@@ -3,7 +3,7 @@ import { auth, db } from "../firebase";
 import { doc, getDoc, updateDoc, collection, getDocs, setDoc, onSnapshot } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
-// ✨ 1. Import the new central data provider
+// Import the new central data provider
 import { CashBookProvider } from "../context/CashBookContext";
 
 // Import all tab components
@@ -228,14 +228,32 @@ const Dashboard = () => {
         <div style={styles.tabsContainer}><div style={styles.tabs}>{visibleTabs.map(tab => (<div key={tab} style={{...styles.tab, ...(activeTab === tab ? styles.activeTab : {})}} onClick={() => setActiveTab(tab)}>{tab}</div>))}</div></div>
       </div>
       
-      {/* ✨ 2. Wrap the rendered content with the CashBookProvider */}
       <div style={styles.content}>
         <CashBookProvider>
           {renderTabContent()}
         </CashBookProvider>
       </div>
       
-      {showPopup && (<div style={styles.popupOverlay}><div style={styles.popupBox}><h2 style={styles.welcomeTitle}>Welcome to {userInfo?.companyName || "EasyPOS"} 🎉</h2><p style={styles.welcomeText}>Here's a quick video guide to get you started:</p><div style={styles.videoWrapper}><iframe width="100%" height="315" src="https://www.youtube.com/embed/cCmImWx4YNQ?si=oM-ZJk338Avdkbga" title="Welcome Video" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen/></div><button onClick={() => setShowPopup(false)} style={styles.gotItBtn}>Got it</button></div></div>)}
+      {showPopup && (
+        <div style={styles.popupOverlay}>
+            <div style={styles.popupBox}>
+                <h2 style={styles.welcomeTitle}>Welcome to {userInfo?.companyName || "EasyPOS"} 🎉</h2>
+                <p style={styles.welcomeText}>Here's a quick video guide to get you started:</p>
+                <div style={styles.videoWrapper}>
+                    {/* ✨ FIX: Removed fixed width/height and applied responsive style */}
+                    <iframe 
+                        style={styles.popupBoxiframe}
+                        src="https://youtu.be/DiA2LuJcN4A?si=gOhg0jRYo8ANvZkI" 
+                        title="Welcome Video" 
+                        frameBorder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allowFullScreen
+                    />
+                </div>
+                <button onClick={() => setShowPopup(false)} style={styles.gotItBtn}>Got it</button>
+            </div>
+        </div>
+      )}
       {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
     </div>
   );
