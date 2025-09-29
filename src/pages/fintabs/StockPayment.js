@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from "react";
 import { db, auth } from "../../firebase";
 import { collection, query, getDocs, addDoc, serverTimestamp, orderBy, doc } from "firebase/firestore";
-import { AiOutlineSearch } from "react-icons/ai";
+import { AiOutlineSearch, AiOutlineLock } from "react-icons/ai";
 import Select from "react-select";
 import { CashBookContext } from "../../context/CashBookContext";
 
 const StockPayment = () => {
-  const { cashBooks, cashBookBalances, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
+  const { cashBooks, cashBookBalances, reconciledDates, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
 
   const [stockInRecords, setStockInRecords] = useState([]);
   const [filteredRecords, setFilteredRecords] = useState([]);
@@ -117,6 +117,9 @@ const StockPayment = () => {
     }
   };
   
+  const todayString = new Date().toISOString().split('T')[0];
+  const isTodayReconciled = reconciledDates.has(todayString);
+
   if (loading || balancesLoading) return <div style={styles.loadingContainer}>Loading data...</div>;
 
   return (
@@ -166,9 +169,13 @@ const StockPayment = () => {
                   <td style={{...styles.td, fontWeight: 'bold', color: isPayable ? '#e74c3c' : '#2ecc71'}}>Rs. {balance.toFixed(2)}</td>
                   <td style={styles.td}>
                     <div style={styles.actionButtonsContainer}>
-                      {/* ✨ FIX: Removed the reconciliation lock from the Make Payment button */}
-                      {isPayable && (
+                      {isPayable && !isTodayReconciled && (
                         <button onClick={() => handleOpenPaymentModal(rec, balance)} style={styles.addPaymentButton}>Make Payment</button>
+                      )}
+                      {isPayable && isTodayReconciled && (
+                        <button style={styles.buttonDisabled} title={`Payments are locked for today (${todayString}) because it has been reconciled.`}>
+                            <AiOutlineLock /> Payment Locked
+                        </button>
                       )}
                       <button onClick={() => handleOpenHistoryModal(rec.stockInId)} style={styles.viewHistoryButton}>View Payments</button>
                     </div>
@@ -186,11 +193,14 @@ const StockPayment = () => {
     </div>
   );
 };
+
+// ✨ FIX: Properly formatted the modal components that were causing the syntax error
 const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances }) => {
     const [paymentType, setPaymentType] = useState(null);
     const [formData, setFormData] = useState({amount: '', receiverName: '', chequeNumber: '', referenceNumber: '', cashBook: null,});
     const [error, setError] = useState('');
     const cashBookOptions = useMemo(() => cashBooks.map(book => ({ value: book.id, label: book.name })), [cashBooks]);
+
     useEffect(() => {
         const { amount, cashBook } = formData;
         if (amount && cashBook && paymentType === 'Cash') {
@@ -201,10 +211,12 @@ const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances })
         } else if (amount && parseFloat(amount) > record.balance) { setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`); } 
         else { setError(''); }
     }, [formData.amount, formData.cashBook, paymentType, cashBookBalances, record.balance]);
+    
     const isFormValid = () => {
         const amount = parseFloat(formData.amount);
         return (!error && formData.receiverName.trim() && formData.amount && amount > 0 && paymentType && (paymentType === 'Cash' ? formData.cashBook : true) && (paymentType !== 'Cheque' || formData.chequeNumber.trim()) && (paymentType !== 'Online Payment' || formData.referenceNumber.trim()));
     };
+
     const handleSave = () => {
         if (!isFormValid()) { alert('Please fill all required fields correctly.'); return; }
         const finalPaymentData = {
@@ -215,23 +227,120 @@ const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances })
         };
         onSave(finalPaymentData);
     };
+
     const handlePaymentTypeChange = (type) => {
         setPaymentType(type);
         if (type !== 'Cash') { setFormData(prev => ({...prev, cashBook: null})); }
     };
-    return (<div style={styles.modalOverlay}><div style={styles.modal}><h3 style={styles.modalTitle}>Add Payment for {record.stockInId}</h3>
-    {!paymentType ? (<div style={styles.paymentTypeSelection}><p>1. Select a payment method:</p><div style={styles.paymentTypeButtons}><button onClick={() => handlePaymentTypeChange('Cash')} style={styles.paymentTypeButton}>Cash</button><button onClick={() => handlePaymentTypeChange('Cheque')} style={styles.paymentTypeButton}>Cheque</button><button onClick={() => handlePaymentTypeChange('Online Payment')} style={styles.paymentTypeButton}>Online Payment</button></div></div>) : 
-    (<div style={styles.formGrid}><div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Payment Method</label><div style={{display: 'flex', alignItems: 'center', gap: '10px'}}><p style={styles.paymentTypeDisplay}>{paymentType}</p><button onClick={() => setPaymentType(null)} style={styles.changeButton}>Change</button></div></div>
-    <div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Pay From Cash Book {paymentType === 'Cash' ? '*' : '(Cash Only)'}</label><Select options={cashBookOptions} value={formData.cashBook} onChange={option => setFormData(prev => ({...prev, cashBook: option}))} placeholder={paymentType === 'Cash' ? "Select cash book..." : "Not applicable"} isDisabled={paymentType !== 'Cash'}/></div>
-    {paymentType === 'Cheque' && (<div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Cheque Number *</label><input type="text" value={formData.chequeNumber} onChange={e => setFormData({...formData, chequeNumber: e.target.value})} style={styles.modalInput} required /></div>)}
-    {paymentType === 'Online Payment' && (<div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Reference Number *</label><input type="text" value={formData.referenceNumber} onChange={e => setFormData({...formData, referenceNumber: e.target.value})} style={styles.modalInput} required /></div>)}
-    <div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Receiver Name *</label><input type="text" value={formData.receiverName} onChange={e => setFormData({...formData, receiverName: e.target.value})} style={styles.modalInput} required/></div>
-    <div style={{...styles.formGroup, gridColumn: 'span 2'}}><label>Amount to Pay *</label><input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} style={styles.modalInput} required/>{error && <p style={styles.errorText}>{error}</p>}</div></div>)}
-    <div style={styles.modalActions}><button onClick={onCancel} style={styles.cancelButton}>Cancel</button>{paymentType && <button onClick={handleSave} style={!isFormValid() ? {...styles.saveButtonModal, ...styles.saveButtonDisabled} : styles.saveButtonModal} disabled={!isFormValid()}>Save Payment</button>}</div></div></div>);
+
+    return (
+        <div style={styles.modalOverlay}>
+            <div style={styles.modal}>
+                <h3 style={styles.modalTitle}>Add Payment for {record.stockInId}</h3>
+                {!paymentType ? (
+                    <div style={styles.paymentTypeSelection}>
+                        <p>1. Select a payment method:</p>
+                        <div style={styles.paymentTypeButtons}>
+                            <button onClick={() => handlePaymentTypeChange('Cash')} style={styles.paymentTypeButton}>Cash</button>
+                            <button onClick={() => handlePaymentTypeChange('Cheque')} style={styles.paymentTypeButton}>Cheque</button>
+                            <button onClick={() => handlePaymentTypeChange('Online Payment')} style={styles.paymentTypeButton}>Online Payment</button>
+                        </div>
+                    </div>
+                ) : (
+                    <div style={styles.formGrid}>
+                        <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                            <label>Payment Method</label>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                                <p style={styles.paymentTypeDisplay}>{paymentType}</p>
+                                <button onClick={() => setPaymentType(null)} style={styles.changeButton}>Change</button>
+                            </div>
+                        </div>
+                        <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                            <label>Pay From Cash Book {paymentType === 'Cash' ? '*' : '(Cash Only)'}</label>
+                            <Select 
+                                options={cashBookOptions} 
+                                value={formData.cashBook} 
+                                onChange={option => setFormData(prev => ({...prev, cashBook: option}))} 
+                                placeholder={paymentType === 'Cash' ? "Select cash book..." : "Not applicable"} 
+                                isDisabled={paymentType !== 'Cash'}
+                            />
+                        </div>
+                        {paymentType === 'Cheque' && (
+                            <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                                <label>Cheque Number *</label>
+                                <input type="text" value={formData.chequeNumber} onChange={e => setFormData({...formData, chequeNumber: e.target.value})} style={styles.modalInput} required />
+                            </div>
+                        )}
+                        {paymentType === 'Online Payment' && (
+                            <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                                <label>Reference Number *</label>
+                                <input type="text" value={formData.referenceNumber} onChange={e => setFormData({...formData, referenceNumber: e.target.value})} style={styles.modalInput} required />
+                            </div>
+                        )}
+                        <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                           <label>Receiver Name *</label>
+                           <input type="text" value={formData.receiverName} onChange={e => setFormData({...formData, receiverName: e.target.value})} style={styles.modalInput} required/>
+                        </div>
+                        <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                            <label>Amount to Pay *</label>
+                            <input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} style={styles.modalInput} required/>
+                            {error && <p style={styles.errorText}>{error}</p>}
+                        </div>
+                    </div>
+                )}
+                <div style={styles.modalActions}>
+                    <button onClick={onCancel} style={styles.cancelButton}>Cancel</button>
+                    {paymentType && <button onClick={handleSave} style={!isFormValid() ? {...styles.saveButtonModal, ...styles.saveButtonDisabled} : styles.saveButtonModal} disabled={!isFormValid()}>Save Payment</button>}
+                </div>
+            </div>
+        </div>
+    );
 };
-const PaymentHistoryModal = ({ payments, onClose }) => { const stockInId = payments.length > 0 ? payments[0].stockInId : ''; return (<div style={styles.modalOverlay}><div style={{...styles.modal, maxWidth: '800px'}}><h3 style={styles.modalTitle}>Payment History for {stockInId}</h3><table style={{...styles.table, minWidth: 'auto'}}><thead><tr><th style={styles.th}>Payment ID</th><th style={styles.th}>Date Paid</th><th style={styles.th}>Amount</th><th style={styles.th}>Method</th><th style={styles.th}>Paid From</th><th style={styles.th}>Receiver Name</th><th style={styles.th}>Paid By</th></tr></thead><tbody>
-{payments.length > 0 ? payments.map(p => (<tr key={p.id}><td style={{...styles.td, fontWeight: 'bold'}}>{p.paymentId || p.id}</td><td style={{...styles.td}>{p.paidAt?.toDate().toLocaleString()}</td><td style={styles.td}>Rs. {p.amount.toFixed(2)}</td><td style={styles.td}>{p.method}</td><td style={styles.td}>{p.cashBookName || 'N/A'}</td><td style={styles.td}>{p.receiverName}</td><td style={styles.td}>{p.paidBy}</td></tr>)) : (<tr><td colSpan="7" style={styles.noData}>No payment history found.</td></tr>)}
-</tbody></table><div style={styles.modalActions}><button onClick={onClose} style={styles.cancelButton}>Close</button></div></div></div>);};
+
+const PaymentHistoryModal = ({ payments, onClose }) => { 
+    const stockInId = payments.length > 0 ? payments[0].stockInId : ''; 
+    return (
+        <div style={styles.modalOverlay}>
+            <div style={{...styles.modal, maxWidth: '800px'}}>
+                <h3 style={styles.modalTitle}>Payment History for {stockInId}</h3>
+                <table style={{...styles.table, minWidth: 'auto'}}>
+                    <thead>
+                        <tr>
+                            <th style={styles.th}>Payment ID</th>
+                            <th style={styles.th}>Date Paid</th>
+                            <th style={styles.th}>Amount</th>
+                            <th style={styles.th}>Method</th>
+                            <th style={styles.th}>Paid From</th>
+                            <th style={styles.th}>Receiver Name</th>
+                            <th style={styles.th}>Paid By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {payments.length > 0 ? payments.map(p => (
+                            <tr key={p.id}>
+                                <td style={{...styles.td, fontWeight: 'bold'}}>{p.paymentId || p.id}</td>
+                                <td style={styles.td}>{p.paidAt?.toDate().toLocaleString()}</td>
+                                <td style={styles.td}>Rs. {p.amount.toFixed(2)}</td>
+                                <td style={styles.td}>{p.method}</td>
+                                <td style={styles.td}>{p.cashBookName || 'N/A'}</td>
+                                <td style={styles.td}>{p.receiverName}</td>
+                                <td style={styles.td}>{p.paidBy}</td>
+                            </tr>
+                        )) : (
+                            <tr>
+                                <td colSpan="7" style={styles.noData}>No payment history found.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+                <div style={styles.modalActions}>
+                    <button onClick={onClose} style={styles.cancelButton}>Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
     section: { backgroundColor: '#fff', padding: '24px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
