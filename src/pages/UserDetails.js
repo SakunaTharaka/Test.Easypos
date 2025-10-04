@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
-import { doc, setDoc, getDoc, Timestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
+import { FaCheckCircle } from 'react-icons/fa';
 
 const UserDetails = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(1);
-  const [selectedBilling, setSelectedBilling] = useState(null);
-
+  const [selectedPlan, setSelectedPlan] = useState('monthly');
   const [formData, setFormData] = useState({
     fullName: "",
     phone: "",
@@ -21,26 +21,22 @@ const UserDetails = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        navigate("/"); // redirect to Home if not logged in
+        navigate("/");
         return;
       }
-
       setUser(currentUser);
 
-      // Check if user already exists in Firestore
+      // Check if user info document already exists
       const userRef = doc(db, "Userinfo", currentUser.uid);
       const docSnap = await getDoc(userRef);
 
       if (docSnap.exists()) {
-        // User already registered → redirect directly to Dashboard
         navigate("/dashboard");
       } else {
-        // First-time login → show User Info form
         setStep(1);
         setLoading(false);
       }
     });
-
     return () => unsubscribe();
   }, [navigate]);
 
@@ -49,190 +45,116 @@ const UserDetails = () => {
   };
 
   const handleSaveUserInfo = async () => {
-    if (
-      !formData.fullName ||
-      !formData.phone ||
-      !formData.companyName ||
-      !formData.companyAddress
-    ) {
-      alert("Please fill all fields");
+    if (!formData.fullName || !formData.phone || !formData.companyName || !formData.companyAddress) {
+      alert("Please fill all fields to continue.");
       return;
     }
-
     setLoading(true);
     try {
       const userRef = doc(db, "Userinfo", user.uid);
-
-      const savingDate = Timestamp.fromDate(new Date());
-      const dueDate = Timestamp.fromDate(
-        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days later
-      );
-
       await setDoc(userRef, {
         uid: user.uid,
         email: user.email,
         ...formData,
-        savingDate,
-        dueDate,
+        registrationDate: serverTimestamp(),
       });
-
-      // After saving, show billing step
-      setStep(2);
-      setLoading(false);
+      setStep(2); // Move to the next step
     } catch (error) {
       alert("Error saving user info: " + error.message);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleBillingProceed = () => {
-    if (!selectedBilling) {
-      alert("Please select a billing option");
-      return;
+  const handleStartTrial = async () => {
+    setLoading(true);
+    try {
+      const userRef = doc(db, "Userinfo", user.uid);
+      await updateDoc(userRef, {
+        selectedPackage: selectedPlan,
+        trialStartDate: serverTimestamp(),
+        status: 'trialing',
+      });
+      navigate("/dashboard");
+    } catch (error) {
+      alert("Could not start your trial. Please try again.");
+      setLoading(false);
     }
-    navigate("/dashboard");
   };
 
-  if (loading) return <p>Loading...</p>;
+  if (loading && step === 1) return <div style={styles.loadingOverlay}><p>Loading...</p></div>;
 
   return (
-    <div style={styles.container}>
-      {step === 1 && (
-        <div style={styles.box}>
-          <h2>User Information</h2>
-          <input
-            type="text"
-            name="fullName"
-            placeholder="Full Name"
-            value={formData.fullName}
-            onChange={handleChange}
-            style={styles.input}
-          />
-          <input
-            type="text"
-            name="phone"
-            placeholder="Phone Number"
-            value={formData.phone}
-            onChange={handleChange}
-            style={styles.input}
-          />
-          <input
-            type="text"
-            name="companyName"
-            placeholder="Company/Shop Name"
-            value={formData.companyName}
-            onChange={handleChange}
-            style={styles.input}
-          />
-          <input
-            type="text"
-            name="companyAddress"
-            placeholder="Company/Shop Address"
-            value={formData.companyAddress}
-            onChange={handleChange}
-            style={styles.input}
-          />
-          <button onClick={handleSaveUserInfo} style={styles.button}>
-            Next
-          </button>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div style={styles.box}>
-          <h2>Billing Info</h2>
-          <div style={styles.billingBoxes}>
-            <div
-              style={{
-                ...styles.billingBox,
-                borderColor: selectedBilling === 1 ? "#28a745" : "#007bff",
-              }}
-              onClick={() => setSelectedBilling(1)}
-            >
-              Billing Option 1
-            </div>
-            <div
-              style={{
-                ...styles.billingBox,
-                borderColor: selectedBilling === 2 ? "#28a745" : "#007bff",
-              }}
-              onClick={() => setSelectedBilling(2)}
-            >
-              Billing Option 2
-            </div>
-            <div
-              style={{
-                ...styles.billingBox,
-                borderColor: selectedBilling === 3 ? "#28a745" : "#007bff",
-              }}
-              onClick={() => setSelectedBilling(3)}
-            >
-              Billing Option 3
-            </div>
+    <div style={styles.pageContainer}>
+      <div style={styles.leftPanel}>
+        <h1 style={styles.brandTitle}>EasyPOS LK</h1>
+        <p style={styles.brandSubtitle}>The complete Point of Sale solution for your growing business.</p>
+      </div>
+      <div style={styles.rightPanel}>
+        {step === 1 && (
+          <div style={styles.formContainer}>
+            <h2 style={styles.formTitle}>Tell Us About Yourself</h2>
+            <p style={styles.formSubtitle}>This information will be used on your invoices and reports.</p>
+            <input type="text" name="fullName" placeholder="Full Name" value={formData.fullName} onChange={handleChange} style={styles.input} />
+            <input type="tel" name="phone" placeholder="Phone Number" value={formData.phone} onChange={handleChange} style={styles.input} />
+            <input type="text" name="companyName" placeholder="Company / Shop Name" value={formData.companyName} onChange={handleChange} style={styles.input} />
+            <input type="text" name="companyAddress" placeholder="Company / Shop Address" value={formData.companyAddress} onChange={handleChange} style={styles.input} />
+            <button onClick={handleSaveUserInfo} style={loading ? styles.buttonDisabled : styles.button} disabled={loading}>
+              {loading ? 'Saving...' : 'Next'}
+            </button>
           </div>
-          <button onClick={handleBillingProceed} style={styles.button}>
-            Proceed
-          </button>
-        </div>
-      )}
+        )}
+
+        {step === 2 && (
+          <div style={styles.formContainer}>
+            <div style={styles.flashOffer}>⚡ Flash Offer</div>
+            <h2 style={styles.formTitle}>Choose Your Plan</h2>
+            <p style={styles.formSubtitle}>All plans begin with a 1-month free trial.</p>
+            <div style={styles.optionsContainer}>
+              <div style={selectedPlan === 'monthly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('monthly')}>
+                {selectedPlan === 'monthly' && <FaCheckCircle style={styles.checkIcon} />}
+                <h3 style={styles.planTitle}>Monthly</h3>
+                <p style={styles.planPrice}>Rs. 1,800 <span style={styles.pricePer}>/ month</span></p>
+              </div>
+              <div style={selectedPlan === 'yearly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('yearly')}>
+                {selectedPlan === 'yearly' && <FaCheckCircle style={styles.checkIcon} />}
+                <div style={styles.saveBadge}>Save 12%</div>
+                <h3 style={styles.planTitle}>Yearly</h3>
+                <p style={styles.planPrice}>Rs. 19,000 <span style={styles.pricePer}>/ year</span></p>
+              </div>
+            </div>
+            <button onClick={handleStartTrial} style={loading ? styles.buttonDisabled : styles.button} disabled={loading}>
+              {loading ? 'Starting...' : 'Start Free Trial'}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
 const styles = {
-  container: {
-    padding: "30px",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    minHeight: "100vh",
-    fontFamily: "Arial, sans-serif",
-    background: "#f4f6f9",
-  },
-  box: {
-    width: "400px",
-    padding: "20px",
-    borderRadius: "10px",
-    background: "#fff",
-    boxShadow: "0 0 10px rgba(0,0,0,0.1)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-  },
-  input: {
-    width: "100%",
-    padding: "10px",
-    margin: "10px 0",
-    borderRadius: "6px",
-    border: "1px solid #ccc",
-  },
-  button: {
-    marginTop: "20px",
-    padding: "10px 20px",
-    borderRadius: "6px",
-    border: "none",
-    background: "#007bff",
-    color: "#fff",
-    cursor: "pointer",
-    fontSize: "1rem",
-  },
-  billingBoxes: {
-    display: "flex",
-    justifyContent: "space-between",
-    width: "100%",
-    marginBottom: "20px",
-  },
-  billingBox: {
-    flex: 1,
-    margin: "0 5px",
-    padding: "20px",
-    border: "2px solid #007bff",
-    borderRadius: "8px",
-    textAlign: "center",
-    cursor: "pointer",
-    background: "#e7f0ff",
-    transition: "0.2s",
-  },
+    pageContainer: { display: 'flex', width: '100vw', height: '100vh', fontFamily: "'Inter', sans-serif" },
+    leftPanel: { flex: 1, background: 'linear-gradient(135deg, #2c3e50, #1a2530)', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px', boxSizing: 'border-box' },
+    brandTitle: { fontSize: '48px', fontWeight: 'bold', margin: 0 },
+    brandSubtitle: { fontSize: '18px', color: '#bdc3c7', marginTop: '10px', lineHeight: '1.6' },
+    rightPanel: { flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px', background: '#f8f9fa' },
+    loadingOverlay: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '18px' },
+    formContainer: { width: '100%', maxWidth: '500px', backgroundColor: '#fff', borderRadius: '16px', padding: '40px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', textAlign: 'center', position: 'relative' },
+    formTitle: { fontSize: '28px', fontWeight: 'bold', color: '#111827', margin: '0 0 10px 0' },
+    formSubtitle: { fontSize: '16px', color: '#6b7280', marginBottom: '30px' },
+    input: { width: '100%', padding: '14px 16px', margin: '10px 0', borderRadius: '8px', border: '1px solid #ddd', fontSize: '15px', boxSizing: 'border-box' },
+    button: { width: '100%', marginTop: '20px', padding: '16px', borderRadius: '12px', border: 'none', background: 'linear-gradient(135deg, #3498db, #2980b9)', color: '#fff', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' },
+    buttonDisabled: { width: '100%', marginTop: '20px', padding: '16px', borderRadius: '12px', border: 'none', background: '#9ca3af', color: '#e5e7eb', cursor: 'not-allowed', fontSize: '16px', fontWeight: 'bold' },
+    flashOffer: { position: 'absolute', top: '-15px', left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg, #ff416c, #ff4b2b)', color: 'white', padding: '8px 16px', borderRadius: '20px', fontSize: '14px', fontWeight: 'bold' },
+    optionsContainer: { display: 'flex', gap: '20px', marginBottom: '30px' },
+    planOption: { flex: 1, padding: '20px', border: '2px solid #e5e7eb', borderRadius: '12px', cursor: 'pointer', position: 'relative', transition: 'border-color 0.2s, box-shadow 0.2s' },
+    selectedOption: { borderColor: '#3b82f6', boxShadow: '0 0 10px rgba(59, 130, 246, 0.3)' },
+    checkIcon: { position: 'absolute', top: '10px', right: '10px', color: '#3b82f6' },
+    planTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: '#1f2937' },
+    planPrice: { margin: '8px 0 0 0', fontSize: '22px', fontWeight: 'bold', color: '#111827' },
+    pricePer: { fontSize: '14px', fontWeight: 'normal', color: '#6b7280' },
+    saveBadge: { position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: 'white', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '500' },
 };
 
 export default UserDetails;

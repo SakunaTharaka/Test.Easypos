@@ -81,12 +81,30 @@ const Settings = () => {
           setProductionShifts(data.productionShifts || []);
           setExpenseCategories(data.expenseCategories || []);
         } else {
+          // --- NEW LOGIC: Fetch from Userinfo on first setup ---
+          const userInfoRef = doc(db, "Userinfo", uid);
+          const userInfoSnap = await getDoc(userInfoRef);
+          
+          let initialCompanyName = "My Business";
+          let initialCompanyAddress = "";
+          let initialFullName = auth.currentUser.displayName || "";
+          let initialPhone = "";
+
+          if (userInfoSnap.exists()) {
+            const onboardingData = userInfoSnap.data();
+            initialCompanyName = onboardingData.companyName || "My Business";
+            initialCompanyAddress = onboardingData.companyAddress || "";
+            initialFullName = onboardingData.fullName || "";
+            initialPhone = onboardingData.phone || "";
+          }
+          // --- END NEW LOGIC ---
+
           const defaultSettings = {
-            fullName: auth.currentUser.displayName || "",
+            fullName: initialFullName,
             email: auth.currentUser.email,
-            phone: "",
-            companyAddress: "",
-            companyName: "My Business",
+            phone: initialPhone,
+            companyAddress: initialCompanyAddress,
+            companyName: initialCompanyName,
             companyLogo: "",
             inventoryType: "Buy and Sell only",
             itemCategories: ["Default Category"],
@@ -97,15 +115,26 @@ const Settings = () => {
             productionShifts: [],
             expenseCategories: [],
           };
+          
           await setDoc(settingsDocRef, defaultSettings);
-          Object.entries(defaultSettings).forEach(([key, value]) => {
-              const setterName = `set${key.charAt(0).toUpperCase() + key.slice(1)}`;
-              if (typeof window[setterName] === 'function') {
-                  window[setterName](value);
-              }
-          });
+          // Manually update the state with the newly created settings
           setUserInfo(defaultSettings);
-          setFormInput(defaultSettings);
+          setFormInput({
+            fullName: defaultSettings.fullName,
+            email: defaultSettings.email,
+            phone: defaultSettings.phone,
+            companyAddress: defaultSettings.companyAddress,
+            companyName: defaultSettings.companyName,
+            companyLogo: defaultSettings.companyLogo,
+          });
+          setInventoryType(defaultSettings.inventoryType);
+          setItemCategories(defaultSettings.itemCategories);
+          setSelectedUnits(defaultSettings.itemUnits);
+          setStockReminder(defaultSettings.stockReminder);
+          setDefaultCustomerId(defaultSettings.defaultCustomerId);
+          setUseShiftProduction(defaultSettings.useShiftProduction);
+          setProductionShifts(defaultSettings.productionShifts);
+          setExpenseCategories(defaultSettings.expenseCategories);
         }
 
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -148,7 +177,7 @@ const Settings = () => {
       // Exclude email from the update object
       const { email, ...updateData } = formInput;
       await updateDoc(getSettingsDocRef(), updateData);
-      setUserInfo(formInput);
+      setUserInfo(prev => ({...prev, ...updateData}));
       setEditMode(false);
       alert("Personal info updated successfully!");
     } catch (error) { alert("Failed to update info: " + error.message); }
@@ -276,7 +305,6 @@ const Settings = () => {
 };
 
 const styles = {
-  // Add the new style for the disabled input
   inputDisabled: { width: '100%', padding: '12px 16px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box', backgroundColor: '#f8f9fa', color: '#6c757d', cursor: 'not-allowed' },
   toggleContainer: { display: 'flex', border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', width: 'fit-content' },
   toggleButton: { padding: '10px 20px', border: 'none', background: '#f8f9fa', cursor: 'pointer', color: '#6c757d', fontWeight: '500' },
