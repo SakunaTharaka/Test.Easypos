@@ -12,6 +12,10 @@ import {
   doc,
   getDoc,
   runTransaction,
+  orderBy,
+  limit,
+  startAfter,
+  where,
 } from "firebase/firestore";
 import {
   AiOutlinePlus,
@@ -22,21 +26,19 @@ import {
 
 const Items = ({ internalUser }) => {
   const [items, setItems] = useState([]);
-  const [filteredItems, setFilteredItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [form, setForm] = useState({
-    name: "",
-    brand: "",
-    sku: "",
-    type: "",
-    category: "",
-  });
+  const [form, setForm] = useState({ name: "", brand: "", sku: "", type: "", category: "" });
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
+
+  // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [lastVisible, setLastVisible] = useState(null);
+  const [pageCursors, setPageCursors] = useState({ 1: null });
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const itemsPerPage = 100; // ✨ FIX: Page size updated to 100
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
@@ -53,122 +55,132 @@ const Items = ({ internalUser }) => {
   })();
 
   useEffect(() => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      setLoading(false);
-      return;
-    }
-    const uid = currentUser.uid;
-
-    const fetchData = async () => {
+    const fetchItems = async () => {
       setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) { setLoading(false); return; }
+      const uid = currentUser.uid;
+
       try {
-        const settingsRef = doc(db, uid, "settings");
-        const settingsSnap = await getDoc(settingsRef);
-        if (settingsSnap.exists()) {
-          setCategories(settingsSnap.data().itemCategories || []);
+        const itemsColRef = collection(db, uid, "items", "item_list");
+        let q = query(itemsColRef, orderBy("createdAt", "desc"));
+
+        const searchTerm = search.trim();
+        if (searchTerm) {
+          q = query(q, where("name", ">=", searchTerm), where("name", "<=", searchTerm + '\uf8ff'));
         }
 
-        const itemsColRef = collection(db, uid, "items", "item_list");
-        const itemsSnap = await getDocs(query(itemsColRef));
-        const data = itemsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        setItems(data);
-        setFilteredItems(data);
+        const cursor = pageCursors[currentPage];
+        if (cursor) {
+          q = query(q, startAfter(cursor));
+        }
+        
+        q = query(q, limit(itemsPerPage));
+
+        const itemsSnap = await getDocs(q);
+        const fetchedItems = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setItems(fetchedItems);
+        
+        if (!itemsSnap.empty) {
+            const lastDoc = itemsSnap.docs[itemsSnap.docs.length - 1];
+            setLastVisible(lastDoc);
+            setHasNextPage(itemsSnap.docs.length === itemsPerPage);
+        } else {
+            setHasNextPage(false);
+        }
+
       } catch (error) {
-        alert("Error fetching items: " + error.message);
+        alert("Error fetching items: " + error.message + "\n\nNOTE: Searching may require a new database index. Check the browser console (F12) for a link to create it.");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchItems();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, search]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const fetchCategories = async () => {
+        const settingsRef = doc(db, uid, "settings");
+        const settingsSnap = await getDoc(settingsRef);
+        if (settingsSnap.exists()) {
+          setCategories(settingsSnap.data().itemCategories || []);
+        }
+    }
+    fetchCategories();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setPageCursors({ 1: null });
+    setLastVisible(null);
+  }, [search]);
+
+  const handlePageChange = (direction) => {
+      if (direction === 'next' && hasNextPage) {
+          setPageCursors(prev => ({ ...prev, [currentPage + 1]: lastVisible }));
+          setCurrentPage(prev => prev + 1);
+      } else if (direction === 'prev' && currentPage > 1) {
+          setCurrentPage(prev => prev - 1);
+      }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // 💡 This function now clears the brand when "ourProduct" is selected.
   const handleTypeSelect = (selectedType) => {
-    if (selectedType === "ourProduct") {
-      setForm((prev) => ({ ...prev, type: selectedType, brand: "" }));
-    } else {
-      setForm((prev) => ({ ...prev, type: selectedType }));
-    }
+    setForm((prev) => ({ ...prev, type: selectedType, brand: selectedType === "ourProduct" ? "" : prev.brand }));
   };
   
   const getNextPID = async (uid) => {
     const counterRef = doc(db, uid, "counters");
     try {
-      const newPID = await runTransaction(db, async (transaction) => {
+      return await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
-        const currentPID = counterDoc.exists() ? counterDoc.data().lastItemID || 0 : 0;
-        const nextPID = currentPID + 1;
+        const nextPID = (counterDoc.data()?.lastItemID || 0) + 1;
         transaction.set(counterRef, { lastItemID: nextPID }, { merge: true });
-        return nextPID;
+        return String(nextPID).padStart(6, "0");
       });
-      return String(newPID).padStart(6, "0");
     } catch (err) {
-      console.error("Error generating PID:", err.message);
       alert("Could not generate a new Product ID. Please try again.");
       return null;
     }
   };
 
-  // 💡 The save logic now handles cases where "brand" is not needed.
   const handleSave = async () => {
     if ((form.type !== "ourProduct" && !form.brand?.trim()) || !form.name?.trim() || !form.type) {
       return alert("Item Name, Type, and Brand (if not 'ourProduct') are required.");
     }
     
-    const currentUser = auth.currentUser;
-    if (!currentUser) return alert("You must be logged in to save items.");
-    const uid = currentUser.uid;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
 
     try {
       const username = getCurrentInternal()?.username || "Admin";
-      // Construct the final name based on the item type
-      const finalName = form.type === "ourProduct"
-        ? form.name.trim()
-        : `${form.brand.trim()} ${form.name.trim()}`;
-
+      const finalName = form.type === "ourProduct" ? form.name.trim() : `${form.brand.trim()} ${form.name.trim()}`;
       const itemsColRef = collection(db, uid, "items", "item_list");
 
       if (editingItem) {
-        const itemDocRef = doc(itemsColRef, editingItem.id);
-        const updates = {
-          name: finalName,
-          brand: form.brand.trim(),
-          sku: form.sku || "",
-          type: form.type,
-          category: form.category || "",
-          lastEditedBy: username,
-          lastEditedAt: serverTimestamp(),
-        };
-        await updateDoc(itemDocRef, updates);
-        setItems((prev) => prev.map((i) => (i.id === editingItem.id ? { ...i, ...updates, name: finalName } : i)));
-
+        await updateDoc(doc(itemsColRef, editingItem.id), {
+          name: finalName, brand: form.brand.trim(), sku: form.sku || "", type: form.type,
+          category: form.category || "", lastEditedBy: username, lastEditedAt: serverTimestamp(),
+        });
       } else {
         const pid = await getNextPID(uid);
         if (pid === null) return;
-
-        const newDoc = {
-          name: finalName,
-          brand: form.brand.trim(),
-          sku: form.sku || "",
-          type: form.type,
-          category: form.category || "",
-          addedBy: username,
-          createdAt: serverTimestamp(),
-          pid,
-        };
-        const docRef = await addDoc(itemsColRef, newDoc);
-        const newItem = { ...newDoc, id: docRef.id, createdAt: new Date() };
-        setItems((prev) => [newItem, ...prev]);
+        await addDoc(itemsColRef, {
+          name: finalName, brand: form.brand.trim(), sku: form.sku || "", type: form.type,
+          category: form.category || "", addedBy: username, createdAt: serverTimestamp(), pid,
+        });
       }
+
+      setCurrentPage(1); 
+      setPageCursors({ 1: null });
 
       setForm({ name: "", brand: "", sku: "", type: "", category: "" });
       setEditingItem(null);
@@ -179,40 +191,18 @@ const Items = ({ internalUser }) => {
   };
 
   const handleDelete = async (id) => {
-    if (!isAdmin) return alert("Only admins can delete items.");
-    if (!window.confirm("Are you sure you want to delete this item?")) return;
-    
+    if (!isAdmin || !window.confirm("Are you sure?")) return;
     const uid = auth.currentUser.uid;
-    const itemDocRef = doc(db, uid, "items", "item_list", id);
-    
     try {
-      await deleteDoc(itemDocRef);
-      setItems((prev) => prev.filter((i) => i.id !== id));
+      await deleteDoc(doc(db, uid, "items", "item_list", id));
+      setCurrentPage(1);
+      setPageCursors({ 1: null });
     } catch (error) {
       alert("Error deleting item: " + error.message);
     }
   };
 
-  useEffect(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) {
-      setFilteredItems(items);
-      return;
-    }
-    const filtered = items.filter((i) =>
-      Object.values(i).some(val => String(val).toLowerCase().includes(term))
-    );
-    setFilteredItems(filtered);
-    setCurrentPage(1);
-  }, [search, items]);
-
-  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
-  const currentItems = filteredItems.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  if (loading) return <p>Loading items...</p>;
+  if (loading && currentPage === 1 && !search) return <p>Loading items...</p>;
 
   return (
     <div style={{ padding: "24px", fontFamily: "'Segoe UI', sans-serif" }}>
@@ -223,18 +213,14 @@ const Items = ({ internalUser }) => {
           <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
           <input
             type="text"
-            placeholder="Search by any field..."
+            placeholder="Search by item name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ flex: 1, width: "100%", padding: "8px 8px 8px 34px", border: "1px solid #ddd", borderRadius: "6px" }}
           />
         </div>
         <button
-          onClick={() => {
-            setForm({ name: "", brand: "", sku: "", type: "", category: "" });
-            setEditingItem(null);
-            setShowModal(true);
-          }}
+          onClick={() => { setForm({ name: "", brand: "", sku: "", type: "", category: "" }); setEditingItem(null); setShowModal(true); }}
           style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", background: "#3498db", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: '14px' }}
         >
           <AiOutlinePlus /> Add Item
@@ -245,58 +231,53 @@ const Items = ({ internalUser }) => {
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: '800px' }}>
             <thead>
                 <tr style={{ background: "#f5f5f5", textAlign: "left" }}>
-                    <th style={{ padding: "12px" }}>PID</th>
-                    <th style={{ padding: "12px" }}>Item</th>
-                    <th style={{ padding: "12px" }}>SKU</th>
-                    <th style={{ padding: "12px" }}>Type</th>
-                    <th style={{ padding: "12px" }}>Category</th>
-                    <th style={{ padding: "12px" }}>Added By</th>
+                    <th style={{ padding: "12px" }}>PID</th><th style={{ padding: "12px" }}>Item</th>
+                    <th style={{ padding: "12px" }}>SKU</th><th style={{ padding: "12px" }}>Type</th>
+                    <th style={{ padding: "12px" }}>Category</th><th style={{ padding: "12px" }}>Added By</th>
                     <th style={{ padding: "12px" }}>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                {currentItems.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
-                        <td style={{ padding: "12px" }}>{item.pid}</td>
-                        <td style={{ padding: "12px", fontWeight: 500 }}>{item.name}</td>
-                        <td style={{ padding: "12px" }}>{item.sku || "-"}</td>
-                        <td style={{ padding: "12px" }}>{item.type}</td>
-                        <td style={{ padding: "12px" }}>{item.category || "-"}</td>
-                        <td style={{ padding: "12px" }}>{item.addedBy || "-"}</td>
-                        <td style={{ padding: "12px", display: "flex", gap: "8px" }}>
-                            <button onClick={() => { setEditingItem(item); setForm({ name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""), brand: item.brand, sku: item.sku || "", type: item.type, category: item.category || "", }); setShowModal(true); }} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
-                                <AiOutlineEdit />
-                            </button>
-                            {isAdmin && (
-                                <button onClick={() => handleDelete(item.id)} style={{ background: "#e74c3c", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Delete">
-                                    <AiOutlineDelete />
+                {loading ? (<tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>) 
+                : items.length > 0 ? (
+                    items.map((item) => (
+                        <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
+                            <td style={{ padding: "12px" }}>{item.pid}</td>
+                            <td style={{ padding: "12px", fontWeight: 500 }}>{item.name}</td>
+                            <td style={{ padding: "12px" }}>{item.sku || "-"}</td>
+                            <td style={{ padding: "12px" }}>{item.type}</td>
+                            <td style={{ padding: "12px" }}>{item.category || "-"}</td>
+                            <td style={{ padding: "12px" }}>{item.addedBy || "-"}</td>
+                            <td style={{ padding: "12px", display: "flex", gap: "8px" }}>
+                                <button onClick={() => { setEditingItem(item); setForm({ name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""), brand: item.brand, sku: item.sku || "", type: item.type, category: item.category || "", }); setShowModal(true); }} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
+                                    <AiOutlineEdit />
                                 </button>
-                            )}
-                        </td>
-                    </tr>
-                ))}
-                {currentItems.length === 0 && (
+                                {isAdmin && (
+                                    <button onClick={() => handleDelete(item.id)} style={{ background: "#e74c3c", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Delete">
+                                        <AiOutlineDelete />
+                                    </button>
+                                )}
+                            </td>
+                        </tr>
+                    ))
+                ) : (
                     <tr><td colSpan="7" style={{ textAlign: "center", padding: "20px", color: "#777" }}>No items found.</td></tr>
                 )}
             </tbody>
         </table>
       </div>
 
-      {totalPages > 1 && (
-        <div style={{ marginTop: "20px", display: "flex", justifyContent: 'center', gap: "8px" }}>
-          {Array.from({ length: totalPages }, (_, i) => (
-            <button key={i} onClick={() => setCurrentPage(i + 1)} style={{ padding: "6px 12px", border: "1px solid #ddd", background: currentPage === i + 1 ? "#3498db" : "white", color: currentPage === i + 1 ? "white" : "black", borderRadius: "4px", cursor: "pointer" }}>{i + 1}</button>
-          ))}
-        </div>
-      )}
+      <div style={{ marginTop: "20px", display: "flex", justifyContent: 'center', gap: "8px", alignItems: 'center' }}>
+          <button onClick={() => handlePageChange('prev')} disabled={currentPage === 1 || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Previous</button>
+          <span>Page {currentPage}</span>
+          <button onClick={() => handlePageChange('next')} disabled={!hasNextPage || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Next</button>
+      </div>
 
       {showModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px" }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingItem ? "Edit Item" : "Add New Item"}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                
-                {/* 💡 Item Type moved to the top */}
                 <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
                     <label style={{ fontWeight: 600, display: 'block', marginBottom: '10px' }}>Item Type *</label>
                     <div style={{ display: 'flex', justifyContent: 'space-around' }}>
@@ -305,15 +286,11 @@ const Items = ({ internalUser }) => {
                         ))}
                     </div>
                 </div>
-
-                {/* 💡 Brand field is now conditional */}
                 {form.type !== "ourProduct" && (
                   <input type="text" name="brand" placeholder="Brand (e.g., Coca-Cola)" value={form.brand} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 )}
-                
                 <input type="text" name="name" placeholder="Item Name (e.g., Classic Coke)" value={form.name} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 <input type="text" name="sku" placeholder="SKU / Barcode (optional)" value={form.sku} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
-
                 <div>
                     <label style={{ display: "block", marginBottom: "6px" }}>Category</label>
                     <select name="category" value={form.category} onChange={handleChange} style={{ width: "100%", padding: "10px" }}>

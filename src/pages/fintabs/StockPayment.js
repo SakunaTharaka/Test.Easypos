@@ -117,9 +117,6 @@ const StockPayment = () => {
     }
   };
   
-  const todayString = new Date().toISOString().split('T')[0];
-  const isTodayReconciled = reconciledDates.has(todayString);
-
   if (loading || balancesLoading) return <div style={styles.loadingContainer}>Loading data...</div>;
 
   return (
@@ -169,13 +166,9 @@ const StockPayment = () => {
                   <td style={{...styles.td, fontWeight: 'bold', color: isPayable ? '#e74c3c' : '#2ecc71'}}>Rs. {balance.toFixed(2)}</td>
                   <td style={styles.td}>
                     <div style={styles.actionButtonsContainer}>
-                      {isPayable && !isTodayReconciled && (
+                      {/* ✨ FIX: Removed the lock condition. The "Make Payment" button will now always show if there is a balance. */}
+                      {isPayable && (
                         <button onClick={() => handleOpenPaymentModal(rec, balance)} style={styles.addPaymentButton}>Make Payment</button>
-                      )}
-                      {isPayable && isTodayReconciled && (
-                        <button style={styles.buttonDisabled} title={`Payments are locked for today (${todayString}) because it has been reconciled.`}>
-                            <AiOutlineLock /> Payment Locked
-                        </button>
                       )}
                       <button onClick={() => handleOpenHistoryModal(rec.stockInId)} style={styles.viewHistoryButton}>View Payments</button>
                     </div>
@@ -194,7 +187,8 @@ const StockPayment = () => {
   );
 };
 
-// ✨ FIX: Properly formatted the modal components that were causing the syntax error
+// MODAL COMPONENTS AND STYLES (No changes needed below this line)
+
 const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances }) => {
     const [paymentType, setPaymentType] = useState(null);
     const [formData, setFormData] = useState({amount: '', receiverName: '', chequeNumber: '', referenceNumber: '', cashBook: null,});

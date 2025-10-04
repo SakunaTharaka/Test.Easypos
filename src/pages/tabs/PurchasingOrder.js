@@ -8,7 +8,7 @@ import {
   serverTimestamp,
   doc,
   runTransaction,
-  deleteDoc // 💡 1. Import deleteDoc
+  deleteDoc
 } from "firebase/firestore";
 import { AiOutlinePlus, AiOutlineSearch, AiOutlineFilter, AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
@@ -43,7 +43,6 @@ const PurchasingOrder = ({ internalUser }) => {
 
   const printComponentRef = useRef();
 
-  // 💡 2. Add logic to determine if the current user is an admin
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
     try {
@@ -169,7 +168,6 @@ const PurchasingOrder = ({ internalUser }) => {
     }
   };
 
-  // 💡 3. Add the new delete handler function
   const handleDeleteOrder = async (orderId) => {
     if (!window.confirm("Are you sure you want to permanently delete this Purchase Order?")) return;
     
@@ -236,7 +234,6 @@ const PurchasingOrder = ({ internalUser }) => {
                     <td style={styles.td}>
                         <div style={{display: 'flex', gap: '10px'}}>
                             <button onClick={() => { setSelectedOrder(order); setShowViewModal(true); }} style={styles.actionButton} title="View/Print PO"><AiOutlineEye /></button>
-                            {/* 💡 4. Add the delete button, visible only to admins */}
                             {isAdmin && (
                                 <button onClick={() => handleDeleteOrder(order.id)} style={{...styles.actionButton, color: '#e74c3c'}} title="Delete PO"><AiOutlineDelete /></button>
                             )}
@@ -373,6 +370,7 @@ const styles = {
     poDetails: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' },
 };
 
+// CORRECTED Stylesheet
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @media print {
@@ -380,24 +378,18 @@ styleSheet.innerText = `
       display: none !important;
     }
     .print-overlay {
-      position: absolute !important;
+      position: fixed;
       top: 0;
       left: 0;
       width: 100%;
-      height: auto;
-      padding: 0;
-      margin: 0;
-      background: white !important;
-      overflow: visible !important;
+      height: 100%;
+      background: white;
+      z-index: 9999;
+      overflow: auto;
     }
     .printable-content {
       box-shadow: none !important;
       border: none !important;
-      max-height: none !important;
-      overflow: visible !important;
-    }
-    body > *:not(.print-overlay) {
-      display: none;
     }
   }
 `;

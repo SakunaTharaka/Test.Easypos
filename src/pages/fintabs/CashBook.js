@@ -6,116 +6,148 @@ import {
     getDocs, 
     serverTimestamp, 
     query, 
-    orderBy, 
-    doc,
     where,
+    orderBy,
     limit,
-    Timestamp,
+    startAfter,
 } from 'firebase/firestore';
-import { AiOutlinePlus, AiOutlineLock } from 'react-icons/ai';
+import { AiOutlinePlus, AiOutlineBook, AiOutlineLoading3Quarters } from 'react-icons/ai';
 import { CashBookContext } from '../../context/CashBookContext';
 
 const CashBook = () => {
-    const { cashBooks, reconciledDates, refreshBalances } = useContext(CashBookContext);
-    const [dailyData, setDailyData] = useState({});
-    const [loading, setLoading] = useState(true);
+    const { cashBooks, refreshBalances } = useContext(CashBookContext);
     
+    // Panel 1: Create Cash Book
     const [newCashBookName, setNewCashBookName] = useState("");
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Panel 2 & 3: Select and View Cash Book
+    const [selectedBook, setSelectedBook] = useState(null);
+    const [transactions, setTransactions] = useState([]);
+    const [loading, setLoading] = useState(false);
     
-    const [showAddCashModal, setShowAddCashModal] = useState(false);
-    const [selectedBookForModal, setSelectedBookForModal] = useState(null);
-    const [modalData, setModalData] = useState({ amount: '', date: new Date().toISOString().split('T')[0] });
-    
-    const isDateReconciled = reconciledDates.has(selectedDate);
-
-    const fetchDailyData = useCallback(async (date) => {
-        setLoading(true);
-        const user = auth.currentUser;
-        if (!user) { setLoading(false); return; }
-        const uid = user.uid;
-
-        try {
-            const startOfDay = new Date(date);
-            startOfDay.setHours(0, 0, 0, 0);
-            const endOfDay = new Date(date);
-            endOfDay.setHours(23, 59, 59, 999);
-
-            const newDailyData = {};
-
-            for (const book of cashBooks) {
-                const snapshotQuery = query(
-                    collection(db, uid, 'user_data', 'daily_cashbook_snapshots'),
-                    where('cashBookId', '==', book.id),
-                    where('date', '<', Timestamp.fromDate(startOfDay)),
-                    orderBy('date', 'desc'),
-                    limit(1)
-                );
-                const prevSnapshotSnap = await getDocs(snapshotQuery);
-                const openingBalance = prevSnapshotSnap.empty ? 0 : prevSnapshotSnap.docs[0].data().closingBalance;
-
-                const cashInQuery = query(collection(db, uid, 'cash_book_entries', 'entry_list'), where('cashBookId', '==', book.id), where('date', '>=', startOfDay), where('date', '<=', endOfDay));
-                const expensesQuery = query(collection(db, uid, 'user_data', 'expenses'), where('cashBookId', '==', book.id), where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay));
-                const stockPaymentsQuery = query(collection(db, uid, 'stock_payments', 'payments'), where('cashBookId', '==', book.id), where('method', '==', 'Cash'), where('paidAt', '>=', startOfDay), where('paidAt', '<=', endOfDay));
-
-                const [cashInSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([getDocs(cashInQuery), getDocs(expensesQuery), getDocs(stockPaymentsQuery)]);
-                
-                const cashInTxs = cashInSnap.docs.map(d => ({...d.data(), type: 'Cash In'}));
-                const expenseTxs = expensesSnap.docs.map(d => ({...d.data(), type: 'Expense'}));
-                const stockPaymentTxs = stockPaymentsSnap.docs.map(d => ({...d.data(), type: 'Stock Payment'}));
-
-                const totalIn = cashInTxs.reduce((sum, tx) => sum + tx.amount, 0);
-                const totalOut = [...expenseTxs, ...stockPaymentTxs].reduce((sum, tx) => sum + tx.amount, 0);
-                
-                newDailyData[book.id] = {
-                    openingBalance,
-                    totalIn,
-                    totalOut,
-                    closingBalance: openingBalance + totalIn - totalOut,
-                };
-            }
-            setDailyData(newDailyData);
-        } catch (error) {
-            console.error("Error fetching daily cash book data:", error);
-            alert("Failed to fetch data: " + error.message);
-        }
-        setLoading(false);
-    }, [cashBooks]); // Depend on cashBooks from context
-
-    useEffect(() => {
-        if (cashBooks.length > 0) {
-            fetchDailyData(selectedDate);
-        }
-    }, [selectedDate, fetchDailyData, cashBooks]);
+    // State for server-side pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageCursors, setPageCursors] = useState([null]); // Stores the cursor for the start of each page
+    const [hasNextPage, setHasNextPage] = useState(false);
+    const [balanceCarry, setBalanceCarry] = useState([0]); // Stores the running balance between pages
+    const PAGE_SIZE = 65;
 
     const handleCreateCashBook = async () => {
         if (!newCashBookName.trim()) return alert("Cash book name cannot be empty.");
-        const user = auth.currentUser; const uid = user.uid;
+        const user = auth.currentUser;
+        if (!user) return;
+        const uid = user.uid;
         const cashBooksColRef = collection(db, uid, 'cash_books', 'book_list');
-        if (cashBooks.some(book => book.name.toLowerCase() === newCashBookName.trim().toLowerCase())) { return alert("A cash book with this name already exists."); }
+        if (cashBooks.some(book => book.name.toLowerCase() === newCashBookName.trim().toLowerCase())) {
+            return alert("A cash book with this name already exists.");
+        }
         try {
-            await addDoc(cashBooksColRef, { name: newCashBookName.trim(), createdAt: serverTimestamp(), createdBy: user.displayName || user.email, });
+            await addDoc(cashBooksColRef, { 
+                name: newCashBookName.trim(), 
+                createdAt: serverTimestamp(), 
+                createdBy: user.displayName || user.email, 
+            });
             setNewCashBookName("");
-            await refreshBalances(); // Refresh context instead of local fetch
-        } catch (error) { alert("Failed to create cash book: " + error.message); }
+            await refreshBalances();
+        } catch (error) { 
+            alert("Failed to create cash book: " + error.message); 
+        }
     };
 
-    const handleAddCash = async () => {
-        if (!modalData.amount || isNaN(modalData.amount) || Number(modalData.amount) <= 0) return alert("Please enter a valid positive amount.");
-        if (!modalData.date) return alert("Please select a date.");
-        const user = auth.currentUser; const uid = user.uid;
-        const transactionsColRef = collection(db, uid, 'cash_book_entries', 'entry_list');
+    const fetchTransactions = useCallback(async (bookId, page) => {
+        if (!bookId) return;
+        setLoading(true);
+        const uid = auth.currentUser.uid;
+        const expensesCollection = collection(db, uid, 'user_data', 'expenses');
+        const paymentsCollection = collection(db, uid, 'stock_payments', 'payments');
+        const cashInCollection = collection(db, uid, 'cash_book_entries', 'entry_list');
+
         try {
-            await addDoc(transactionsColRef, { cashBookId: selectedBookForModal.id, cashBookName: selectedBookForModal.name, amount: Number(modalData.amount), date: new Date(modalData.date), createdAt: serverTimestamp(), addedBy: user.displayName || user.email });
-            setShowAddCashModal(false);
-            setModalData({ amount: '', date: new Date().toISOString().split('T')[0] });
-            await refreshBalances(); // Refresh context
-        } catch (error) { alert("Failed to add cash: " + error.message); }
-    };
-    
+            const buildQuery = (coll, timestampField) => {
+                let q = query(coll, where('cashBookId', '==', bookId), orderBy(timestampField, 'asc'));
+                const cursor = pageCursors[page - 1];
+                if (cursor) {
+                    q = query(q, startAfter(cursor));
+                }
+                return query(q, limit(PAGE_SIZE));
+            };
+
+            const expensesQuery = buildQuery(expensesCollection, 'createdAt');
+            const paymentsQuery = buildQuery(paymentsCollection, 'paidAt');
+            const cashInQuery = buildQuery(cashInCollection, 'createdAt');
+
+            const [expensesSnap, paymentsSnap, cashInSnap] = await Promise.all([
+                getDocs(expensesQuery),
+                getDocs(paymentsQuery),
+                getDocs(cashInQuery)
+            ]);
+
+            const expenseTxs = expensesSnap.docs.map(d => ({...d.data(), id: d.id, doc: d, type: 'Expense', timestamp: d.data().createdAt, user: d.data().createdBy, details: `(${d.data().category}) ${d.data().details}`}));
+            const stockPaymentTxs = paymentsSnap.docs.map(d => ({...d.data(), id: d.id, doc: d, type: 'Stock Payment', timestamp: d.data().paidAt, user: d.data().paidBy, details: `Payment for Stock-In: ${d.data().stockInId}`}));
+            const cashInTxs = cashInSnap.docs.map(d => ({...d.data(), id: d.id, doc: d, type: 'Cash In', timestamp: d.data().createdAt, user: d.data().addedBy, details: 'Cash deposited'}));
+
+            const combined = [...expenseTxs, ...stockPaymentTxs, ...cashInTxs]
+                .sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
+
+            const pageData = combined.slice(0, PAGE_SIZE);
+            setTransactions(pageData);
+
+            if (pageData.length > 0) {
+                let currentRunningBalance = balanceCarry[page - 1] || 0;
+                pageData.forEach(tx => {
+                    const isCredit = tx.type === 'Expense' || tx.type === 'Stock Payment';
+                    currentRunningBalance += isCredit ? -tx.amount : tx.amount;
+                });
+
+                setBalanceCarry(prev => {
+                    const newCarry = [...prev];
+                    newCarry[page] = currentRunningBalance;
+                    return newCarry;
+                });
+
+                const lastDocOnPage = pageData[pageData.length - 1];
+                setPageCursors(prev => {
+                    const newCursors = [...prev];
+                    newCursors[page] = lastDocOnPage.doc;
+                    return newCursors;
+                });
+            }
+            
+            setHasNextPage(combined.length > PAGE_SIZE);
+
+        } catch (error) {
+            console.error("Error fetching transactions:", error);
+            // This improved message guides you to the solution for database index errors.
+            alert("Failed to fetch transaction data. This is likely due to a missing database index. Press F12 to open the developer console and look for a link to create the required index.");
+        } finally {
+            setLoading(false);
+        }
+    }, [pageCursors, balanceCarry]);
+
+    useEffect(() => {
+        if (selectedBook) {
+            fetchTransactions(selectedBook.id, currentPage);
+        } else {
+            setTransactions([]);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedBook, currentPage]);
+
+    useEffect(() => {
+        if (selectedBook) {
+            setCurrentPage(1);
+            setPageCursors([null]);
+            setBalanceCarry([0]);
+            setHasNextPage(false);
+        }
+    }, [selectedBook]);
+
+    let runningBalance = balanceCarry[currentPage - 1] || 0;
+
     return (
         <div style={styles.container}>
-            <div style={styles.section}>
+            {/* Panel 1: Create Cash Book */}
+            <div style={styles.panel}>
                 <h2 style={styles.title}>Manage Cash Books</h2>
                 <div style={styles.inputGroup}>
                     <input type="text" value={newCashBookName} onChange={(e) => setNewCashBookName(e.target.value)} placeholder="Enter new cash book name" style={styles.input} />
@@ -123,79 +155,112 @@ const CashBook = () => {
                 </div>
             </div>
 
-            <div style={styles.section}>
-                <div style={styles.dailyHeader}>
-                    <h2 style={styles.title}>Daily Cash Sheet</h2>
-                    <div style={styles.datePickerContainer}>
-                        <label>Select Date:</label>
-                        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={styles.input} />
-                    </div>
-                </div>
-
-                {isDateReconciled && (
-                    <div style={styles.reconciledBanner}>
-                        <AiOutlineLock /> This day has been reconciled and is locked from editing.
-                    </div>
-                )}
-
-                {loading ? <p style={styles.noData}>Calculating daily balances...</p> : (
-                    <div style={styles.cardsContainer}>
-                        {cashBooks.map(book => {
-                            const data = dailyData[book.id] || { openingBalance: 0, totalIn: 0, totalOut: 0, closingBalance: 0 };
-                            return (
-                                <div key={book.id} style={styles.card}>
-                                    <div style={styles.cardHeader}>
-                                        <h3>{book.name}</h3>
-                                        <button onClick={() => { setSelectedBookForModal(book); setShowAddCashModal(true); }} style={styles.addCashButton} disabled={isDateReconciled}>Add Cash In</button>
-                                    </div>
-                                    <div style={styles.balanceRow}><span style={styles.balanceLabel}>Opening Balance:</span><span>Rs. {data.openingBalance.toFixed(2)}</span></div>
-                                    <div style={{...styles.balanceRow, color: '#27ae60'}}><span style={styles.balanceLabel}>Today's Cash In:</span><span>+ Rs. {data.totalIn.toFixed(2)}</span></div>
-                                    <div style={{...styles.balanceRow, color: '#e74c3c'}}><span style={styles.balanceLabel}>Today's Cash Out:</span><span>- Rs. {data.totalOut.toFixed(2)}</span></div>
-                                    <div style={{...styles.balanceRow, ...styles.closingBalance}}><span style={styles.balanceLabel}>Closing Balance:</span><span>Rs. {data.closingBalance.toFixed(2)}</span></div>
-                                </div>
-                            )
-                        })}
-                    </div>
-                )}
+            {/* Panel 2: Select Cash Book */}
+            <div style={styles.panel}>
+                 <h2 style={styles.title}>Select Cash Book</h2>
+                 <div style={styles.bookListContainer}>
+                    {cashBooks.length > 0 ? cashBooks.map(book => (
+                        <button 
+                            key={book.id} 
+                            onClick={() => setSelectedBook(book)}
+                            style={selectedBook?.id === book.id ? styles.bookButtonSelected : styles.bookButton}
+                        >
+                           <AiOutlineBook style={{ marginRight: '10px' }}/> {book.name}
+                        </button>
+                    )) : <p style={styles.noDataText}>No cash books created yet.</p>}
+                 </div>
             </div>
-            
-            {showAddCashModal && (
-                <div style={styles.modalOverlay}>
-                    <div style={styles.modal}>
-                        <h3 style={styles.modalTitle}>Add Cash to "{selectedBookForModal.name}"</h3>
-                        <div style={styles.modalFormGroup}><label style={styles.label}>Date</label><input type="date" value={modalData.date} onChange={(e) => setModalData({...modalData, date: e.target.value})} style={styles.input}/></div>
-                        <div style={styles.modalFormGroup}><label style={styles.label}>Amount to Add</label><input type="number" value={modalData.amount} onChange={(e) => setModalData({...modalData, amount: e.target.value})} placeholder="0.00" style={styles.input}/></div>
-                        <div style={styles.modalActions}><button onClick={() => setShowAddCashModal(false)} style={styles.cancelButton}>Cancel</button><button onClick={handleAddCash} style={styles.button}>Add Cash</button></div>
-                    </div>
+
+            {/* Panel 3: View Cash Book Data */}
+            <div style={styles.panel}>
+                <h2 style={styles.title}>
+                    {selectedBook ? `Ledger: ${selectedBook.name}` : 'Select a Cash Book to View Transactions'}
+                </h2>
+                <div style={styles.tableContainer}>
+                    <table style={styles.table}>
+                        <thead>
+                            <tr>
+                                <th style={styles.th}>Date & Time</th>
+                                <th style={styles.th}>Transaction ID</th>
+                                <th style={styles.th}>Details</th>
+                                <th style={styles.th}>User</th>
+                                <th style={styles.th}>Cash In (Debit)</th>
+                                <th style={styles.th}>Cash Out (Credit)</th>
+                                <th style={styles.th}>Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr><td colSpan="7" style={styles.loadingCell}><AiOutlineLoading3Quarters className="spinner" /> Loading Transactions...</td></tr>
+                            ) : transactions.length > 0 ? (
+                                transactions.map(tx => {
+                                    const isCredit = tx.type === 'Expense' || tx.type === 'Stock Payment';
+                                    const amount = tx.amount;
+                                    runningBalance += isCredit ? -amount : amount;
+
+                                    return (
+                                        <tr key={tx.id}>
+                                            <td style={styles.td}>{tx.timestamp?.toDate().toLocaleString()}</td>
+                                            <td style={styles.td}>
+                                                <div>{tx.expenseId || tx.paymentId || 'N/A'}</div>
+                                                <span style={{...styles.badge, backgroundColor: isCredit ? '#e74c3c' : '#27ae60' }}>{tx.type}</span>
+                                            </td>
+                                            <td style={styles.td}>{tx.details}</td>
+                                            <td style={styles.td}>{tx.user}</td>
+                                            <td style={{...styles.td, color: '#27ae60', fontWeight: '500'}}>{!isCredit ? `Rs. ${amount.toFixed(2)}` : '-'}</td>
+                                            <td style={{...styles.td, color: '#e74c3c', fontWeight: '500'}}>{isCredit ? `Rs. ${amount.toFixed(2)}` : '-'}</td>
+                                            <td style={{...styles.td, fontWeight: 'bold'}}>{`Rs. ${runningBalance.toFixed(2)}`}</td>
+                                        </tr>
+                                    );
+                                })
+                            ) : (
+                                <tr><td colSpan="7" style={styles.noDataCell}>{selectedBook ? 'No transactions found for this cash book.' : 'Please select a cash book.'}</td></tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-            )}
+                <div style={styles.paginationContainer}>
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1 || loading}>
+                        Previous
+                    </button>
+                    <span>Page {currentPage}</span>
+                    <button onClick={() => setCurrentPage(p => p + 1)} disabled={!hasNextPage || loading}>
+                        Next
+                    </button>
+                </div>
+            </div>
+            <style>{`
+                .spinner {
+                    animation: spin 1s linear infinite;
+                }
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     );
 };
+
 const styles = {
-    container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
-    section: { backgroundColor: '#fff', padding: '24px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
-    title: { fontSize: '22px', fontWeight: '600', color: '#2c3e50', margin: 0 },
-    inputGroup: { display: 'flex', gap: '16px', alignItems: 'center', marginTop: '16px' },
+    container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f4f6f8' },
+    panel: { backgroundColor: '#fff', padding: '24px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
+    title: { fontSize: '22px', fontWeight: '600', color: '#2c3e50', margin: '0 0 16px 0' },
+    inputGroup: { display: 'flex', gap: '16px', alignItems: 'center' },
     input: { flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #bdc3c7', fontSize: '14px' },
     button: { padding: '10px 16px', border: 'none', backgroundColor: '#3498db', color: 'white', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontWeight: '500' },
-    dailyHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-    datePickerContainer: { display: 'flex', alignItems: 'center', gap: '10px' },
-    cardsContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '20px' },
-    card: { border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' },
-    cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px', marginBottom: '12px' },
-    balanceRow: { display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' },
-    balanceLabel: { color: '#6b7280' },
-    closingBalance: { fontWeight: 'bold', fontSize: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '8px', marginTop: '8px' },
-    addCashButton: { padding: '8px 12px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' },
-    noData: { textAlign: 'center', padding: '32px', color: '#6b7280' },
-    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1001 },
-    modal: { backgroundColor: 'white', padding: '25px', borderRadius: '12px', width: '90%', maxWidth: '400px', boxShadow: '0 5px 15px rgba(0,0,0,0.3)' },
-    modalTitle: { margin: '0 0 20px 0', textAlign: 'center', fontSize: '20px', fontWeight: '600' },
-    modalFormGroup: { marginBottom: '16px' },
-    label: { display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500' },
-    modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' },
-    cancelButton: { padding: '10px 20px', backgroundColor: '#e0e0e0', color: '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' },
-    reconciledBanner: { backgroundColor: '#fef3c7', color: '#92400e', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' },
+    bookListContainer: { display: 'flex', flexWrap: 'wrap', gap: '12px' },
+    bookButton: { padding: '10px 15px', border: '1px solid #3498db', backgroundColor: 'white', color: '#3498db', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontWeight: '500', fontSize: '14px' },
+    bookButtonSelected: { padding: '10px 15px', border: '1px solid #3498db', backgroundColor: '#3498db', color: 'white', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontWeight: '500', fontSize: '14px' },
+    noDataText: { color: '#6b7280', fontStyle: 'italic' },
+    tableContainer: { overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' },
+    table: { width: '100%', borderCollapse: 'collapse' },
+    th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: '600', color: '#4b5563', fontSize: '12px', textTransform: 'uppercase' },
+    td: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb', fontSize: '14px', color: '#34495e' },
+    badge: { color: 'white', padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '500', display: 'inline-block', marginTop: '4px' },
+    loadingCell: { textAlign: 'center', padding: '40px', color: '#6b7280', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
+    noDataCell: { textAlign: 'center', padding: '40px', color: '#6b7280' },
+    paginationContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginTop: '20px' },
 };
+
 export default CashBook;

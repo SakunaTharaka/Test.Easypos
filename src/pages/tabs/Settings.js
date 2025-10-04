@@ -45,7 +45,6 @@ const Settings = () => {
   const [productionShifts, setProductionShifts] = useState([]);
   const [editingShift, setEditingShift] = useState(null);
 
-  // 💡 1. State for the new Finance Settings panel
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
 
@@ -80,7 +79,6 @@ const Settings = () => {
           setDefaultCustomerId(data.defaultCustomerId || "");
           setUseShiftProduction(data.useShiftProduction || false);
           setProductionShifts(data.productionShifts || []);
-          // 💡 2. Load expense categories from Firestore
           setExpenseCategories(data.expenseCategories || []);
         } else {
           const defaultSettings = {
@@ -97,13 +95,11 @@ const Settings = () => {
             defaultCustomerId: "",
             useShiftProduction: false,
             productionShifts: [],
-            expenseCategories: [], // 💡 Initialize with an empty array
+            expenseCategories: [],
           };
           await setDoc(settingsDocRef, defaultSettings);
-          // Set all states from the new default object
           Object.entries(defaultSettings).forEach(([key, value]) => {
               const setterName = `set${key.charAt(0).toUpperCase() + key.slice(1)}`;
-              // A simple way to call the right setter function if it exists
               if (typeof window[setterName] === 'function') {
                   window[setterName](value);
               }
@@ -130,7 +126,6 @@ const Settings = () => {
       return doc(db, uid, "settings");
   }
 
-  // ... (uploadLogo, handleSave, other handlers remain the same)
   const uploadLogo = async (file) => {
     if (!file) return;
     setLogoUploading(true);
@@ -150,7 +145,9 @@ const Settings = () => {
   };
   const handleSave = async () => {
     try {
-      await updateDoc(getSettingsDocRef(), formInput);
+      // Exclude email from the update object
+      const { email, ...updateData } = formInput;
+      await updateDoc(getSettingsDocRef(), updateData);
       setUserInfo(formInput);
       setEditMode(false);
       alert("Personal info updated successfully!");
@@ -206,7 +203,6 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { productionShifts: updatedShifts });
   };
   
-  // 💡 3. New handlers for expense categories
   const handleAddExpenseCategory = async () => {
     if (!newExpenseCategory.trim()) return;
     const updatedCategories = [...expenseCategories, newExpenseCategory.trim()];
@@ -238,7 +234,7 @@ const Settings = () => {
     <div style={styles.container}>
       {/* Personal Info Section */}
       <div style={styles.headerContainer}><h2 style={styles.header}>Settings</h2><p style={styles.subHeader}>Manage your account and application preferences</p></div>
-      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>{["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (<div style={styles.formGroup} key={field}><label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>{editMode ? (<input type={field === "email" ? "email" : "text"} value={formInput[field]} onChange={(e) => setFormInput({ ...formInput, [field]: e.target.value })} style={styles.input} placeholder={`Enter your ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}/>) : (<p style={styles.value}>{userInfo?.[field] || "Not provided"}</p>)}</div>))}{editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
+      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>{["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (<div style={styles.formGroup} key={field}><label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>{editMode ? (field === "email" ? (<input type="email" value={formInput[field]} style={styles.inputDisabled} readOnly/>) : (<input type="text" value={formInput[field]} onChange={(e) => setFormInput({ ...formInput, [field]: e.target.value })} style={styles.input} placeholder={`Enter your ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}/>)) : (<p style={styles.value}>{userInfo?.[field] || "Not provided"}</p>)}</div>))}{editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
 
       {/* Inventory Settings Section */}
       <div style={styles.section}>
@@ -250,7 +246,7 @@ const Settings = () => {
         <div style={styles.formGroup}><label style={styles.label}>Measurement Units</label><div style={styles.unitsGrid}>{AVAILABLE_UNITS.map((unit) => (<label key={unit} style={styles.unitCheckbox}><input type="checkbox" checked={selectedUnits.includes(unit)} onChange={() => handleUnitChange(unit)}/>{unit}</label>))}</div></div>
       </div>
       
-      {/* 💡 4. New Finance Settings Panel */}
+      {/* Finance Settings Panel */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Finance Settings</h3>
         <div style={styles.formGroup}>
@@ -280,6 +276,8 @@ const Settings = () => {
 };
 
 const styles = {
+  // Add the new style for the disabled input
+  inputDisabled: { width: '100%', padding: '12px 16px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box', backgroundColor: '#f8f9fa', color: '#6c757d', cursor: 'not-allowed' },
   toggleContainer: { display: 'flex', border: '1px solid #ddd', borderRadius: '8px', overflow: 'hidden', width: 'fit-content' },
   toggleButton: { padding: '10px 20px', border: 'none', background: '#f8f9fa', cursor: 'pointer', color: '#6c757d', fontWeight: '500' },
   toggleButtonActive: { padding: '10px 20px', border: 'none', background: '#3498db', cursor: 'pointer', color: 'white', fontWeight: '600' },
