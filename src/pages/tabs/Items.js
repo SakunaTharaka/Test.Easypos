@@ -32,13 +32,16 @@ const Items = ({ internalUser }) => {
   const [form, setForm] = useState({ name: "", brand: "", sku: "", type: "", category: "" });
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
+  
+  // ✨ NEW: State to store the inventory type setting
+  const [inventoryType, setInventoryType] = useState(null); 
 
   // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [lastVisible, setLastVisible] = useState(null);
   const [pageCursors, setPageCursors] = useState({ 1: null });
   const [hasNextPage, setHasNextPage] = useState(false);
-  const itemsPerPage = 100; // ✨ FIX: Page size updated to 100
+  const itemsPerPage = 100;
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
@@ -96,21 +99,27 @@ const Items = ({ internalUser }) => {
       }
     };
 
-    fetchItems();
+    if(inventoryType) fetchItems(); // Wait until settings are loaded
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, search]);
+  }, [currentPage, search, inventoryType]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const fetchCategories = async () => {
+    const fetchSettings = async () => {
         const settingsRef = doc(db, uid, "settings");
         const settingsSnap = await getDoc(settingsRef);
         if (settingsSnap.exists()) {
-          setCategories(settingsSnap.data().itemCategories || []);
+          const settingsData = settingsSnap.data();
+          setCategories(settingsData.itemCategories || []);
+          // ✨ NEW: Fetch and set the inventory type
+          setInventoryType(settingsData.inventoryType || "Buy and Sell only");
+        } else {
+          // Fallback if settings document doesn't exist
+          setInventoryType("Buy and Sell only");
         }
     }
-    fetchCategories();
+    fetchSettings();
   }, []);
 
   useEffect(() => {
@@ -202,6 +211,44 @@ const Items = ({ internalUser }) => {
     }
   };
 
+  // ✨ NEW: Dynamically determine which item types to show
+  const getItemTypeOptions = () => {
+    switch (inventoryType) {
+      case "Buy and Sell only":
+        return [{ value: "buySell", label: "Buy/Sell Item" }];
+      case "Production Selling only":
+        return [
+          { value: "storesItem", label: "Stores Item / Raw Material" },
+          { value: "ourProduct", label: "Finished Product" },
+        ];
+      case "We doing both":
+      default: // Show all if setting is "We doing both" or not loaded yet
+        return [
+          { value: "buySell", label: "Buy/Sell Item" },
+          { value: "storesItem", label: "Stores Item / Raw Material" },
+          { value: "ourProduct", label: "Finished Product" },
+        ];
+    }
+  };
+  const itemTypeOptions = getItemTypeOptions();
+
+
+  // ✨ NEW: Handler for the 'Add Item' button to set the correct default type
+  const handleAddItemClick = () => {
+    let defaultType = "";
+    if (inventoryType === "Buy and Sell only") {
+      defaultType = "buySell";
+    } else if (inventoryType === "Production Selling only") {
+      defaultType = "storesItem"; // Default to the first available option
+    }
+    // No default for "We doing both", letting the user choose
+    
+    setForm({ name: "", brand: "", sku: "", type: defaultType, category: "" });
+    setEditingItem(null);
+    setShowModal(true);
+  };
+
+
   if (loading && currentPage === 1 && !search) return <p>Loading items...</p>;
 
   return (
@@ -220,7 +267,7 @@ const Items = ({ internalUser }) => {
           />
         </div>
         <button
-          onClick={() => { setForm({ name: "", brand: "", sku: "", type: "", category: "" }); setEditingItem(null); setShowModal(true); }}
+          onClick={handleAddItemClick} // ✨ Use the new handler
           style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", background: "#3498db", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: '14px' }}
         >
           <AiOutlinePlus /> Add Item
@@ -278,14 +325,20 @@ const Items = ({ internalUser }) => {
           <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px" }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingItem ? "Edit Item" : "Add New Item"}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
-                    <label style={{ fontWeight: 600, display: 'block', marginBottom: '10px' }}>Item Type *</label>
-                    <div style={{ display: 'flex', justifyContent: 'space-around' }}>
-                        {["storesItem", "ourProduct", "buySell"].map((t) => (
-                            <label key={t} style={{ cursor: 'pointer' }}><input type="radio" name="type" checked={form.type === t} onChange={() => handleTypeSelect(t)} style={{ marginRight: "6px" }}/>{t}</label>
-                        ))}
+                {/* ✨ NEW: Conditionally rendered radio buttons */}
+                {itemTypeOptions.length > 1 && (
+                    <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
+                        <label style={{ fontWeight: 600, display: 'block', marginBottom: '10px' }}>Item Type *</label>
+                        <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: '10px' }}>
+                            {itemTypeOptions.map((opt) => (
+                                <label key={opt.value} style={{ cursor: 'pointer' }}>
+                                    <input type="radio" name="type" checked={form.type === opt.value} onChange={() => handleTypeSelect(opt.value)} style={{ marginRight: "6px" }}/>
+                                    {opt.label}
+                                </label>
+                            ))}
+                        </div>
                     </div>
-                </div>
+                )}
                 {form.type !== "ourProduct" && (
                   <input type="text" name="brand" placeholder="Brand (e.g., Coca-Cola)" value={form.brand} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 )}
