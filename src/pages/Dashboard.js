@@ -61,6 +61,17 @@ const Dashboard = () => {
       }
       
       const uid = currentUser.uid;
+      
+      // ✅ **FIX: More robust check for setup completion**
+      const userInfoRefOnboarding = doc(db, "Userinfo", uid);
+      const userDocSnap = await getDoc(userInfoRefOnboarding);
+      
+      // Redirect if the doc doesn't exist OR if the 'status' field (from step 2) is missing.
+      if (!userDocSnap.exists() || !userDocSnap.data().status) {
+        navigate("/user-details");
+        return;
+      }
+      
       const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
       if (savedInternalUser) setInternalLoggedInUser(savedInternalUser);
 
@@ -76,13 +87,11 @@ const Dashboard = () => {
           }
         });
 
+        // This logic remains to show the welcome video popup on first login
         const userInfoDocRef = doc(db, uid, "Userinfo");
         const userInfoSnap = await getDoc(userInfoDocRef);
-        if (!userInfoSnap.exists()) {
-          const newUserInfo = { firstLoginShown: false };
-          await setDoc(userInfoDocRef, newUserInfo);
-          setShowPopup(true); 
-        } else if (userInfoSnap.data().firstLoginShown === false) {
+        // Add a check to ensure data exists before trying to access it
+        if (userInfoSnap.exists() && userInfoSnap.data().firstLoginShown === false) {
            setShowPopup(true);
            await updateDoc(userInfoDocRef, { firstLoginShown: true });
         }
@@ -240,7 +249,6 @@ const Dashboard = () => {
                 <h2 style={styles.welcomeTitle}>Welcome to {userInfo?.companyName || "EasyPOS"} 🎉</h2>
                 <p style={styles.welcomeText}>Here's a quick video guide to get you started:</p>
                 <div style={styles.videoWrapper}>
-                    {/* ✨ FIX: Removed fixed width/height and applied responsive style */}
                     <iframe 
                         style={styles.popupBoxiframe}
                         src="https://youtu.be/DiA2LuJcN4A?si=gOhg0jRYo8ANvZkI" 
@@ -258,8 +266,7 @@ const Dashboard = () => {
     </div>
   );
 };
-
-// Styles remain unchanged
+// Styles
 const styles = {
     stickyHeader: { position: 'sticky', top: 0, zIndex: 1000, backgroundColor: '#fff' },
     wayneSystems: { fontSize: '12px', color: '#bdc3c7', margin: '2px 0 0 0', fontStyle: 'italic' },

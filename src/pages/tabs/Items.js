@@ -169,6 +169,38 @@ const Items = ({ internalUser }) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    // ✅ **START: SKU Uniqueness Check**
+    const skuToCheck = form.sku?.trim();
+    if (skuToCheck) { // Only perform the check if an SKU is actually entered.
+      try {
+        const itemsColRef = collection(db, uid, "items", "item_list");
+        const q = query(itemsColRef, where("sku", "==", skuToCheck));
+        const querySnapshot = await getDocs(q);
+        
+        let isDuplicate = false;
+        if (!querySnapshot.empty) {
+          if (editingItem) {
+            // In EDIT mode, it's a duplicate only if the found item's ID is different from the one being edited.
+            if (querySnapshot.docs[0].id !== editingItem.id) {
+              isDuplicate = true;
+            }
+          } else {
+            // In ADD mode, any found item is a duplicate.
+            isDuplicate = true;
+          }
+        }
+
+        if (isDuplicate) {
+          alert("This SKU is already in use by another item. Please use a unique SKU.");
+          return; // Stop the function from proceeding.
+        }
+      } catch (error) {
+        alert("Error checking SKU uniqueness: " + error.message);
+        return; // Stop on error.
+      }
+    }
+    // ✅ **END: SKU Uniqueness Check**
+
     try {
       const username = getCurrentInternal()?.username || "Admin";
       const finalName = form.type === "ourProduct" ? form.name.trim() : `${form.brand.trim()} ${form.name.trim()}`;

@@ -26,12 +26,23 @@ const UserDetails = () => {
       }
       setUser(currentUser);
 
-      // Check if user info document already exists
       const userRef = doc(db, "Userinfo", currentUser.uid);
       const docSnap = await getDoc(userRef);
 
       if (docSnap.exists()) {
-        navigate("/dashboard");
+        const userData = docSnap.data();
+        if (userData.status === 'trialing') {
+          navigate("/dashboard");
+        } else {
+          setFormData({
+              fullName: userData.fullName || "",
+              phone: userData.phone || "",
+              companyName: userData.companyName || "",
+              companyAddress: userData.companyAddress || "",
+          });
+          setStep(2);
+          setLoading(false);
+        }
       } else {
         setStep(1);
         setLoading(false);
@@ -41,13 +52,26 @@ const UserDetails = () => {
   }, [navigate]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === "phone") {
+      const numericValue = value.replace(/[^0-9]/g, '');
+      if (numericValue.length <= 10) {
+        setFormData({ ...formData, [name]: numericValue });
+      }
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
   };
 
   const handleSaveUserInfo = async () => {
     if (!formData.fullName || !formData.phone || !formData.companyName || !formData.companyAddress) {
       alert("Please fill all fields to continue.");
       return;
+    }
+    const phoneRegex = /^0\d{9}$/;
+    if (!phoneRegex.test(formData.phone)) {
+        alert("Please enter a valid 10-digit Sri Lankan phone number starting with 0.");
+        return;
     }
     setLoading(true);
     try {
@@ -58,7 +82,7 @@ const UserDetails = () => {
         ...formData,
         registrationDate: serverTimestamp(),
       });
-      setStep(2); // Move to the next step
+      setStep(2);
     } catch (error) {
       alert("Error saving user info: " + error.message);
     } finally {
@@ -69,10 +93,16 @@ const UserDetails = () => {
   const handleStartTrial = async () => {
     setLoading(true);
     try {
+      // ✅ **FIX: Calculate trial start and end dates**
+      const trialStartDate = new Date();
+      const trialEndDate = new Date(trialStartDate);
+      trialEndDate.setDate(trialStartDate.getDate() + 30);
+
       const userRef = doc(db, "Userinfo", user.uid);
       await updateDoc(userRef, {
         selectedPackage: selectedPlan,
-        trialStartDate: serverTimestamp(),
+        trialStartDate: trialStartDate, // Use the calculated start date
+        trialEndDate: trialEndDate,     // Add the new end date
         status: 'trialing',
       });
       navigate("/dashboard");
@@ -82,7 +112,7 @@ const UserDetails = () => {
     }
   };
 
-  if (loading && step === 1) return <div style={styles.loadingOverlay}><p>Loading...</p></div>;
+  if (loading) return <div style={styles.loadingOverlay}><p>Loading...</p></div>;
 
   return (
     <div style={styles.pageContainer}>
@@ -96,7 +126,7 @@ const UserDetails = () => {
             <h2 style={styles.formTitle}>Tell Us About Yourself</h2>
             <p style={styles.formSubtitle}>This information will be used on your invoices and reports.</p>
             <input type="text" name="fullName" placeholder="Full Name" value={formData.fullName} onChange={handleChange} style={styles.input} />
-            <input type="tel" name="phone" placeholder="Phone Number" value={formData.phone} onChange={handleChange} style={styles.input} />
+            <input type="tel" name="phone" placeholder="E.g., 0712345678" value={formData.phone} onChange={handleChange} style={styles.input} />
             <input type="text" name="companyName" placeholder="Company / Shop Name" value={formData.companyName} onChange={handleChange} style={styles.input} />
             <input type="text" name="companyAddress" placeholder="Company / Shop Address" value={formData.companyAddress} onChange={handleChange} style={styles.input} />
             <button onClick={handleSaveUserInfo} style={loading ? styles.buttonDisabled : styles.button} disabled={loading}>
@@ -132,7 +162,7 @@ const UserDetails = () => {
     </div>
   );
 };
-
+// Styles
 const styles = {
     pageContainer: { display: 'flex', width: '100vw', height: '100vh', fontFamily: "'Inter', sans-serif" },
     leftPanel: { flex: 1, background: 'linear-gradient(135deg, #2c3e50, #1a2530)', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px', boxSizing: 'border-box' },

@@ -13,6 +13,93 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 
+// ✅ **NEW: Self-contained, printable layout component (from InvoiceViewer)**
+const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
+    if (!invoice || !Array.isArray(invoice.items)) return null;
+    const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const balanceToDisplay = invoice.received === 0 ? 0 : invoice.balance;
+    const createdAtDate = invoice.createdAt instanceof Date ? invoice.createdAt : invoice.createdAt?.toDate();
+  
+    return (
+      <div style={printStyles.invoiceBox}>
+        <div className="invoice-header-section">
+          <div className="company-details">
+            {companyInfo?.companyLogo && (
+              <img src={companyInfo.companyLogo} style={printStyles.logo} alt="Company Logo" onLoad={onImageLoad} onError={onImageLoad} />
+            )}
+            <h1 style={printStyles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
+            <p style={printStyles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
+            {companyInfo?.phone && <p style={printStyles.headerText}>{companyInfo.phone}</p>}
+          </div>
+          <div className="invoice-meta-details">
+            <p><strong>Invoice #:</strong> {invoice.invoiceNumber}</p>
+            <p><strong>Date:</strong> {createdAtDate?.toLocaleDateString()}</p>
+            <p><strong>Customer:</strong> {invoice.customerName}</p>
+            <p><strong>Issued By:</strong> {invoice.issuedBy}</p>
+          </div>
+        </div>
+        <table style={printStyles.itemsTable}>
+          <thead><tr><th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th><th style={printStyles.th}>Qty</th><th style={printStyles.th}>Rate</th><th style={printStyles.th}>Total</th></tr></thead>
+          <tbody>
+            {invoice.items.map((item, index) => (
+              <tr key={index}><td style={printStyles.td}>{item.itemName}</td><td style={{ ...printStyles.td, ...printStyles.tdCenter }}>{item.quantity}</td><td style={{ ...printStyles.td, ...printStyles.tdRight }}>{item.price.toFixed(2)}</td><td style={{ ...printStyles.td, ...printStyles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="invoice-footer-section">
+          <div style={printStyles.totalsContainer}>
+            <div style={printStyles.totals}><div style={printStyles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div><div style={printStyles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div><hr style={printStyles.hr} /><div style={printStyles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div><div style={{ ...printStyles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div></div>
+          </div>
+        </div>
+        <div style={printStyles.footer}><p>Thank you for your business!</p></div>
+        <div style={printStyles.creditFooter}><p>Wayne Software Solutions | 078 722 3407</p></div>
+      </div>
+    );
+};
+
+// ✅ **NEW: Print Preview Modal Component**
+const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
+    const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
+    const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Enter' && isPrintReady) {
+                e.preventDefault();
+                window.print();
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                onClose();
+            }
+        };
+        const handleAfterPrint = () => onClose();
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('afterprint', handleAfterPrint);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('afterprint', handleAfterPrint);
+        };
+    }, [onClose, isPrintReady]);
+
+    return (
+        <>
+            <style>{`@page{size:80mm auto;margin:3mm;}@media print{body{background-color:#fff !important;} .no-print{display:none !important;}.print-area-container{box-shadow:none;margin:0;width:100%;}.print-area{page:thermal;font-family:'Courier New',monospace;}}`}</style>
+            <div style={styles.confirmOverlay}>
+                <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '10px', transform: 'scale(1.1)', transformOrigin: 'top center' }}>
+                    <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
+                        {isPrintReady ? 'Press ENTER to Print or ESC to Close' : 'Loading preview...'}
+                    </div>
+                    <div className="print-area">
+                        {invoice ? <PrintableLayout invoice={invoice} companyInfo={companyInfo} onImageLoad={() => setIsImageLoaded(true)} /> : <p>Loading...</p>}
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+};
+
+
 const Invoice = ({ internalUser }) => {
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -29,23 +116,26 @@ const Invoice = ({ internalUser }) => {
   const [amountReceivedMode, setAmountReceivedMode] = useState(false);
   const [checkoutFocusMode, setCheckoutFocusMode] = useState(false);
   const [highlightedCheckoutIndex, setHighlightedCheckoutIndex] = useState(-1);
-  
-  // State for shift feature
+  const [settings, setSettings] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [shiftProductionEnabled, setShiftProductionEnabled] = useState(false);
   const [availableShifts, setAvailableShifts] = useState([]);
   const [selectedShift, setSelectedShift] = useState("");
-
-  // State for the new payment confirmation popup
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const paymentOptions = ['Cash', 'Card', 'Online'];
+  
+  // ✅ **NEW: State for modal control**
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [invoiceToPrint, setInvoiceToPrint] = useState(null);
 
   const containerRef = useRef(null);
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
 
-  const toggleFullscreen = () => {
+  // ... (toggleFullscreen, handleFullscreenChange, generateInvoiceNumber functions are unchanged) ...
+    const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen().catch(err => alert(`Error: ${err.message}`));
     } else {
@@ -79,8 +169,9 @@ const Invoice = ({ internalUser }) => {
         return `INV-${datePrefix}-ERR`;
     }
   };
-  
+
   useEffect(() => {
+    // ... (This useEffect's content to fetch initial data remains mostly the same, but now it just stores settings in state) ...
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
@@ -100,6 +191,7 @@ const Invoice = ({ internalUser }) => {
       const settingsSnap = await getDoc(doc(db, uid, "settings"));
       if (settingsSnap.exists()) {
         const settingsData = settingsSnap.data();
+        setSettings(settingsData); 
         if (settingsData.defaultCustomerId) {
           const defaultCustomer = customerOptions.find(c => c.value === settingsData.defaultCustomerId);
           if (defaultCustomer) setSelectedCustomer(defaultCustomer);
@@ -118,7 +210,8 @@ const Invoice = ({ internalUser }) => {
     initialize();
   }, []);
   
-  useEffect(() => {
+  // ... (All other useEffects and handlers like handleItemSelect, addItemToCheckout, etc., are unchanged) ...
+    useEffect(() => {
     if (selectedShift) {
         localStorage.setItem('savedSelectedShift', selectedShift);
     }
@@ -147,14 +240,14 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (showPaymentConfirm) return; // Disable other shortcuts when popup is open
+      if (showPaymentConfirm || isSaving || showPrintPreview) return; // Disable shortcuts during modals
       if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
       if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setAmountReceivedMode(prev => !prev); }
       if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setCheckoutFocusMode(prev => !prev); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm]);
+  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm, isSaving, showPrintPreview]);
 
   useEffect(() => {
     if (amountReceivedMode) { receivedAmountRef.current?.focus(); receivedAmountRef.current?.select(); }
@@ -215,31 +308,49 @@ const Invoice = ({ internalUser }) => {
     itemInputRef.current?.focus();
   };
   const removeCheckoutItem = (index) => setCheckout(prev => prev.filter((_, i) => i !== index));
+
+  const resetForm = async () => {
+    const newInvNum = await generateInvoiceNumber();
+    sessionStorage.setItem('currentInvoiceNumber', newInvNum);
+    setInvoiceNumber(newInvNum);
+    setCheckout([]);
+    setReceivedAmount("");
+    itemInputRef.current?.focus();
+  };
   
+  // ✅ **REVISED: Logic to show modal or alert after saving**
   const executeSaveInvoice = async (finalPaymentMethod) => {
     const user = auth.currentUser;
     if (!user) return alert("You are not logged in.");
+    
+    setIsSaving(true); 
+    setShowPaymentConfirm(false);
+
     try {
       const invoicesColRef = collection(db, user.uid, "invoices", "invoice_list");
-      await addDoc(invoicesColRef, {
+      const invoiceDataForDb = {
         customerId: selectedCustomer.value, customerName: selectedCustomer.label,
         items: checkout, total: subtotal, received: Number(receivedAmount) || 0,
-        balance: balance, // This saves the TRUE balance to the database
-        createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
-        issuedBy: internalUser?.username || "Admin",
-        shift: selectedShift || "",
+        balance: balance, createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
+        issuedBy: internalUser?.username || "Admin", shift: selectedShift || "",
         paymentMethod: finalPaymentMethod,
-      });
-      alert("Invoice saved successfully!");
-      const newInvNum = await generateInvoiceNumber();
-      sessionStorage.setItem('currentInvoiceNumber', newInvNum);
-      setInvoiceNumber(newInvNum);
-      setCheckout([]);
-      setReceivedAmount("");
-      setShowPaymentConfirm(false);
-      itemInputRef.current?.focus();
+      };
+
+      await addDoc(invoicesColRef, invoiceDataForDb);
+      
+      if (settings?.autoPrintInvoice === true) {
+        // Use client-side date for instant preview
+        const invoiceDataForPrint = { ...invoiceDataForDb, createdAt: new Date() };
+        setInvoiceToPrint(invoiceDataForPrint);
+        setShowPrintPreview(true);
+      } else {
+        alert("Invoice saved successfully!");
+        await resetForm();
+      }
     } catch (error) {
       alert("Failed to save invoice: " + error.message);
+    } finally {
+      setIsSaving(false); 
     }
   };
   
@@ -248,11 +359,11 @@ const Invoice = ({ internalUser }) => {
     if (shiftProductionEnabled && !selectedShift) {
         return alert("Please select a shift before saving the invoice.");
     }
-    setConfirmPaymentMethod('Cash'); // Default to cash when opening
+    setConfirmPaymentMethod('Cash');
     setShowPaymentConfirm(true);
   };
-
-  useEffect(() => {
+    // ... useEffect for payment confirmation keydown unchanged
+    useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
         
@@ -277,21 +388,37 @@ const Invoice = ({ internalUser }) => {
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPaymentConfirm, confirmPaymentMethod, checkout, receivedAmount]);
+
   
-  // ✨ --- NEW BALANCE AND SAVE LOGIC --- ✨
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  // This is the REAL balance used for saving to the database
   const balance = (Number(receivedAmount) || 0) - subtotal; 
-  
-  // This is the new DISPLAY balance with the special condition
   const received = Number(receivedAmount) || 0;
   const displayBalance = received === 0 ? 0 : balance;
-
-  // This is the new logic to enable/disable the save button
   const isSaveDisabled = !selectedCustomer || checkout.length === 0 || (balance < 0 && received > 0);
 
   return (
     <div ref={containerRef} style={styles.container}>
+      {isSaving && !showPrintPreview && (
+        <div style={styles.savingOverlay}>
+            <div style={styles.savingSpinner}></div>
+            <p>Saving...</p>
+        </div>
+      )}
+      
+      {/* ✅ **NEW: Render the print modal** */}
+      {showPrintPreview && (
+        <PrintPreviewModal 
+            invoice={invoiceToPrint} 
+            companyInfo={settings}
+            onClose={() => {
+                setShowPrintPreview(false);
+                setInvoiceToPrint(null);
+                resetForm();
+            }}
+        />
+      )}
+
+      {/* ... (The rest of the JSX is unchanged) ... */}
       <button onClick={toggleFullscreen} style={styles.fullscreenButton}>{isFullscreen ? "Exit Fullscreen" : "Fullscreen"}</button>
       <div style={styles.leftPanel}>
         <div style={styles.header}>
@@ -322,8 +449,8 @@ const Invoice = ({ internalUser }) => {
                 Rs. {displayBalance.toFixed(2)}
               </span>
             </div>
-            <button onClick={handleSaveAttempt} disabled={isSaveDisabled} style={{...styles.saveButton, ...(isSaveDisabled ? styles.saveButtonDisabled : {})}}>
-              SAVE INVOICE (ALT+S)
+            <button onClick={handleSaveAttempt} disabled={isSaveDisabled || isSaving} style={{...styles.saveButton, ...((isSaveDisabled || isSaving) ? styles.saveButtonDisabled : {})}}>
+              {isSaving ? 'SAVING...' : 'SAVE INVOICE (ALT+S)'}
             </button>
         </div>
       </div>
@@ -350,6 +477,7 @@ const Invoice = ({ internalUser }) => {
   );
 };
 
+// ... Main component styles are unchanged
 const styles = {
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
@@ -395,6 +523,27 @@ const styles = {
     shortcutsHelp: { backgroundColor: 'white', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginTop: 'auto', fontSize: '12px', color: '#4b5563' },
     shortcutsTitle: { fontWeight: 'bold', marginBottom: '8px', color: '#111827' },
     shortcutItem: { marginBottom: '4px' },
+    savingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 3000, color: '#1f2937', fontSize: '18px', fontWeight: '600' },
+    savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
+};
+// ✅ **NEW: Styles for the printable layout**
+const printStyles = {
+    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
+    logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
+    companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
+    headerText: { margin: '2px 0', fontSize: '0.9em' },
+    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+    th: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
+    thItem: { textAlign: 'left' },
+    td: { padding: '8px', borderBottom: '1px dotted #ccc' },
+    tdCenter: { textAlign: 'center' },
+    tdRight: { textAlign: 'right' },
+    totalsContainer: { width: '100%' },
+    totals: { paddingTop: '10px' },
+    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1em' },
+    hr: { border: 'none', borderTop: '1px dashed #000' },
+    footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
+    creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
 };
 
 export default Invoice;

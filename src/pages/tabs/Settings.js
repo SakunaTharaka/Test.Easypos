@@ -47,6 +47,10 @@ const Settings = () => {
 
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
+  
+  // ✅ **NEW: State for the auto-print invoice setting**
+  const [autoPrintInvoice, setAutoPrintInvoice] = useState(false);
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -80,6 +84,8 @@ const Settings = () => {
           setUseShiftProduction(data.useShiftProduction || false);
           setProductionShifts(data.productionShifts || []);
           setExpenseCategories(data.expenseCategories || []);
+          // ✅ **NEW: Load the auto-print setting**
+          setAutoPrintInvoice(data.autoPrintInvoice || false);
         } else {
           // --- NEW LOGIC: Fetch from Userinfo on first setup ---
           const userInfoRef = doc(db, "Userinfo", uid);
@@ -114,6 +120,8 @@ const Settings = () => {
             useShiftProduction: false,
             productionShifts: [],
             expenseCategories: [],
+            // ✅ **NEW: Add auto-print to default settings**
+            autoPrintInvoice: false,
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -135,6 +143,8 @@ const Settings = () => {
           setUseShiftProduction(defaultSettings.useShiftProduction);
           setProductionShifts(defaultSettings.productionShifts);
           setExpenseCategories(defaultSettings.expenseCategories);
+          // ✅ **NEW: Set default state for auto-print**
+          setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
         }
 
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -250,6 +260,13 @@ const Settings = () => {
     setDefaultCustomerId(value);
     await updateDoc(getSettingsDocRef(), { defaultCustomerId: value });
   };
+
+  // ✅ **NEW: Handler function to save the auto-print setting**
+  const handleAutoPrintChange = async (value) => {
+    setAutoPrintInvoice(value);
+    await updateDoc(getSettingsDocRef(), { autoPrintInvoice: value });
+  };
+
   const handleLogout = async () => {
     await auth.signOut();
     navigate("/");
@@ -298,7 +315,28 @@ const Settings = () => {
       </div>
       
       {/* Invoicing Settings */}
-      <div style={styles.section}><h3 style={styles.sectionTitle}>Invoicing</h3><div style={styles.formGroup}><label style={styles.label}>Default Customer</label><select value={defaultCustomerId} onChange={(e) => handleDefaultCustomerChange(e.target.value)} style={styles.select}><option value="">Select a Default Customer</option>{customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}</select><p style={styles.helpText}>This customer will be selected by default in new invoices.</p></div></div>
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Invoicing</h3>
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Default Customer</label>
+            <select value={defaultCustomerId} onChange={(e) => handleDefaultCustomerChange(e.target.value)} style={styles.select}>
+                <option value="">Select a Default Customer</option>
+                {customers.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+            </select>
+            <p style={styles.helpText}>This customer will be selected by default in new invoices.</p>
+        </div>
+        
+        {/* ✅ **NEW: Auto-Print Toggle Button** */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Print Invoice Automatically After Save</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleAutoPrintChange(true)} style={autoPrintInvoice ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleAutoPrintChange(false)} style={!autoPrintInvoice ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>If set to 'Yes', the print dialog will open automatically after an invoice is saved.</p>
+        </div>
+      </div>
+
       <div style={styles.logoutContainer}><button onClick={handleLogout} style={styles.logoutButton}><AiOutlineLogout size={18} /> Logout</button></div>
     </div>
   );
