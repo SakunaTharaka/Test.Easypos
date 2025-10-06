@@ -62,15 +62,31 @@ const Dashboard = () => {
       
       const uid = currentUser.uid;
       
-      // ✅ **FIX: More robust check for setup completion**
       const userInfoRefOnboarding = doc(db, "Userinfo", uid);
       const userDocSnap = await getDoc(userInfoRefOnboarding);
       
-      // Redirect if the doc doesn't exist OR if the 'status' field (from step 2) is missing.
       if (!userDocSnap.exists() || !userDocSnap.data().status) {
         navigate("/user-details");
         return;
       }
+
+      // START: ADDED SECURITY CHECK FOR TRIAL EXPIRATION
+      const userData = userDocSnap.data();
+      if (userData.status === 'trialing') {
+        const trialEndDate = userData.trialEndDate?.toDate(); // Convert Firestore Timestamp
+
+        if (trialEndDate) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0); // Normalize to start of today
+
+          if (today > trialEndDate) {
+            // Trial is expired! Block access and redirect.
+            navigate("/billing");
+            return; // IMPORTANT: Stop execution to prevent dashboard from loading.
+          }
+        }
+      }
+      // END: ADDED SECURITY CHECK FOR TRIAL EXPIRATION
       
       const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
       if (savedInternalUser) setInternalLoggedInUser(savedInternalUser);
@@ -87,10 +103,8 @@ const Dashboard = () => {
           }
         });
 
-        // This logic remains to show the welcome video popup on first login
         const userInfoDocRef = doc(db, uid, "Userinfo");
         const userInfoSnap = await getDoc(userInfoDocRef);
-        // Add a check to ensure data exists before trying to access it
         if (userInfoSnap.exists() && userInfoSnap.data().firstLoginShown === false) {
            setShowPopup(true);
            await updateDoc(userInfoDocRef, { firstLoginShown: true });
@@ -138,6 +152,7 @@ const Dashboard = () => {
     };
   }, [navigate]);
 
+  // The rest of the file (handleInternalLogin, render functions, styles) remains exactly the same.
   const handleInternalLogin = () => {
     const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === loginInput.password);
     if (!matchedUser) { alert("Invalid credentials"); return; }
@@ -266,7 +281,7 @@ const Dashboard = () => {
     </div>
   );
 };
-// Styles
+// Styles (styles object remains the same)
 const styles = {
     stickyHeader: { position: 'sticky', top: 0, zIndex: 1000, backgroundColor: '#fff' },
     wayneSystems: { fontSize: '12px', color: '#bdc3c7', margin: '2px 0 0 0', fontStyle: 'italic' },

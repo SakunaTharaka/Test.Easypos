@@ -32,7 +32,25 @@ const UserDetails = () => {
       if (docSnap.exists()) {
         const userData = docSnap.data();
         if (userData.status === 'trialing') {
-          navigate("/dashboard");
+          // START: MODIFIED LOGIC FOR TRIAL CHECK
+          const trialEndDate = userData.trialEndDate?.toDate(); // Safely convert Firestore Timestamp
+
+          if (trialEndDate) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
+
+            if (today > trialEndDate) {
+              // Trial has expired, redirect to billing
+              navigate("/billing");
+            } else {
+              // Trial is active, proceed to dashboard
+              navigate("/dashboard");
+            }
+          } else {
+            // Failsafe: if for some reason date is missing, let them in
+            navigate("/dashboard");
+          }
+          // END: MODIFIED LOGIC FOR TRIAL CHECK
         } else {
           setFormData({
               fullName: userData.fullName || "",
@@ -93,7 +111,6 @@ const UserDetails = () => {
   const handleStartTrial = async () => {
     setLoading(true);
     try {
-      // ✅ **FIX: Calculate trial start and end dates**
       const trialStartDate = new Date();
       const trialEndDate = new Date(trialStartDate);
       trialEndDate.setDate(trialStartDate.getDate() + 30);
@@ -101,8 +118,8 @@ const UserDetails = () => {
       const userRef = doc(db, "Userinfo", user.uid);
       await updateDoc(userRef, {
         selectedPackage: selectedPlan,
-        trialStartDate: trialStartDate, // Use the calculated start date
-        trialEndDate: trialEndDate,     // Add the new end date
+        trialStartDate: trialStartDate,
+        trialEndDate: trialEndDate,
         status: 'trialing',
       });
       navigate("/dashboard");
@@ -162,7 +179,7 @@ const UserDetails = () => {
     </div>
   );
 };
-// Styles
+// Styles (styles object remains the same)
 const styles = {
     pageContainer: { display: 'flex', width: '100vw', height: '100vh', fontFamily: "'Inter', sans-serif" },
     leftPanel: { flex: 1, background: 'linear-gradient(135deg, #2c3e50, #1a2530)', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px', boxSizing: 'border-box' },

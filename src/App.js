@@ -8,7 +8,8 @@ import UserDetails from "./pages/UserDetails";
 import Dashboard from "./pages/Dashboard";
 import StockOutView from "./pages/tabs/StockOutView";
 import InvoiceViewer from './pages/InvoiceViewer';
-import MasterAdmin from './pages/MasterAdmin'; // 1. Import the new component
+import MasterAdmin from './pages/MasterAdmin';
+import BillingPage from './pages/BillingPage'; // 1. Import the new billing page
 
 function App() {
   return (
@@ -21,7 +22,8 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/stockout-view/:id" element={<StockOutView />} />
         <Route path="/invoice/view/:invoiceId" element={<InvoiceViewer />} />
-        <Route path="/master-admin" element={<MasterAdmin />} /> {/* 2. Add the new route */}
+        <Route path="/master-admin" element={<MasterAdmin />} />
+        <Route path="/billing" element={<BillingPage />} /> {/* 2. Add the new route */}
       </Routes>
     </Router>
   );
