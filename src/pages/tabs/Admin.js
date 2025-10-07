@@ -8,6 +8,7 @@ import {
   collection,
   deleteDoc,
 } from "firebase/firestore";
+import { FaKey, FaTrash } from 'react-icons/fa'; // Using icons for clarity
 
 const Admin = ({ internalUsers, setInternalUsers }) => {
   const [loading, setLoading] = useState(true);
@@ -16,7 +17,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
   const [changePasswordUser, setChangePasswordUser] = useState(null);
   const [passwordInput, setPasswordInput] = useState({ newPassword: "", confirmPassword: "" });
 
-  // 💡 1. Get the currently logged-in internal user to check their role
   const getCurrentInternal = () => {
     try {
       const stored = localStorage.getItem("internalLoggedInUser");
@@ -52,6 +52,9 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
 
   const handleDeleteUser = async (user) => {
     if (user.isMaster) return alert("Cannot delete the master admin account.");
+    // This is an extra server-side check, though the UI should prevent this.
+    if (user.id === loggedInUser?.id) return alert("You cannot delete your own account.");
+    
     if (!window.confirm(`Delete user ${user.username}?`)) return;
 
     const uid = auth.currentUser.uid;
@@ -67,7 +70,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
   };
   
   const handleChangePassword = async () => {
-    // 💡 2. Updated security check: Block if the target is master AND the logged-in user is NOT master.
     if (changePasswordUser?.isMaster && !loggedInUser?.isMaster) {
       alert("Only the master admin can change their own password.");
       return;
@@ -75,6 +77,9 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
     
     if (!passwordInput.newPassword || passwordInput.newPassword !== passwordInput.confirmPassword) {
       return alert("Passwords do not match or are empty.");
+    }
+    if (passwordInput.newPassword.length < 6) {
+        return alert("Password must be at least 6 characters long.");
     }
 
     const uid = auth.currentUser.uid;
@@ -176,22 +181,23 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
                   </td>
                   <td style={styles.td}>
                     <div style={styles.actionButtons}>
-                      {/* 💡 3. Updated button logic */}
                       <button 
                         onClick={() => openChangePasswordPopup(user)} 
                         style={user.isMaster && !loggedInUser?.isMaster ? styles.changePasswordButtonDisabled : styles.changePasswordButton}
                         title={user.isMaster && !loggedInUser?.isMaster ? "Only the master admin can change this password" : "Change password"}
                         disabled={user.isMaster && !loggedInUser?.isMaster}
                       >
-                        🔒
+                        <FaKey />
                       </button>
+                      {/* ✅ FIX: The delete button is now disabled for the current logged-in user */}
                       {!user.isMaster && (
                         <button 
                           onClick={() => handleDeleteUser(user)} 
-                          style={styles.deleteButton}
-                          title="Delete user"
+                          style={user.id === loggedInUser?.id ? styles.deleteButtonDisabled : styles.deleteButton}
+                          title={user.id === loggedInUser?.id ? "You cannot delete your own account" : "Delete user"}
+                          disabled={user.id === loggedInUser?.id}
                         >
-                          🗑️
+                          <FaTrash />
                         </button>
                       )}
                     </div>
@@ -222,7 +228,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
                 <input 
                   type="password" 
                   style={styles.input} 
-                  placeholder="Enter new password" 
+                  placeholder="Enter new password (min. 6 characters)" 
                   value={passwordInput.newPassword} 
                   onChange={e => setPasswordInput({ ...passwordInput, newPassword: e.target.value })} 
                 />
@@ -285,7 +291,7 @@ const styles = {
   th: { padding: "16px", textAlign: "left", fontWeight: "600", color: "#2c3e50", borderBottom: "2px solid #ddd", fontSize: "14px" },
   td: { padding: "16px", borderBottom: "1px solid #eee", fontSize: "14px" },
   masterRow: { backgroundColor: "#f0f9ff" },
-  regularRow: { backgroundColor: "#fff" },
+  regularRow: {},
   userCell: { display: "flex", alignItems: "center", gap: "10px" },
   username: { fontWeight: "500" },
   masterBadge: { backgroundColor: "#3498db", color: "#fff", padding: "3px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: "500" },
@@ -294,6 +300,7 @@ const styles = {
   changePasswordButton: { background: "transparent", border: "none", cursor: "pointer", fontSize: "16px", color: "#3498db", padding: "5px" },
   changePasswordButtonDisabled: { background: "transparent", border: "none", fontSize: "16px", color: "#bdc3c7", padding: "5px", cursor: "not-allowed" },
   deleteButton: { background: "transparent", border: "none", cursor: "pointer", fontSize: "16px", color: "#e74c3c", padding: "5px" },
+  deleteButtonDisabled: { background: "transparent", border: "none", fontSize: "16px", color: "#bdc3c7", padding: "5px", cursor: "not-allowed" },
   modalOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000, padding: "20px" },
   modal: { backgroundColor: "#fff", borderRadius: "10px", width: "100%", maxWidth: "450px", boxShadow: "0 5px 20px rgba(0,0,0,0.15)" },
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 25px", borderBottom: "1px solid #eee" },

@@ -191,9 +191,10 @@ const MasterAdmin = () => {
     setIsExtending(true);
     try {
         const userRef = doc(db, "Userinfo", selectedUser.id);
-        const currentEndDate = selectedUser.trialEndDate.toDate();
-        const newEndDate = new Date(currentEndDate);
-        newEndDate.setDate(currentEndDate.getDate() + days);
+        
+        const today = new Date();
+        const newEndDate = new Date(today);
+        newEndDate.setDate(today.getDate() + days);
 
         await updateDoc(userRef, {
             trialEndDate: Timestamp.fromDate(newEndDate)
@@ -202,12 +203,34 @@ const MasterAdmin = () => {
         const updatedDoc = await getDoc(userRef);
         setSelectedUser({ id: updatedDoc.id, ...updatedDoc.data() });
 
-        alert(`Trial extended successfully by ${days} days!`);
+        alert(`Trial successfully extended to ${newEndDate.toLocaleDateString('en-LK')}!`);
     } catch (err) {
         alert(`Failed to extend trial: ${err.message}`);
     } finally {
         setTimeout(() => setIsExtending(false), 1000);
     }
+  };
+
+  const calculateDaysLeft = (trialEndDate) => {
+    if (!trialEndDate || !trialEndDate.toDate) {
+      return { text: '-', color: '#555' };
+    }
+    const today = new Date();
+    const endDate = trialEndDate.toDate();
+    
+    today.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    
+    const diffTime = endDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return { text: 'Expired', color: '#e74c3c' };
+    }
+    if (diffDays < 5) {
+      return { text: `${diffDays} days`, color: '#e74c3c' };
+    }
+    return { text: `${diffDays} days`, color: '#27ae60' };
   };
 
   if (!loggedIn) {
@@ -317,16 +340,27 @@ const MasterAdmin = () => {
                 <th style={styles.th}>Company Name</th>
                 <th style={styles.th}>Email</th>
                 <th style={styles.th}>Phone</th>
+                <th style={styles.th}>Days Left</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(user => (
-                <tr key={user.id} onClick={() => setSelectedUser(user)} style={styles.tr}>
-                  <td style={styles.td}>{user.companyName}</td>
-                  <td style={styles.td}>{user.email}</td>
-                  <td style={styles.td}>{user.phone}</td>
-                </tr>
-              ))}
+              {users.map(user => {
+                const daysLeftInfo = calculateDaysLeft(user.trialEndDate);
+                return (
+                  <tr 
+                    key={user.id} 
+                    onClick={() => setSelectedUser(user)} 
+                    style={selectedUser?.id === user.id ? { ...styles.tr, ...styles.trSelected } : styles.tr}
+                  >
+                    <td style={styles.td}>{user.companyName}</td>
+                    <td style={styles.td}>{user.email}</td>
+                    <td style={styles.td}>{user.phone}</td>
+                    <td style={{...styles.td, color: daysLeftInfo.color, fontWeight: 'bold' }}>
+                      {daysLeftInfo.text}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -390,6 +424,7 @@ const styles = {
     th: { textAlign: 'left', padding: '12px', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' },
     td: { padding: '12px', borderBottom: '1px solid #e5e7eb' },
     tr: { cursor: 'pointer', transition: 'background-color 0.2s' },
+    trSelected: { backgroundColor: '#eaf5ff', color: '#2563eb' },
     trialDate: { fontWeight: 'bold', fontSize: '1.1em', backgroundColor: '#fef3c7', padding: '12px', borderRadius: '6px', marginTop: '20px' },
     buttonGroup: { display: 'flex', gap: '12px', marginTop: '20px' },
     errorText: { color: '#ef4444', marginTop: '12px' },
