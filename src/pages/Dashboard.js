@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { doc, getDoc, updateDoc, collection, getDocs, setDoc, onSnapshot } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Navigate } from "react-router-dom";
+import { FaExclamationCircle } from 'react-icons/fa';
 
-// Import the new central data provider
 import { CashBookProvider } from "../context/CashBookContext";
-
-// Import all tab components
 import Admin from "./tabs/Admin";
 import Settings from "./tabs/Settings";
 import Inventory from "./tabs/Inventory";
@@ -18,16 +16,12 @@ import Customers from "./tabs/Customers";
 import PriceCat from "./tabs/PriceCat";
 import AddProduction from "./tabs/AddProduction";
 import ProductionBalance from "./tabs/ProductionBalance";
-
-// Import the new Finance sub-tab components
 import SalesIncome from "./fintabs/SalesIncome";
 import StockPayment from "./fintabs/StockPayment";
 import DaySaleBal from "./fintabs/Reconcile";
 import Expenses from "./fintabs/Expenses";
 import Summary from "./fintabs/Summary";
 import CashBook from "./fintabs/CashBook"; 
-
-// Import page components
 import DashboardView from "./DashboardView";
 import Invoice from "./Invoice";
 import SalesReport from "./SalesReport";
@@ -46,21 +40,55 @@ const Dashboard = () => {
   const [internalLoggedInUser, setInternalLoggedInUser] = useState(null);
   const [loginInput, setLoginInput] = useState({ username: "", password: "" });
   const [showProductionTabs, setShowProductionTabs] = useState(false);
-
   const [activeFinanceTab, setActiveFinanceTab] = useState("Sales Income");
+  const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
 
+  // State for Maintenance Check
+  const [maintenanceStatus, setMaintenanceStatus] = useState({
+    loading: true,
+    isActive: false,
+  });
 
+  // Effect 1: Check for maintenance mode first.
   useEffect(() => {
+    const maintRef = doc(db, 'global_settings', 'maintenance');
+    const unsubscribe = onSnapshot(maintRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setMaintenanceStatus({ loading: false, isActive: docSnap.data().isActive });
+      } else {
+        // If the document doesn't exist, assume maintenance is off
+        setMaintenanceStatus({ loading: false, isActive: false });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Effect 2: Run user authentication and data loading AFTER maintenance check.
+  useEffect(() => {
+    // Don't run this logic if we are still checking for maintenance or if it's active
+    if (maintenanceStatus.loading || maintenanceStatus.isActive) {
+      setLoading(false); // Ensure the user data loading spinner is off
+      return;
+    }
+
+    setLoading(true); // Start loading user data
     let settingsListenerUnsubscribe = null;
+    let announcementListenerUnsubscribe = null;
 
     const authUnsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (!currentUser) {
         if (settingsListenerUnsubscribe) settingsListenerUnsubscribe();
+        if (announcementListenerUnsubscribe) announcementListenerUnsubscribe();
         navigate("/");
         return;
       }
       
       const uid = currentUser.uid;
+      
+      const announcementRef = doc(db, 'global_settings', 'announcement');
+      announcementListenerUnsubscribe = onSnapshot(announcementRef, (docSnap) => {
+        setIsAnnouncementActive(docSnap.exists() && docSnap.data().isEnabled);
+      });
       
       const userInfoRefOnboarding = doc(db, "Userinfo", uid);
       const userDocSnap = await getDoc(userInfoRefOnboarding);
@@ -70,23 +98,18 @@ const Dashboard = () => {
         return;
       }
 
-      // START: ADDED SECURITY CHECK FOR TRIAL EXPIRATION
       const userData = userDocSnap.data();
       if (userData.status === 'trialing') {
-        const trialEndDate = userData.trialEndDate?.toDate(); // Convert Firestore Timestamp
-
+        const trialEndDate = userData.trialEndDate?.toDate();
         if (trialEndDate) {
           const today = new Date();
-          today.setHours(0, 0, 0, 0); // Normalize to start of today
-
+          today.setHours(0, 0, 0, 0);
           if (today > trialEndDate) {
-            // Trial is expired! Block access and redirect.
             navigate("/billing");
-            return; // IMPORTANT: Stop execution to prevent dashboard from loading.
+            return;
           }
         }
       }
-      // END: ADDED SECURITY CHECK FOR TRIAL EXPIRATION
       
       const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
       if (savedInternalUser) setInternalLoggedInUser(savedInternalUser);
@@ -147,12 +170,12 @@ const Dashboard = () => {
 
     return () => {
       authUnsubscribe();
-      if (settingsListenerUnsubscribe) { settingsListenerUnsubscribe(); }
+      if (settingsListenerUnsubscribe) settingsListenerUnsubscribe();
+      if (announcementListenerUnsubscribe) announcementListenerUnsubscribe();
       window.removeEventListener("storage", syncInternalState);
     };
-  }, [navigate]);
+  }, [navigate, maintenanceStatus]);
 
-  // The rest of the file (handleInternalLogin, render functions, styles) remains exactly the same.
   const handleInternalLogin = () => {
     const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === loginInput.password);
     if (!matchedUser) { alert("Invalid credentials"); return; }
@@ -167,7 +190,17 @@ const Dashboard = () => {
     localStorage.removeItem("internalLoggedInUser");
     if (internalUsers.length > 1) setShowLoginPopup(true);
   };
+  
+  // NEW RENDER LOGIC AT THE TOP
+  if (maintenanceStatus.loading) {
+    return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div></div>;
+  }
 
+  if (maintenanceStatus.isActive) {
+    return <Navigate to="/maintenance" replace />;
+  }
+  
+  // This is now for loading the user-specific data
   if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p style={styles.loadingText}>Loading dashboard...</p></div> );
   
   const allTabs = ["Dashboard", "Invoicing", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
@@ -176,9 +209,7 @@ const Dashboard = () => {
   const renderTabContent = () => {
     if (!auth.currentUser && !loading) { return <p style={styles.accessDenied}>Please log in to continue.</p>; }
     if ((activeTab === "Finance" || activeTab === "Admin") && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
-    
     if (activeTab === "Settings" && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
-
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
@@ -247,6 +278,14 @@ const Dashboard = () => {
               <p style={styles.wayneSystems}>Wayne Systems</p> 
             </div>
           </div>
+          
+          {isAnnouncementActive && (
+            <div style={styles.blinkingIndicator}>
+              <FaExclamationCircle style={{ marginRight: '8px' }} />
+              SYSTEM ALERT
+            </div>
+          )}
+          
           {internalUsers.length > 1 && internalLoggedInUser && (<button onClick={handleInternalLogout} style={styles.logoutBtn}><span style={styles.logoutText}>Logout</span><span style={styles.logoutIcon}>→</span></button>)}
         </div>
         <div style={styles.tabsContainer}><div style={styles.tabs}>{visibleTabs.map(tab => (<div key={tab} style={{...styles.tab, ...(activeTab === tab ? styles.activeTab : {})}} onClick={() => setActiveTab(tab)}>{tab}</div>))}</div></div>
@@ -281,7 +320,7 @@ const Dashboard = () => {
     </div>
   );
 };
-// Styles (styles object remains the same)
+
 const styles = {
     stickyHeader: { position: 'sticky', top: 0, zIndex: 1000, backgroundColor: '#fff' },
     wayneSystems: { fontSize: '12px', color: '#bdc3c7', margin: '2px 0 0 0', fontStyle: 'italic' },
@@ -294,6 +333,7 @@ const styles = {
     logoPlaceholder: { width: "52px", height: "52px", borderRadius: "12px", background: "linear-gradient(135deg, #3498db, #2c3e50)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "22px", fontWeight: "bold", marginRight: "16px" },
     topInfo: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
     companyName: { margin: "0", fontSize: "22px", fontWeight: "700" },
+    blinkingIndicator: { display: 'flex', alignItems: 'center', padding: '6px 12px', backgroundColor: '#d9534f', color: 'white', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', animation: 'blinker 1.5s linear infinite', letterSpacing: '0.5px', flexShrink: 0, margin: '0 16px' },
     logoutBtn: { padding: "10px 18px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontWeight: "600", fontSize: "14px" },
     logoutText: { fontSize: "14px" },
     logoutIcon: { fontSize: "16px" },
@@ -313,17 +353,20 @@ const styles = {
     welcomeText: { margin: "0", color: "#7f8c8d", fontSize: "16px" },
     videoWrapper: { margin: "20px 0", borderRadius: "12px", overflow: "hidden", position: "relative", paddingTop: "56.25%" },
     popupBoxiframe: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%" },
-    gotItBtn: { marginTop: "10px", padding: "14px 28px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)", color: "#fff", cursor: "pointer", fontSize: "16px", fontWeight: "600" },
+    gotItBtn: { marginTop: "10px", padding: "14px 28px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)", color: "#fff", cursor: "pointer", fontSize: "16px", fontWeight: "bold" },
     loginPopupBox: { width: "100%", maxWidth: "420px", padding: "32px", background: "#fff", borderRadius: "16px", textAlign: "center", display: "flex", flexDirection: "column", gap: "20px", boxSizing: "border-box" },
     loginTitle: { margin: "0", color: "#2c3e50", fontSize: "24px", fontWeight: "700" },
     loginInput: { padding: "14px 16px", border: "1px solid #e0e0e0", borderRadius: "8px", fontSize: "15px", outline: "none" },
     loginButtons: { display: "flex", flexDirection: "column", gap: "12px", marginTop: "8px" },
-    loginBtn: { padding: "14px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #3498db 0%, #2980b9 100%)", color: "#fff", cursor: "pointer", fontSize: "15px", fontWeight: "600" },
+    loginBtn: { padding: "14px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #3498db, #2980b9 100%)", color: "#fff", cursor: "pointer", fontSize: "15px", fontWeight: "600" },
     systemLogoutBtn: { padding: "14px", border: "1px solid #e74c3c", borderRadius: "8px", background: "transparent", color: "#e74c3c", cursor: "pointer", fontSize: "15px", fontWeight: "600" },
 };
 
 const styleSheet = document.createElement("style");
-styleSheet.innerText = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+styleSheet.innerText = `
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  @keyframes blinker { 50% { opacity: 0.6; } }
+`;
 document.head.appendChild(styleSheet);
 
 export default Dashboard;

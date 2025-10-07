@@ -8,6 +8,11 @@ const Home = () => {
   const [hoveredButton, setHoveredButton] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
+  // State for hidden admin button
+  const [keySequence, setKeySequence] = useState('');
+  const [isAdminButtonVisible, setIsAdminButtonVisible] = useState(false);
+  const SECRET_CODE = 'admin';
+
   useEffect(() => {
     // Trigger animations after component mounts
     setTimeout(() => setIsLoaded(true), 100);
@@ -19,29 +24,46 @@ const Home = () => {
         y: (e.clientY - window.innerHeight / 2) / 50,
       });
     };
+    
+    // Keydown listener for the secret shortcut
+    const handleKeyDown = (e) => {
+      const newSequence = keySequence + e.key;
+      // Keep the sequence from getting too long and check if it ends with the code
+      const trimmedSequence = newSequence.slice(-SECRET_CODE.length);
+      setKeySequence(trimmedSequence);
+
+      if (trimmedSequence === SECRET_CODE) {
+        setIsAdminButtonVisible(true);
+      }
+    };
 
     window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [keySequence]);
 
   const openLogin = () => {
     if (auth.currentUser) {
-      // If already logged in, redirect to dashboard
       navigate("/dashboard");
     } else {
-      // Open login page in a new tab
       window.open("/login", "_blank");
     }
   };
 
   const openSignup = () => {
     if (auth.currentUser) {
-      // If already logged in, redirect to dashboard
       navigate("/dashboard");
     } else {
-      // Open signup page in a new tab
       window.open("/signup", "_blank");
     }
+  };
+
+  const openMasterAdmin = () => {
+    navigate("/master-admin");
   };
 
   return (
@@ -224,6 +246,11 @@ const Home = () => {
           </div>
           <div style={styles.footerBottom}>
             <p>© 2025 EasyPOS.lk | All Rights Reserved</p>
+            {isAdminButtonVisible && (
+              <button onClick={openMasterAdmin} style={styles.adminButton}>
+                Master Admin Panel
+              </button>
+            )}
             <p>Contact: <a href="mailto:support@easypos.lk" style={styles.footerLink}>support@easypos.lk</a></p>
           </div>
         </div>
@@ -327,17 +354,6 @@ const styles = {
     height: '32px',
     background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
     borderRadius: '8px',
-    position: 'relative',
-    '::after': {
-      content: '""',
-      position: 'absolute',
-      top: '6px',
-      left: '6px',
-      right: '6px',
-      bottom: '6px',
-      background: 'white',
-      borderRadius: '4px',
-    }
   },
 
   headerTitle: {
@@ -356,25 +372,8 @@ const styles = {
     color: '#6b7280',
     fontWeight: '500',
     fontSize: '16px',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-    cursor: 'pointer',
-    position: 'relative',
-    '::after': {
-      content: '""',
-      position: 'absolute',
-      bottom: '-4px',
-      left: 0,
-      width: '0',
-      height: '2px',
-      background: '#6366f1',
-      transition: 'width 0.3s ease',
-    },
-    ':hover': {
-      color: '#6366f1',
-      '::after': {
-        width: '100%',
-      }
-    }
+    textDecoration: 'none',
+    transition: 'color 0.3s ease',
   },
 
   // Main Container
@@ -509,7 +508,6 @@ const styles = {
     color: '#ffffff',
   },
 
-  // Features Preview
   featuresPreview: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -529,11 +527,6 @@ const styles = {
     transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
     cursor: 'pointer',
     position: 'relative',
-    ':hover': {
-      transform: 'translateY(-10px) scale(1.02)',
-      boxShadow: '0 25px 50px rgba(0, 0, 0, 0.1)',
-      background: 'rgba(255, 255, 255, 0.9)',
-    }
   },
 
   featureIconContainer: {
@@ -581,7 +574,6 @@ const styles = {
     margin: 0,
   },
 
-  // Footer
   footer: {
     background: 'rgba(249, 250, 251, 0.8)',
     backdropFilter: 'blur(20px)',
@@ -631,19 +623,28 @@ const styles = {
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: '20px',
+    color: '#6b7280'
+  },
+  
+  adminButton: {
+    padding: '8px 16px',
+    fontSize: '14px',
+    border: '1px solid #d1d5db',
+    borderRadius: '8px',
+    backgroundColor: '#f9fafb',
+    color: '#4b5563',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
   },
 
   footerLink: {
     color: '#6366f1',
     fontWeight: '500',
+    textDecoration: 'none',
     transition: 'color 0.3s ease',
-    ':hover': {
-      color: '#8b5cf6',
-    }
   },
 };
 
-// Add CSS animations
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @keyframes morphFloat {
@@ -676,54 +677,6 @@ styleSheet.innerText = `
   @keyframes underlineExpand {
     0% { width: 0; }
     100% { width: 100px; }
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
-  }
-
-  @media (max-width: 768px) {
-    .hero-title { font-size: 2.5rem !important; }
-    .hero-subtitle { font-size: 1.1rem !important; }
-    .button-group { flex-direction: column; align-items: center; }
-    .features-preview { grid-template-columns: 1fr !important; }
-    .header-content { padding: 0 20px !important; }
-    .footer-bottom { flex-direction: column; text-align: center; }
-    .nav { flex-wrap: wrap; gap: 20px !important; }
-  }
-
-  @media (max-width: 480px) {
-    .hero-title { font-size: 2rem !important; }
-    .features-preview { padding: 0 10px !important; }
-  }
-
-  /* Hover effects */
-  .feature-card:hover .feature-icon {
-    animation: pulse 1s ease-in-out infinite;
-  }
-
-  /* Smooth scrolling */
-  html {
-    scroll-behavior: smooth;
-  }
-
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: #f1f1f1;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    border-radius: 4px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(135deg, #5855eb, #7c3aed);
   }
 `;
 document.head.appendChild(styleSheet);
