@@ -15,7 +15,6 @@ import {
 import { Line, Doughnut } from 'react-chartjs-2';
 import { CashBookContext } from "../../context/CashBookContext";
 
-// Register the components required for Chart.js
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, ArcElement
 );
@@ -24,7 +23,6 @@ const Summary = () => {
   const { cashBooks, cashBookBalances, loading: balancesLoading } = useContext(CashBookContext);
   const [loading, setLoading] = useState(true);
   
-  // Set default date range to the last 30 days
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
@@ -46,37 +44,62 @@ const Summary = () => {
       const endOfDay = new Date(to); endOfDay.setHours(23, 59, 59, 999);
 
       // --- Fetch all required data concurrently ---
+      const customersRef = collection(db, uid, "customers", "customer_list");
+      const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
+
       const invoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(startOfDay)), where("createdAt", "<=", Timestamp.fromDate(endOfDay)));
       const expensesQuery = query(collection(db, uid, "user_data", "expenses"), where("createdAt", ">=", startOfDay), where("createdAt", "<=", endOfDay));
       const itemsQuery = query(collection(db, uid, "items", "item_list"));
       
-      const [invoicesSnap, expensesSnap, itemsSnap] = await Promise.all([
+      const [creditCustomersSnap, invoicesSnap, expensesSnap, itemsSnap] = await Promise.all([
+        getDocs(creditCustomersQuery),
         getDocs(invoicesQuery),
         getDocs(expensesQuery),
         getDocs(itemsQuery),
       ]);
 
-      const allInvoices = invoicesSnap.docs.map(d => d.data());
-      const allExpenses = expensesSnap.docs.map(d => d.data());
-      const itemCostMap = new Map(itemsSnap.docs.map(d => [d.data().itemId, d.data().costPrice || 0]));
+      const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
+      
+      // Filter invoices to exclude credit sales but include credit repayments
+      const validInvoices = invoicesSnap.docs
+        .map(d => d.data())
+        .filter(inv => {
+            const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
+            const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
+            return isCreditRepayment || !isFromCreditCustomer;
+        });
 
-      // --- Process KPIs ---
-      const totalRevenue = allInvoices.reduce((sum, inv) => sum + inv.total, 0);
+      const allExpenses = expensesSnap.docs.map(d => d.data());
+      const itemCostMap = new Map();
+      itemsSnap.docs.forEach(d => {
+        const itemData = d.data();
+        if (itemData.pid) { // Assuming PID is the unique identifier for items
+            itemCostMap.set(itemData.pid, itemData.costPrice || 0);
+        }
+      });
+      
+      // --- Process KPIs based on valid invoices ---
+      const totalRevenue = validInvoices.reduce((sum, inv) => sum + inv.total, 0);
       const totalExpenses = allExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-      const totalCOGS = allInvoices.reduce((sum, inv) => {
+      
+      const totalCOGS = validInvoices.reduce((sum, inv) => {
+        // Exclude COGS for credit repayments as they are not sales of goods
+        if (inv.paymentMethod === 'Credit-Repayment') return sum;
+        
         const invoiceCOGS = inv.items.reduce((itemSum, item) => {
-          const cost = itemCostMap.get(item.itemId) || 0;
+          const cost = itemCostMap.get(item.itemId) || 0; // Assuming itemId links to PID
           return itemSum + (cost * item.quantity);
         }, 0);
         return sum + invoiceCOGS;
       }, 0);
+
       const grossProfit = totalRevenue - totalCOGS;
       const netIncome = grossProfit - totalExpenses;
       setKpiData({ totalRevenue, grossProfit, totalExpenses, netIncome });
 
       // --- Process Sales Chart Data ---
       const dailySales = {};
-      allInvoices.forEach(inv => {
+      validInvoices.forEach(inv => {
         const date = inv.createdAt.toDate().toISOString().split('T')[0];
         if (!dailySales[date]) dailySales[date] = 0;
         dailySales[date] += inv.total;
@@ -131,7 +154,7 @@ const Summary = () => {
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>📑 Finance Summary</h2>
-      <p style={styles.subHeader}>A complete financial overview of your business for the selected period.</p>
+      <p style={styles.subHeader}>A financial overview of cash/card sales and credit repayments.</p>
 
       <div style={styles.section}>
         <div style={styles.controlsContainer}>
@@ -146,7 +169,6 @@ const Summary = () => {
         </div>
       </div>
       
-      {/* KPI Section */}
       <div style={styles.kpiContainer}>
         <KpiCard title="Total Revenue" value={kpiData.totalRevenue} isLoading={loading} />
         <KpiCard title="Gross Profit" value={kpiData.grossProfit} isLoading={loading} />
@@ -154,7 +176,6 @@ const Summary = () => {
         <KpiCard title="Net Income" value={kpiData.netIncome} isLoading={loading} />
       </div>
 
-      {/* Graphs Section */}
       <div style={styles.graphsContainer}>
         <div style={styles.section}>
             <h3 style={styles.chartTitle}>Sales Trend</h3>
@@ -168,7 +189,6 @@ const Summary = () => {
         </div>
       </div>
       
-      {/* Cash Books Section */}
       <div style={styles.section}>
           <h3 style={styles.chartTitle}>Cash Book Closing Balances</h3>
           <div style={styles.balancesContainer}>
@@ -180,7 +200,6 @@ const Summary = () => {
               )) : <p>No cash books found.</p>}
           </div>
       </div>
-
     </div>
   );
 };
@@ -208,3 +227,4 @@ const styles = {
 };
 
 export default Summary;
+

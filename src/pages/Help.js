@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaPhoneAlt, FaEnvelope, FaWhatsapp, FaYoutube } from 'react-icons/fa';
+import { FaPhoneAlt, FaEnvelope, FaWhatsapp } from 'react-icons/fa';
 
 const Help = () => {
   const contactNumber = '078 722 3407';
@@ -54,33 +54,54 @@ const Help = () => {
         </div>
       </div>
 
-      {/* Terms & Conditions Section */}
+      {/* ✅ **UPDATED: Terms & Conditions Section** */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Terms and Conditions</h3>
         <div style={styles.termsContainer}>
-            <p>Last updated: October 05, 2025</p>
-            <p>Please read these terms and conditions carefully before using Our Service.</p>
-
+            <p><strong>Last Updated: October 05, 2025</strong></p>
+            <p>Please read these Terms and Conditions (“Terms”, “Terms and Conditions”) carefully before using our web application (the “Service”). These Terms constitute a legally binding agreement between you (“User”, “you”, or “your”) and Wayne Software Company (“Company”, “we”, “our”, or “us”).</p>
+            <p>By accessing or using the Service, you agree to be bound by these Terms. If you do not agree with any part of these Terms, you may not access or use the Service.</p>
+            
             <h4 style={styles.termsHeading}>1. Acceptance of Terms</h4>
-            <p>By accessing and using this web application (the "Service"), you accept and agree to be bound by the terms and provision of this agreement. This Service is the exclusive property of <strong>Wayne Software Company</strong>.</p>
-
+            <p>By creating an account, subscribing, or otherwise using the Service, you acknowledge that you have read, understood, and agree to be bound by these Terms, along with our Privacy Policy, which is incorporated herein by reference.</p>
+            
             <h4 style={styles.termsHeading}>2. Subscription and Fees</h4>
-            <p>Access to the Service is provided on a subscription basis. Wayne Software Company reserves the right to modify subscription fees, surcharges, or institute new charges at any time. We will provide you with reasonable prior notice of any such pricing changes, typically no less than 30 days, via email or an in-app notification.</p>
-
+            <h5>Subscription Basis</h5>
+            <p>Access to the Service is provided on a subscription basis, which may include but is not limited to monthly, annual, or one-time paid plans. Subscription fees and billing cycles will be made available to you at the time of subscription.</p>
+            <h5>Billing and Payment</h5>
+            <p>You authorize us or our third-party payment processor to automatically charge your chosen payment method at the beginning of each billing cycle. If a payment attempt is unsuccessful, we may suspend or terminate your access to the Service until all outstanding amounts are paid.</p>
+            <h5>Price Changes</h5>
+            <p>We reserve the right to adjust subscription fees, surcharges, or institute new charges at our discretion. We will provide you with at least thirty (30) days’ advance notice of any pricing changes via email or in-app notification. Continued use of the Service after the effective date of the change constitutes acceptance of the new fees.</p>
+            <h5>Refund Policy</h5>
+            <p>All paid subscriptions are strictly non-refundable. Cancellation of a subscription will prevent future billing, but no partial refunds or credits will be issued for unused periods. Certain exceptions may apply where required by applicable law.</p>
+            
             <h4 style={styles.termsHeading}>3. Intellectual Property</h4>
-            <p>The Service and its original content, features, and functionality are and will remain the exclusive property of Wayne Software Company and its licensors. The Service is protected by copyright, trademark, and other laws of both Sri Lanka and foreign countries. Our trademarks may not be used in connection with any product or service without the prior written consent of Wayne Software Company.</p>
+            <h5>Ownership</h5>
+            <p>The Service, including all content, features, source code, design, graphics, logos, trademarks, and other intellectual property, remains the exclusive property of Wayne Software Company and its licensors.</p>
+            <h5>Restrictions</h5>
+            <p>You may not copy, modify, reproduce, distribute, sell, license, or otherwise exploit any part of the Service without our prior written consent. Unauthorized use of our trademarks or branding in connection with any product or service is strictly prohibited.</p>
             
-            <h4 style={styles.termsHeading}>4. Limitation of Liability</h4>
-            <p>In no event shall Wayne Software Company, nor its directors, employees, partners, agents, suppliers, or affiliates, be liable for any indirect, incidental, special, consequential or punitive damages, including without limitation, loss of profits, data, use, goodwill, or other intangible losses, resulting from your access to or use of or inability to access or use the Service. You are solely responsible for backing up your data.</p>
-
-            <h4 style={styles.termsHeading}>5. Termination</h4>
-            <p>We may terminate or suspend your access to our Service immediately, without prior notice or liability, for any reason whatsoever, including without limitation if you breach the Terms. Upon termination, your right to use the Service will immediately cease.</p>
-
-            <h4 style={styles.termsHeading}>6. Governing Law</h4>
-            <p>These Terms shall be governed and construed in accordance with the laws of Sri Lanka, without regard to its conflict of law provisions.</p>
+            <h4 style={styles.termsHeading}>4. User Responsibilities</h4>
+            <p>You are responsible for maintaining the confidentiality of your account credentials. You agree not to use the Service for any unlawful, fraudulent, or unauthorized purposes. You must comply with all applicable laws and regulations when using the Service. You are solely responsible for backing up any data you upload or generate through the Service.</p>
             
-            <h4 style={styles.termsHeading}>7. Changes to Terms</h4>
-            <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. We will try to provide at least 30 days' notice prior to any new terms taking effect. What constitutes a material change will be determined at our sole discretion.</p>
+            <h4 style={styles.termsHeading}>5. Limitation of Liability</h4>
+            <p>To the maximum extent permitted by law, Wayne Software Company, its directors, employees, partners, agents, suppliers, and affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages. This includes, without limitation, damages for:</p>
+            <ul>
+                <li>Loss of profits, revenue, or anticipated savings,</li>
+                <li>Loss of data, goodwill, or reputation,</li>
+                <li>Business interruption, or</li>
+                <li>Any other intangible loss.</li>
+            </ul>
+            <p>Our total aggregate liability for any claims relating to the Service shall not exceed the amount paid by you to us in the twelve (12) months preceding the claim.</p>
+            
+            <h4 style={styles.termsHeading}>6. Termination</h4>
+            <p>We may suspend or terminate your account and access to the Service immediately, without prior notice, if you breach these Terms or engage in activities harmful to the Service or other users. Upon termination, your right to use the Service will immediately cease. Sections relating to Intellectual Property, Limitation of Liability, and Governing Law shall survive termination.</p>
+            
+            <h4 style={styles.termsHeading}>7. Governing Law</h4>
+            <p>These Terms shall be governed by and construed in accordance with the laws of Sri Lanka, without regard to its conflict of law provisions. Any disputes arising from or relating to these Terms shall be subject to the exclusive jurisdiction of the courts of Sri Lanka.</p>
+            
+            <h4 style={styles.termsHeading}>8. Changes to Terms</h4>
+            <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. If a revision is material, we will provide at least thirty (30) days’ notice before the new Terms take effect. What constitutes a material change will be determined solely by us. Continued use of the Service after such changes constitutes acceptance of the updated Terms.</p>
         </div>
       </div>
     </div>

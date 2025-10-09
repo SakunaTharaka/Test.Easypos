@@ -1,4 +1,3 @@
-// src/pages/tabs/Customers.js
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
 import {
@@ -12,15 +11,23 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { AiOutlinePlus, AiOutlineDelete, AiOutlineEdit } from "react-icons/ai";
+import { FaUserTag } from "react-icons/fa";
 
-// 💡 REMOVED `currentBusinessId` prop
 const Customers = ({ internalUser }) => {
   const [customers, setCustomers] = useState([]);
   const [priceCategories, setPriceCategories] = useState([]);
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
+  
+  const [form, setForm] = useState({
+    name: "",
+    priceCategoryId: "",
+    priceCategoryName: "",
+    isCreditCustomer: false,
+    overdueDays: 30,
+  });
+  
   const [editingCustomer, setEditingCustomer] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
@@ -35,13 +42,11 @@ const Customers = ({ internalUser }) => {
   const isAdmin = currentUser?.isAdmin === true || currentUser?.isAdmin === "1";
   const username = currentUser?.username || "Admin";
 
-  // 💡 This effect now fetches data from within the user's UID collection.
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
 
-    // --- Fetch customers from the new location ---
     const fetchCustomers = async () => {
       try {
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -52,7 +57,6 @@ const Customers = ({ internalUser }) => {
       }
     };
 
-    // --- Fetch price categories from the new location ---
     const fetchPriceCategories = async () => {
       try {
         const catColRef = collection(db, uid, "price_categories", "categories");
@@ -67,58 +71,80 @@ const Customers = ({ internalUser }) => {
     fetchPriceCategories();
   }, []);
 
-  // --- Save customer ---
-  const handleSaveCustomer = async () => {
-    if (!newCustomerName.trim() || !selectedCategory) return alert("Customer Name and Price Category are required.");
-    const uid = auth.currentUser.uid;
-
-    try {
-      // Logic for editing an existing customer
-      if (editingCustomer) {
-        const customerDocRef = doc(db, uid, "customers", "customer_list", editingCustomer.id);
-        await updateDoc(customerDocRef, {
-          name: newCustomerName.trim(),
-          priceCategoryId: selectedCategory.id,
-          priceCategoryName: selectedCategory.name,
-          editedBy: username,
-          editedAt: serverTimestamp(),
-        });
-
-        setCustomers((prev) =>
-          prev.map((c) =>
-            c.id === editingCustomer.id
-              ? { ...c, name: newCustomerName.trim(), priceCategoryId: selectedCategory.id, priceCategoryName: selectedCategory.name }
-              : c
-          )
-        );
-      } else {
-        // Logic for adding a new customer
-        const customersColRef = collection(db, uid, "customers", "customer_list");
-        const docRef = await addDoc(customersColRef, {
-          name: newCustomerName.trim(),
-          priceCategoryId: selectedCategory.id,
-          priceCategoryName: selectedCategory.name,
-          createdBy: username,
-          editedBy: username,
-          createdAt: serverTimestamp(),
-        });
-        setCustomers((prev) => [
-          ...prev,
-          { id: docRef.id, name: newCustomerName.trim(), priceCategoryId: selectedCategory.id, priceCategoryName: selectedCategory.name, createdBy: username },
-        ]);
-      }
-
-      // Reset form state
-      setShowCustomerPopup(false);
-      setNewCustomerName("");
-      setSelectedCategory("");
-      setEditingCustomer(null);
-    } catch (err) {
-      alert("Error saving customer: " + err.message);
+  const resetForm = () => {
+    setForm({
+      name: "",
+      priceCategoryId: "",
+      priceCategoryName: "",
+      isCreditCustomer: false,
+      overdueDays: 30,
+    });
+    setEditingCustomer(null);
+  };
+  
+  const handleFormChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    if (type === 'checkbox') {
+        setForm(prev => ({ ...prev, [name]: checked }));
+    } else if (name === 'overdueDays') {
+        const numericValue = value.replace(/[^0-9]/g, '');
+        setForm(prev => ({ ...prev, [name]: numericValue }));
+    } else {
+        setForm(prev => ({ ...prev, [name]: value }));
     }
   };
 
-  // --- Delete customer ---
+  const handleCategoryChange = (e) => {
+    const selectedCat = priceCategories.find((p) => p.id === e.target.value);
+    setForm(prev => ({
+        ...prev,
+        priceCategoryId: selectedCat ? selectedCat.id : "",
+        priceCategoryName: selectedCat ? selectedCat.name : "",
+    }));
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!form.name.trim() || !form.priceCategoryId) {
+      return alert("Customer Name and Price Category are required.");
+    }
+    
+    setIsSaving(true);
+    const uid = auth.currentUser.uid;
+
+    try {
+      const dataToSave = {
+        name: form.name.trim(),
+        priceCategoryId: form.priceCategoryId,
+        priceCategoryName: form.priceCategoryName,
+        isCreditCustomer: form.isCreditCustomer,
+        overdueDays: form.isCreditCustomer ? Number(form.overdueDays) || 0 : 0,
+        editedBy: username,
+        editedAt: serverTimestamp(),
+      };
+
+      if (editingCustomer) {
+        const customerDocRef = doc(db, uid, "customers", "customer_list", editingCustomer.id);
+        await updateDoc(customerDocRef, dataToSave);
+        setCustomers((prev) => prev.map((c) => c.id === editingCustomer.id ? { ...c, ...dataToSave } : c));
+      } else {
+        const customersColRef = collection(db, uid, "customers", "customer_list");
+        const docRef = await addDoc(customersColRef, {
+          ...dataToSave,
+          createdBy: username,
+          createdAt: serverTimestamp(),
+        });
+        setCustomers((prev) => [...prev, { id: docRef.id, ...dataToSave, createdBy: username, createdAt: new Date() }]);
+      }
+
+      setShowCustomerPopup(false);
+      resetForm();
+    } catch (err) {
+      alert("Error saving customer: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDeleteCustomer = async (id) => {
     if (!window.confirm("Are you sure you want to delete this customer?")) return;
     const uid = auth.currentUser.uid;
@@ -139,9 +165,7 @@ const Customers = ({ internalUser }) => {
         {isAdmin && (
           <button
             onClick={() => {
-              setEditingCustomer(null);
-              setNewCustomerName('');
-              setSelectedCategory('');
+              resetForm();
               setShowCustomerPopup(true);
             }}
             style={{ padding: "8px 16px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -156,6 +180,7 @@ const Customers = ({ internalUser }) => {
           <tr style={{ background: "#f5f5f5" }}>
             <th style={{ padding: 12, textAlign: 'left' }}>Customer Name</th>
             <th style={{ padding: 12, textAlign: 'left' }}>Assigned Price Category</th>
+            <th style={{ padding: 12, textAlign: 'left' }}>Overdue Limit</th>
             <th style={{ padding: 12, textAlign: 'left' }}>Last Edited By</th>
             <th style={{ padding: 12, textAlign: 'left' }}>Actions</th>
           </tr>
@@ -163,8 +188,14 @@ const Customers = ({ internalUser }) => {
         <tbody>
           {customers.map((c) => (
             <tr key={c.id} style={{ borderBottom: "1px solid #eee" }}>
-              <td style={{ padding: 12, fontWeight: 500 }}>{c.name}</td>
+              <td style={{ padding: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {c.name}
+                {c.isCreditCustomer && <FaUserTag color="#e67e22" title={`Credit Customer (Overdue in ${c.overdueDays} days)`} />}
+              </td>
               <td style={{ padding: 12 }}>{c.priceCategoryName}</td>
+              <td style={{ padding: 12 }}>
+                {c.isCreditCustomer ? `${c.overdueDays} days` : 'N/A'}
+              </td>
               <td style={{ padding: 12 }}>{c.editedBy}</td>
               <td style={{ padding: 12 }}>
                 {isAdmin && (
@@ -174,9 +205,13 @@ const Customers = ({ internalUser }) => {
                       title="Edit Customer"
                       onClick={() => {
                         setEditingCustomer(c);
-                        setNewCustomerName(c.name);
-                        const selectedCat = priceCategories.find((p) => p.id === c.priceCategoryId);
-                        setSelectedCategory(selectedCat || "");
+                        setForm({
+                            name: c.name,
+                            priceCategoryId: c.priceCategoryId,
+                            priceCategoryName: c.priceCategoryName,
+                            isCreditCustomer: c.isCreditCustomer || false,
+                            overdueDays: c.overdueDays || 30,
+                        });
                         setShowCustomerPopup(true);
                       }}
                     />
@@ -192,7 +227,7 @@ const Customers = ({ internalUser }) => {
           ))}
           {customers.length === 0 && (
             <tr>
-              <td colSpan={4} style={{ textAlign: "center", padding: 20, color: "#777" }}>
+              <td colSpan={5} style={{ textAlign: "center", padding: 20, color: "#777" }}>
                 No customers have been added yet.
               </td>
             </tr>
@@ -200,7 +235,6 @@ const Customers = ({ internalUser }) => {
         </tbody>
       </table>
 
-      {/* Customer Popup */}
       {showCustomerPopup && (
         <div style={popupStyle}>
           <div style={popupInnerStyle}>
@@ -208,39 +242,75 @@ const Customers = ({ internalUser }) => {
 
             <input
               type="text"
+              name="name"
               placeholder="Customer Full Name"
-              value={newCustomerName}
-              onChange={(e) => setNewCustomerName(e.target.value)}
+              value={form.name}
+              onChange={handleFormChange}
               style={{ width: "100%", padding: 10, marginBottom: 12, boxSizing: 'border-box' }}
             />
 
             <select
-              value={selectedCategory?.id || ""}
-              onChange={(e) =>
-                setSelectedCategory(priceCategories.find((p) => p.id === e.target.value))
-              }
-              style={{ width: "100%", padding: 10, marginBottom: 20, boxSizing: 'border-box' }}
+              name="priceCategoryId"
+              value={form.priceCategoryId}
+              onChange={handleCategoryChange}
+              style={{ width: "100%", padding: 10, marginBottom: 12, boxSizing: 'border-box' }}
             >
               <option value="">Select Price Category</option>
               {priceCategories.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
+            
+            {/* ✅ **FIX: Checkbox is now hidden during edit mode** */}
+            {!editingCustomer && (
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', gap: '10px' }}>
+                  <input 
+                      type="checkbox"
+                      id="isCreditCustomer"
+                      name="isCreditCustomer"
+                      checked={form.isCreditCustomer}
+                      onChange={handleFormChange}
+                      style={{width: '18px', height: '18px'}}
+                  />
+                  <label htmlFor="isCreditCustomer" style={{fontWeight: 500}}>Credit Customer</label>
+              </div>
+            )}
+            
+            {form.isCreditCustomer && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
+                    <label htmlFor="overdueDays">Overdue in</label>
+                    <input
+                        type="text"
+                        id="overdueDays"
+                        name="overdueDays"
+                        value={form.overdueDays}
+                        onChange={handleFormChange}
+                        style={{ width: '60px', padding: '8px', textAlign: 'center' }}
+                    />
+                    <label htmlFor="overdueDays">days</label>
+                </div>
+            )}
+
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
-                onClick={() => { setShowCustomerPopup(false); setEditingCustomer(null); }}
+                onClick={() => { setShowCustomerPopup(false); resetForm(); }}
                 style={popupBtnStyle}
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveCustomer}
-                style={{ ...popupBtnStyle, background: "#2ecc71", color: "#fff" }}
+                disabled={isSaving}
+                style={{ 
+                    ...popupBtnStyle, 
+                    background: "#2ecc71", 
+                    color: "#fff",
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    opacity: isSaving ? 0.7 : 1,
+                }}
               >
-                Save Customer
+                {isSaving ? 'Saving...' : 'Save Customer'}
               </button>
             </div>
           </div>
@@ -266,3 +336,4 @@ const popupInnerStyle = { background: "#fff", padding: 24, borderRadius: 8, widt
 const popupBtnStyle = { padding: "10px 16px", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 500 };
 
 export default Customers;
+

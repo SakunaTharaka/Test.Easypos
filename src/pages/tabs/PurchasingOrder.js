@@ -5,20 +5,22 @@ import {
   addDoc,
   query,
   getDocs,
+  getDoc,
   serverTimestamp,
   doc,
   runTransaction,
   deleteDoc
 } from "firebase/firestore";
-import { AiOutlinePlus, AiOutlineSearch, AiOutlineFilter, AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
+import { AiOutlinePlus, AiOutlineSearch, AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
-import ReactToPrint from "react-to-print";
 
 const PurchasingOrder = ({ internalUser }) => {
   const [orders, setOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [itemsForDropdown, setItemsForDropdown] = useState([]);
+  // ✅ **NEW: State to hold company info for the print header**
+  const [companyInfo, setCompanyInfo] = useState(null);
   
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [form, setForm] = useState({
@@ -61,6 +63,7 @@ const PurchasingOrder = ({ internalUser }) => {
     const fetchData = async () => {
       setLoading(true);
       try {
+        // Fetch Purchase Orders
         const poColRef = collection(db, uid, "purchase_orders", "po_list");
         const poSnap = await getDocs(query(poColRef));
         const poData = poSnap.docs
@@ -68,6 +71,7 @@ const PurchasingOrder = ({ internalUser }) => {
           .sort((a, b) => (b.poNumber?.localeCompare(a.poNumber, undefined, { numeric: true })) || 0);
         setOrders(poData);
 
+        // Fetch Items
         const itemsColRef = collection(db, uid, "items", "item_list");
         const itemsSnap = await getDocs(query(itemsColRef));
         const itemsData = itemsSnap.docs.map(d => ({
@@ -76,6 +80,13 @@ const PurchasingOrder = ({ internalUser }) => {
           ...d.data()
         }));
         setItemsForDropdown(itemsData);
+
+        // ✅ **NEW: Fetch Company Info from settings**
+        const settingsRef = doc(db, uid, "settings");
+        const settingsSnap = await getDoc(settingsRef);
+        if (settingsSnap.exists()) {
+          setCompanyInfo(settingsSnap.data());
+        }
 
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -133,6 +144,20 @@ const PurchasingOrder = ({ internalUser }) => {
     const updatedLineItems = form.lineItems.filter((_, i) => i !== index);
     setForm({ ...form, lineItems: updatedLineItems });
   };
+  
+  // ✅ **NEW: Handler with phone number filtering**
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'supplierContact') {
+        const numericValue = value.replace(/[^0-9]/g, '');
+        if (numericValue.length <= 10) {
+            setForm({ ...form, [name]: numericValue });
+        }
+    } else {
+        setForm({ ...form, [name]: value });
+    }
+  };
+
 
   useEffect(() => {
     const subtotal = form.lineItems.reduce((acc, item) => acc + item.total, 0);
@@ -146,6 +171,14 @@ const PurchasingOrder = ({ internalUser }) => {
     if (!form.supplierName || form.lineItems.some(item => !item.itemId || !item.quantity)) {
         return alert("Please fill in Supplier Name and ensure all line items are complete.");
     }
+    // ✅ **NEW: Phone number validation on save (optional field)**
+    if (form.supplierContact) {
+        const phoneRegex = /^0\d{9}$/;
+        if (!phoneRegex.test(form.supplierContact)) {
+            return alert("Please enter a valid 10-digit phone number starting with 0 for the supplier contact.");
+        }
+    }
+
     const user = auth.currentUser;
     if (!user) return alert("You are not logged in.");
     const uid = user.uid;
@@ -170,20 +203,18 @@ const PurchasingOrder = ({ internalUser }) => {
 
   const handleDeleteOrder = async (orderId) => {
     if (!window.confirm("Are you sure you want to permanently delete this Purchase Order?")) return;
-    
     const user = auth.currentUser;
     if (!user) return alert("You are not logged in.");
 
     try {
         const orderDocRef = doc(db, user.uid, "purchase_orders", "po_list", orderId);
         await deleteDoc(orderDocRef);
-        setOrders(prev => prev.filter(order => order.id !== orderId)); // Update UI in real-time
+        setOrders(prev => prev.filter(order => order.id !== orderId));
         alert("Purchase Order deleted successfully.");
     } catch(error) {
         alert("Error deleting Purchase Order: " + error.message);
     }
   };
-
 
   useEffect(() => {
     let filtered = orders.filter(order => {
@@ -247,16 +278,16 @@ const PurchasingOrder = ({ internalUser }) => {
         </div>
       </div>
 
-      {/* Create PO Modal */}
       {showCreateModal && (
         <div style={styles.modalOverlay}>
             <div style={{...styles.modal, maxWidth: '900px'}}>
                 <div style={styles.modalHeader}><h3>Create Purchase Order</h3><button style={styles.closeButton} onClick={() => setShowCreateModal(false)}>&times;</button></div>
                 <div style={styles.formGrid}>
-                    <div style={styles.formGroup}><label>PO Date</label><input type="date" value={form.poDate} onChange={e => setForm({...form, poDate: e.target.value})} style={styles.input}/></div>
-                    <div style={styles.formGroup}><label>Supplier Name *</label><input value={form.supplierName} onChange={e => setForm({...form, supplierName: e.target.value})} style={styles.input}/></div>
-                    <div style={styles.formGroup}><label>Supplier Address</label><input value={form.supplierAddress} onChange={e => setForm({...form, supplierAddress: e.target.value})} style={styles.input}/></div>
-                    <div style={styles.formGroup}><label>Supplier Contact</label><input value={form.supplierContact} onChange={e => setForm({...form, supplierContact: e.target.value})} style={styles.input}/></div>
+                    <div style={styles.formGroup}><label>PO Date</label><input type="date" name="poDate" value={form.poDate} onChange={handleFormChange} style={styles.input}/></div>
+                    <div style={styles.formGroup}><label>Supplier Name *</label><input name="supplierName" value={form.supplierName} onChange={handleFormChange} style={styles.input}/></div>
+                    <div style={styles.formGroup}><label>Supplier Address</label><input name="supplierAddress" value={form.supplierAddress} onChange={handleFormChange} style={styles.input}/></div>
+                    {/* ✅ **FIX: Added placeholder and using new handler for phone validation** */}
+                    <div style={styles.formGroup}><label>Supplier Contact</label><input name="supplierContact" type="tel" placeholder="E.g., 0712345678" value={form.supplierContact} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroupFull}>
                         <h4>Line Items</h4>
                         {form.lineItems.map((item, index) => (
@@ -284,7 +315,6 @@ const PurchasingOrder = ({ internalUser }) => {
         </div>
       )}
 
-      {/* View/Print PO Modal */}
       {showViewModal && selectedOrder && (
          <div className="print-overlay" style={styles.modalOverlay}>
             <div className="printable-content" style={{...styles.modal, maxWidth: '800px'}}>
@@ -292,15 +322,25 @@ const PurchasingOrder = ({ internalUser }) => {
                     <h3>Purchase Order Details</h3>
                     <button style={styles.closeButton} onClick={() => setShowViewModal(false)}>&times;</button>
                 </div>
+                {/* ✅ **FIX: Print view now includes company header** */}
                 <div ref={printComponentRef} style={styles.printView}>
-                    <h2>Purchase Order</h2>
+                    <div style={styles.printHeader}>
+                        {companyInfo?.companyLogo && <img src={companyInfo.companyLogo} alt="Logo" style={styles.printLogo} />}
+                        <div>
+                            <h2 style={{margin: 0}}>{companyInfo?.companyName || 'Your Company'}</h2>
+                            <p style={{margin: 0}}>{companyInfo?.companyAddress}</p>
+                            <p style={{margin: 0}}>{companyInfo?.phone}</p>
+                        </div>
+                    </div>
+
+                    <h2 style={{textAlign: 'center', textDecoration: 'underline'}}>Purchase Order</h2>
                     <div style={styles.poHeader}>
                         <div><strong>PO #:</strong> {selectedOrder.poNumber}</div>
                         <div><strong>Date:</strong> {selectedOrder.createdAt?.toDate ? selectedOrder.createdAt.toDate().toLocaleDateString() : new Date(selectedOrder.poDate).toLocaleDateString()}</div>
                     </div>
                     <div style={styles.poDetails}>
                         <div>
-                            <strong>Supplier:</strong><br/>
+                            <strong>Supplier Details:</strong><br/>
                             {selectedOrder.supplierName}<br/>
                             {selectedOrder.supplierAddress}<br/>
                             {selectedOrder.supplierContact}
@@ -334,6 +374,7 @@ const PurchasingOrder = ({ internalUser }) => {
 };
 
 const styles = {
+    //... (previous styles are unchanged) ...
     container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
     headerContainer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
     header: { fontSize: '28px', fontWeight: '700', color: '#2c3e50' },
@@ -365,35 +406,48 @@ const styles = {
     modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },
     saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
     cancelButton: { padding: '12px 24px', backgroundColor: '#ecf0f1', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
+    
+    // ✅ **NEW AND UPDATED PRINT STYLES**
     printView: { padding: '40px', fontFamily: 'serif' },
+    printHeader: { display: 'flex', alignItems: 'center', gap: '20px', borderBottom: '2px solid #000', paddingBottom: '20px', marginBottom: '30px' },
+    printLogo: { maxHeight: '80px', maxWidth: '150px' },
     poHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
     poDetails: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' },
 };
 
-// CORRECTED Stylesheet
 const styleSheet = document.createElement("style");
+// ✅ **FIX: Added A5 page formatting**
 styleSheet.innerText = `
   @media print {
+    body {
+        background-color: #fff !important;
+    }
     .non-printable {
       display: none !important;
     }
     .print-overlay {
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
       background: white;
       z-index: 9999;
-      overflow: auto;
+      overflow: visible;
+      padding: 0;
     }
     .printable-content {
       box-shadow: none !important;
       border: none !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
     }
+  }
+  @page {
+    size: A5;
+    margin: 15mm;
   }
 `;
 document.head.appendChild(styleSheet);
-
 
 export default PurchasingOrder;

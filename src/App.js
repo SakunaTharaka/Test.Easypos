@@ -10,7 +10,10 @@ import StockOutView from "./pages/tabs/StockOutView";
 import InvoiceViewer from './pages/InvoiceViewer';
 import MasterAdmin from './pages/MasterAdmin';
 import BillingPage from './pages/BillingPage';
-import MaintenancePage from './pages/MaintenancePage'; // 1. Import the new page
+import MaintenancePage from './pages/MaintenancePage';
+
+// Import the Terms and Conditions page
+import TermsAndConditions from "./pages/TermsAndConditions";
 
 function App() {
   return (
@@ -25,10 +28,14 @@ function App() {
         <Route path="/invoice/view/:invoiceId" element={<InvoiceViewer />} />
         <Route path="/master-admin" element={<MasterAdmin />} />
         <Route path="/billing" element={<BillingPage />} />
-        <Route path="/maintenance" element={<MaintenancePage />} /> {/* 2. Add the new route */}
+        <Route path="/maintenance" element={<MaintenancePage />} />
+        
+        {/* Add the new route for the Terms page */}
+        <Route path="/terms" element={<TermsAndConditions />} />
       </Routes>
     </Router>
   );
 }
 
 export default App;
+

@@ -192,9 +192,34 @@ const MasterAdmin = () => {
     try {
         const userRef = doc(db, "Userinfo", selectedUser.id);
         
+        // ✅ **START: CRITICAL 100% TRUSTABLE DATE LOGIC**
+        
+        // 1. Get today's date and normalize it to the start of the day (midnight) for accurate, time-agnostic comparison.
         const today = new Date();
-        const newEndDate = new Date(today);
-        newEndDate.setDate(today.getDate() + days);
+        today.setHours(0, 0, 0, 0); // Set time to 00:00:00 in local timezone
+
+        // 2. Get the user's current trial end date from Firestore and normalize it as well.
+        const currentEndDate = selectedUser.trialEndDate.toDate();
+        currentEndDate.setHours(0, 0, 0, 0); // Set time to 00:00:00 in local timezone
+
+        let baseDate;
+
+        // 3. Determine the correct base date according to your critical rules.
+        if (currentEndDate > today) {
+            // SCENARIO 1: Trial is still active (ends in the future).
+            // Extend from their EXISTING end date to "top up" their time.
+            baseDate = selectedUser.trialEndDate.toDate();
+        } else {
+            // SCENARIO 2 & 3: Trial is expired or ends today.
+            // Extend from TODAY to give them a fresh period.
+            baseDate = new Date();
+        }
+
+        // 4. Calculate the new end date by adding the specified days to the determined base date.
+        const newEndDate = new Date(baseDate);
+        newEndDate.setDate(baseDate.getDate() + days);
+
+        // ✅ **END: CRITICAL 100% TRUSTABLE DATE LOGIC**
 
         await updateDoc(userRef, {
             trialEndDate: Timestamp.fromDate(newEndDate)
@@ -207,7 +232,7 @@ const MasterAdmin = () => {
     } catch (err) {
         alert(`Failed to extend trial: ${err.message}`);
     } finally {
-        setTimeout(() => setIsExtending(false), 1000);
+        setTimeout(() => setIsExtending(false), 1000); // Prevent double-clicks
     }
   };
 
@@ -226,6 +251,9 @@ const MasterAdmin = () => {
 
     if (diffDays < 0) {
       return { text: 'Expired', color: '#e74c3c' };
+    }
+    if (diffDays === 0) {
+      return { text: 'Expires Today', color: '#f59e0b' };
     }
     if (diffDays < 5) {
       return { text: `${diffDays} days`, color: '#e74c3c' };
@@ -431,3 +459,4 @@ const styles = {
 };
 
 export default MasterAdmin;
+

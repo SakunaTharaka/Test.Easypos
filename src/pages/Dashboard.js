@@ -22,6 +22,8 @@ import DaySaleBal from "./fintabs/Reconcile";
 import Expenses from "./fintabs/Expenses";
 import Summary from "./fintabs/Summary";
 import CashBook from "./fintabs/CashBook"; 
+// ✅ **1. Import the new CreditCust component**
+import CreditCust from "./fintabs/CreditCust";
 import DashboardView from "./DashboardView";
 import Invoice from "./Invoice";
 import SalesReport from "./SalesReport";
@@ -43,35 +45,30 @@ const Dashboard = () => {
   const [activeFinanceTab, setActiveFinanceTab] = useState("Sales Income");
   const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
 
-  // State for Maintenance Check
   const [maintenanceStatus, setMaintenanceStatus] = useState({
     loading: true,
     isActive: false,
   });
 
-  // Effect 1: Check for maintenance mode first.
   useEffect(() => {
     const maintRef = doc(db, 'global_settings', 'maintenance');
     const unsubscribe = onSnapshot(maintRef, (docSnap) => {
       if (docSnap.exists()) {
         setMaintenanceStatus({ loading: false, isActive: docSnap.data().isActive });
       } else {
-        // If the document doesn't exist, assume maintenance is off
         setMaintenanceStatus({ loading: false, isActive: false });
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Effect 2: Run user authentication and data loading AFTER maintenance check.
   useEffect(() => {
-    // Don't run this logic if we are still checking for maintenance or if it's active
     if (maintenanceStatus.loading || maintenanceStatus.isActive) {
-      setLoading(false); // Ensure the user data loading spinner is off
+      setLoading(false);
       return;
     }
 
-    setLoading(true); // Start loading user data
+    setLoading(true);
     let settingsListenerUnsubscribe = null;
     let announcementListenerUnsubscribe = null;
 
@@ -191,7 +188,6 @@ const Dashboard = () => {
     if (internalUsers.length > 1) setShowLoginPopup(true);
   };
   
-  // NEW RENDER LOGIC AT THE TOP
   if (maintenanceStatus.loading) {
     return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div></div>;
   }
@@ -200,7 +196,6 @@ const Dashboard = () => {
     return <Navigate to="/maintenance" replace />;
   }
   
-  // This is now for loading the user-specific data
   if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p style={styles.loadingText}>Loading dashboard...</p></div> );
   
   const allTabs = ["Dashboard", "Invoicing", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
@@ -233,14 +228,17 @@ const Dashboard = () => {
       case "Sales Report": return <SalesReport internalUser={internalLoggedInUser} />;
       case "Finance": return (
         <div>
+          {/* ✅ **2. Add the new sub-tab to the list** */}
           <div style={styles.inventorySubTabs}>
-            {[ "Sales Income", "Stock Payments", "Reconcilation", "Expenses", "Summary", "Cash Book" ].map(tab => (
+            {[ "Sales Income", "Stock Payments", "Credit Customer Cash", "Reconcilation", "Expenses", "Summary", "Cash Book" ].map(tab => (
               <div key={tab} style={{...styles.inventorySubTab, ...(activeFinanceTab === tab ? styles.activeInventorySubTab : {})}} onClick={() => setActiveFinanceTab(tab)}>{tab}</div>
             ))}
           </div>
           <div style={styles.inventoryContent}>
             {activeFinanceTab === "Sales Income" && <SalesIncome />}
             {activeFinanceTab === "Stock Payments" && <StockPayment />}
+            {/* ✅ **3. Render the new component when the sub-tab is active** */}
+            {activeFinanceTab === "Credit Customer Cash" && <CreditCust />}
             {activeFinanceTab === "Reconcilation" && <DaySaleBal />}
             {activeFinanceTab === "Expenses" && <Expenses />}
             {activeFinanceTab === "Summary" && <Summary />}
@@ -272,7 +270,7 @@ const Dashboard = () => {
       <div style={styles.stickyHeader}>
         <div style={styles.navbar}>
           <div style={styles.logoContainer}>
-            <div style={styles.logoPlaceholder}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}/>) : (userInfo?.companyName?.charAt(0) || "B")}</div>
+            <div style={styles.logoPlaceholder}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}/>) : (userInfo?.companyName?.charAt(0) || "B")}</div>
             <div style={styles.topInfo}>
               <h2 style={styles.companyName}>{userInfo?.companyName || "Business"}</h2>
               <p style={styles.wayneSystems}>Wayne Systems</p> 

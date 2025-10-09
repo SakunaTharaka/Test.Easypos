@@ -1,4 +1,3 @@
-// src/pages/tabs/Items.js
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
 import {
@@ -32,9 +31,10 @@ const Items = ({ internalUser }) => {
   const [form, setForm] = useState({ name: "", brand: "", sku: "", type: "", category: "" });
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
-  
-  // ✨ NEW: State to store the inventory type setting
   const [inventoryType, setInventoryType] = useState(null); 
+  
+  // ✅ **1. New state for buffering/loading on save**
+  const [isSaving, setIsSaving] = useState(false);
 
   // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -57,8 +57,7 @@ const Items = ({ internalUser }) => {
     return cur?.isAdmin === true || cur?.isAdmin === "1";
   })();
 
-  useEffect(() => {
-    const fetchItems = async () => {
+  const fetchItems = async () => {
       setLoading(true);
       const currentUser = auth.currentUser;
       if (!currentUser) { setLoading(false); return; }
@@ -99,7 +98,8 @@ const Items = ({ internalUser }) => {
       }
     };
 
-    if(inventoryType) fetchItems(); // Wait until settings are loaded
+  useEffect(() => {
+    if(inventoryType) fetchItems();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, search, inventoryType]);
 
@@ -112,10 +112,8 @@ const Items = ({ internalUser }) => {
         if (settingsSnap.exists()) {
           const settingsData = settingsSnap.data();
           setCategories(settingsData.itemCategories || []);
-          // ✨ NEW: Fetch and set the inventory type
           setInventoryType(settingsData.inventoryType || "Buy and Sell only");
         } else {
-          // Fallback if settings document doesn't exist
           setInventoryType("Buy and Sell only");
         }
     }
@@ -162,16 +160,20 @@ const Items = ({ internalUser }) => {
   };
 
   const handleSave = async () => {
-    if ((form.type !== "ourProduct" && !form.brand?.trim()) || !form.name?.trim() || !form.type) {
-      return alert("Item Name, Type, and Brand (if not 'ourProduct') are required.");
+    // ✅ **2. Brand is now optional. Validation updated.**
+    if (!form.name?.trim() || !form.type) {
+      return alert("Item Name and Type are required.");
     }
     
+    setIsSaving(true); // Set loading state
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) {
+      setIsSaving(false);
+      return;
+    }
 
-    // ✅ **START: SKU Uniqueness Check**
     const skuToCheck = form.sku?.trim();
-    if (skuToCheck) { // Only perform the check if an SKU is actually entered.
+    if (skuToCheck) {
       try {
         const itemsColRef = collection(db, uid, "items", "item_list");
         const q = query(itemsColRef, where("sku", "==", skuToCheck));
@@ -180,54 +182,69 @@ const Items = ({ internalUser }) => {
         let isDuplicate = false;
         if (!querySnapshot.empty) {
           if (editingItem) {
-            // In EDIT mode, it's a duplicate only if the found item's ID is different from the one being edited.
-            if (querySnapshot.docs[0].id !== editingItem.id) {
-              isDuplicate = true;
-            }
+            if (querySnapshot.docs[0].id !== editingItem.id) isDuplicate = true;
           } else {
-            // In ADD mode, any found item is a duplicate.
             isDuplicate = true;
           }
         }
 
         if (isDuplicate) {
           alert("This SKU is already in use by another item. Please use a unique SKU.");
-          return; // Stop the function from proceeding.
+          setIsSaving(false);
+          return;
         }
       } catch (error) {
         alert("Error checking SKU uniqueness: " + error.message);
-        return; // Stop on error.
+        setIsSaving(false);
+        return;
       }
     }
-    // ✅ **END: SKU Uniqueness Check**
 
     try {
       const username = getCurrentInternal()?.username || "Admin";
-      const finalName = form.type === "ourProduct" ? form.name.trim() : `${form.brand.trim()} ${form.name.trim()}`;
+      // If brand is empty, it won't add an extra space before the name
+      const finalName = (form.type !== "ourProduct" && form.brand.trim()) 
+        ? `${form.brand.trim()} ${form.name.trim()}` 
+        : form.name.trim();
+
       const itemsColRef = collection(db, uid, "items", "item_list");
+      const dataToSave = {
+          name: finalName,
+          brand: form.brand.trim(),
+          sku: form.sku || "",
+          type: form.type,
+          category: form.category || "",
+          lastEditedBy: username,
+          lastEditedAt: serverTimestamp(),
+      };
+
 
       if (editingItem) {
-        await updateDoc(doc(itemsColRef, editingItem.id), {
-          name: finalName, brand: form.brand.trim(), sku: form.sku || "", type: form.type,
-          category: form.category || "", lastEditedBy: username, lastEditedAt: serverTimestamp(),
-        });
+        const itemDocRef = doc(itemsColRef, editingItem.id);
+        await updateDoc(itemDocRef, dataToSave);
+        // ✅ **3. Instantly update the UI for edits**
+        setItems(prevItems => prevItems.map(item => 
+          item.id === editingItem.id ? { ...item, ...dataToSave } : item
+        ));
       } else {
         const pid = await getNextPID(uid);
-        if (pid === null) return;
-        await addDoc(itemsColRef, {
-          name: finalName, brand: form.brand.trim(), sku: form.sku || "", type: form.type,
-          category: form.category || "", addedBy: username, createdAt: serverTimestamp(), pid,
-        });
+        if (pid === null) {
+          setIsSaving(false);
+          return;
+        }
+        const newData = { ...dataToSave, addedBy: username, createdAt: serverTimestamp(), pid };
+        const docRef = await addDoc(itemsColRef, newData);
+        // ✅ **3. Instantly update the UI for new items**
+        setItems(prevItems => [{ id: docRef.id, ...newData, createdAt: new Date() }, ...prevItems]);
       }
-
-      setCurrentPage(1); 
-      setPageCursors({ 1: null });
 
       setForm({ name: "", brand: "", sku: "", type: "", category: "" });
       setEditingItem(null);
       setShowModal(false);
     } catch (error) {
       alert("Error saving item: " + error.message);
+    } finally {
+      setIsSaving(false); // Reset loading state
     }
   };
 
@@ -236,14 +253,13 @@ const Items = ({ internalUser }) => {
     const uid = auth.currentUser.uid;
     try {
       await deleteDoc(doc(db, uid, "items", "item_list", id));
-      setCurrentPage(1);
-      setPageCursors({ 1: null });
+      // ✅ **3. Instantly update UI on delete**
+      setItems(prevItems => prevItems.filter(item => item.id !== id));
     } catch (error) {
       alert("Error deleting item: " + error.message);
     }
   };
 
-  // ✨ NEW: Dynamically determine which item types to show
   const getItemTypeOptions = () => {
     switch (inventoryType) {
       case "Buy and Sell only":
@@ -254,7 +270,7 @@ const Items = ({ internalUser }) => {
           { value: "ourProduct", label: "Finished Product" },
         ];
       case "We doing both":
-      default: // Show all if setting is "We doing both" or not loaded yet
+      default:
         return [
           { value: "buySell", label: "Buy/Sell Item" },
           { value: "storesItem", label: "Stores Item / Raw Material" },
@@ -264,17 +280,13 @@ const Items = ({ internalUser }) => {
   };
   const itemTypeOptions = getItemTypeOptions();
 
-
-  // ✨ NEW: Handler for the 'Add Item' button to set the correct default type
   const handleAddItemClick = () => {
     let defaultType = "";
     if (inventoryType === "Buy and Sell only") {
       defaultType = "buySell";
     } else if (inventoryType === "Production Selling only") {
-      defaultType = "storesItem"; // Default to the first available option
+      defaultType = "storesItem";
     }
-    // No default for "We doing both", letting the user choose
-    
     setForm({ name: "", brand: "", sku: "", type: defaultType, category: "" });
     setEditingItem(null);
     setShowModal(true);
@@ -299,7 +311,7 @@ const Items = ({ internalUser }) => {
           />
         </div>
         <button
-          onClick={handleAddItemClick} // ✨ Use the new handler
+          onClick={handleAddItemClick}
           style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", background: "#3498db", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: '14px' }}
         >
           <AiOutlinePlus /> Add Item
@@ -328,7 +340,7 @@ const Items = ({ internalUser }) => {
                             <td style={{ padding: "12px" }}>{item.category || "-"}</td>
                             <td style={{ padding: "12px" }}>{item.addedBy || "-"}</td>
                             <td style={{ padding: "12px", display: "flex", gap: "8px" }}>
-                                <button onClick={() => { setEditingItem(item); setForm({ name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""), brand: item.brand, sku: item.sku || "", type: item.type, category: item.category || "", }); setShowModal(true); }} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
+                                <button onClick={() => { setEditingItem(item); setForm({ name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""), brand: item.brand || "", sku: item.sku || "", type: item.type, category: item.category || "", }); setShowModal(true); }} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
                                     <AiOutlineEdit />
                                 </button>
                                 {isAdmin && (
@@ -357,7 +369,6 @@ const Items = ({ internalUser }) => {
           <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px" }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingItem ? "Edit Item" : "Add New Item"}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {/* ✨ NEW: Conditionally rendered radio buttons */}
                 {itemTypeOptions.length > 1 && (
                     <div style={{ border: '1px solid #ddd', borderRadius: '6px', padding: '10px' }}>
                         <label style={{ fontWeight: 600, display: 'block', marginBottom: '10px' }}>Item Type *</label>
@@ -372,9 +383,9 @@ const Items = ({ internalUser }) => {
                     </div>
                 )}
                 {form.type !== "ourProduct" && (
-                  <input type="text" name="brand" placeholder="Brand (e.g., Coca-Cola)" value={form.brand} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
+                  <input type="text" name="brand" placeholder="Brand (optional, e.g., Coca-Cola)" value={form.brand} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 )}
-                <input type="text" name="name" placeholder="Item Name (e.g., Classic Coke)" value={form.name} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
+                <input type="text" name="name" placeholder="Item Name (e.g., Classic Coke) *" value={form.name} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 <input type="text" name="sku" placeholder="SKU / Barcode (optional)" value={form.sku} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 <div>
                     <label style={{ display: "block", marginBottom: "6px" }}>Category</label>
@@ -385,8 +396,23 @@ const Items = ({ internalUser }) => {
                 </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: '24px' }}>
-              <button onClick={() => { setShowModal(false); setEditingItem(null); }} style={{ padding: "10px 16px", background: '#eee' }}>Cancel</button>
-              <button onClick={handleSave} style={{ background: "#2ecc71", color: "white", border: "none", padding: "10px 20px", borderRadius: "4px" }}>Save</button>
+              <button onClick={() => { setShowModal(false); setEditingItem(null); }} style={{ padding: "10px 16px", background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+              {/* ✅ **4. Button is now disabled and shows "Saving..." during the save operation** */}
+              <button 
+                onClick={handleSave} 
+                disabled={isSaving}
+                style={{ 
+                    background: "#2ecc71", 
+                    color: "white", 
+                    border: "none", 
+                    padding: "10px 20px", 
+                    borderRadius: "4px",
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    opacity: isSaving ? 0.7 : 1
+                }}
+              >
+                {isSaving ? 'Saving...' : 'Save'}
+              </button>
             </div>
           </div>
         </div>

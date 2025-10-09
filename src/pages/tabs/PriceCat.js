@@ -26,6 +26,9 @@ const PriceCat = ({ internalUser }) => {
   const [search, setSearch] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
 
+  // ✅ **1. New state for buffering/loading**
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+
   const [dropdownSearch, setDropdownSearch] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -112,6 +115,10 @@ const PriceCat = ({ internalUser }) => {
 
   const handleSaveCategory = async () => {
     if (!newCategoryName.trim()) return alert("Enter category name");
+    
+    // ✅ **2. Set loading state to true and disable button**
+    setIsSavingCategory(true);
+
     const uid = auth.currentUser.uid;
     const catColRef = collection(db, uid, "price_categories", "categories");
     const username = currentUser?.username || "Admin";
@@ -136,6 +143,9 @@ const PriceCat = ({ internalUser }) => {
       setEditingCategory(null);
     } catch (err) {
       alert("Error saving category: " + err.message);
+    } finally {
+      // ✅ **3. Set loading state to false to re-enable button**
+      setIsSavingCategory(false);
     }
   };
 
@@ -289,8 +299,24 @@ const PriceCat = ({ internalUser }) => {
         {isAdmin && (
           <div style={{ marginBottom: 16 }}>
             <input type="text" placeholder="New category name..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8, boxSizing: 'border-box' }} />
-            <button onClick={handleSaveCategory} style={{ width: "100%", padding: 8, background: editingCategory ? "#f39c12" : "#2ecc71", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-              <AiOutlinePlus /> {editingCategory ? "Update Category" : "Add Category"}
+            {/* ✅ **4. Update button text and disabled state based on loading status** */}
+            <button 
+              onClick={handleSaveCategory} 
+              disabled={isSavingCategory}
+              style={{ 
+                width: "100%", 
+                padding: 8, 
+                background: editingCategory ? "#f39c12" : "#2ecc71", 
+                color: "#fff", 
+                border: "none", 
+                borderRadius: 4, 
+                cursor: "pointer",
+                opacity: isSavingCategory ? 0.7 : 1
+              }}
+            >
+              {isSavingCategory ? 'Saving...' : (
+                <><AiOutlinePlus /> {editingCategory ? "Update Category" : "Add Category"}</>
+              )}
             </button>
             {editingCategory && <button onClick={() => { setEditingCategory(null); setNewCategoryName(""); }} style={{width: '100%', marginTop: '4px', padding: 8, cursor: 'pointer'}}>Cancel</button>}
           </div>
@@ -332,7 +358,6 @@ const PriceCat = ({ internalUser }) => {
                     <th style={{ padding: 10, textAlign: 'left' }}>Item</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>SKU</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>Price (Rs.)</th>
-                    {/* NEW: Column Header */}
                     <th style={{ padding: 10, textAlign: 'left' }}>Last Updated By</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>Actions</th>
                 </tr>
@@ -343,7 +368,6 @@ const PriceCat = ({ internalUser }) => {
                     <td style={{ padding: 10 }}>{i.itemName}</td>
                     <td style={{ padding: 10 }}>{i.itemSKU || "-"}</td>
                     <td style={{ padding: 10, fontWeight: 'bold' }}>{Number(i.price).toFixed(2)}</td>
-                    {/* NEW: Column Data */}
                     <td style={{ padding: 10, color: '#555' }}>{i.editedBy || i.createdBy || '-'}</td>
                     <td style={{ padding: 10 }}>
                       {isAdmin && (
