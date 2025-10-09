@@ -13,11 +13,12 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 
-// ✅ **NEW: Self-contained, printable layout component (from InvoiceViewer)**
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     if (!invoice || !Array.isArray(invoice.items)) return null;
     const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const balanceToDisplay = invoice.received === 0 ? 0 : invoice.balance;
+    // ✅ **FIX: Add delivery charges to subtotal for balance calculation if they exist**
+    const totalBeforeReceived = subtotal + (invoice.deliveryCharge || 0);
+    const balanceToDisplay = invoice.received === 0 ? 0 : invoice.received - totalBeforeReceived;
     const createdAtDate = invoice.createdAt instanceof Date ? invoice.createdAt : invoice.createdAt?.toDate();
   
     return (
@@ -48,7 +49,17 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
         </table>
         <div className="invoice-footer-section">
           <div style={printStyles.totalsContainer}>
-            <div style={printStyles.totals}><div style={printStyles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div><div style={printStyles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div><hr style={printStyles.hr} /><div style={printStyles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div><div style={{ ...printStyles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div></div>
+            <div style={printStyles.totals}>
+                <div style={printStyles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div>
+                {/* ✅ **FIX: Conditionally display delivery charges in print view** */}
+                {invoice.deliveryCharge > 0 && (
+                    <div style={printStyles.totalRow}><strong>Delivery:</strong><span>Rs. {invoice.deliveryCharge.toFixed(2)}</span></div>
+                )}
+                <div style={printStyles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div>
+                <hr style={printStyles.hr} />
+                <div style={printStyles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div>
+                <div style={{ ...printStyles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div>
+            </div>
           </div>
         </div>
         <div style={printStyles.footer}><p>Thank you for your business!</p></div>
@@ -57,7 +68,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     );
 };
 
-// ✅ **NEW: Print Preview Modal Component**
 const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
     const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
@@ -125,16 +135,20 @@ const Invoice = ({ internalUser }) => {
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const paymentOptions = ['Cash', 'Card', 'Online'];
   
-  // ✅ **NEW: State for modal control**
   const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
+  
+  // ✅ **1. New state and ref for delivery charges**
+  const [deliveryCharge, setDeliveryCharge] = useState("");
+  const deliveryChargeRef = useRef(null);
+  const [deliveryChargeMode, setDeliveryChargeMode] = useState(false);
+
 
   const containerRef = useRef(null);
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
 
-  // ... (toggleFullscreen, handleFullscreenChange, generateInvoiceNumber functions are unchanged) ...
     const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen().catch(err => alert(`Error: ${err.message}`));
@@ -171,7 +185,6 @@ const Invoice = ({ internalUser }) => {
   };
 
   useEffect(() => {
-    // ... (This useEffect's content to fetch initial data remains mostly the same, but now it just stores settings in state) ...
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
@@ -210,7 +223,6 @@ const Invoice = ({ internalUser }) => {
     initialize();
   }, []);
   
-  // ... (All other useEffects and handlers like handleItemSelect, addItemToCheckout, etc., are unchanged) ...
     useEffect(() => {
     if (selectedShift) {
         localStorage.setItem('savedSelectedShift', selectedShift);
@@ -240,10 +252,17 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (showPaymentConfirm || isSaving || showPrintPreview) return; // Disable shortcuts during modals
+      if (showPaymentConfirm || isSaving || showPrintPreview) return;
       if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
-      if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setAmountReceivedMode(prev => !prev); }
-      if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setCheckoutFocusMode(prev => !prev); }
+      if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(prev => !prev); }
+      if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(prev => !prev); }
+      // ✅ **2. New F5 shortcut for delivery charge**
+      if (e.key === "F5") { 
+          e.preventDefault(); 
+          setCheckoutFocusMode(false); 
+          setAmountReceivedMode(false); 
+          setDeliveryChargeMode(prev => !prev); 
+      }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
@@ -251,9 +270,10 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     if (amountReceivedMode) { receivedAmountRef.current?.focus(); receivedAmountRef.current?.select(); }
+    else if (deliveryChargeMode) { deliveryChargeRef.current?.focus(); deliveryChargeRef.current?.select(); }
     else if (checkoutFocusMode) { itemInputRef.current?.blur(); qtyInputRef.current?.blur(); receivedAmountRef.current?.blur(); setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); }
     else { itemInputRef.current?.focus(); setHighlightedCheckoutIndex(-1); }
-  }, [amountReceivedMode, checkoutFocusMode, checkout.length]);
+  }, [amountReceivedMode, checkoutFocusMode, deliveryChargeMode, checkout.length]);
 
   useEffect(() => {
     const handleCheckoutNav = (e) => {
@@ -315,10 +335,10 @@ const Invoice = ({ internalUser }) => {
     setInvoiceNumber(newInvNum);
     setCheckout([]);
     setReceivedAmount("");
+    setDeliveryCharge(""); // Reset delivery charge
     itemInputRef.current?.focus();
   };
   
-  // ✅ **REVISED: Logic to show modal or alert after saving**
   const executeSaveInvoice = async (finalPaymentMethod) => {
     const user = auth.currentUser;
     if (!user) return alert("You are not logged in.");
@@ -330,8 +350,12 @@ const Invoice = ({ internalUser }) => {
       const invoicesColRef = collection(db, user.uid, "invoices", "invoice_list");
       const invoiceDataForDb = {
         customerId: selectedCustomer.value, customerName: selectedCustomer.label,
-        items: checkout, total: subtotal, received: Number(receivedAmount) || 0,
-        balance: balance, createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
+        items: checkout, 
+        total: total, // Use the new grand total
+        deliveryCharge: Number(deliveryCharge) || 0, // Save delivery charge
+        received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
+        balance: selectedCustomer.isCreditCustomer ? total : balance,
+        createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
         issuedBy: internalUser?.username || "Admin", shift: selectedShift || "",
         paymentMethod: finalPaymentMethod,
       };
@@ -339,7 +363,6 @@ const Invoice = ({ internalUser }) => {
       await addDoc(invoicesColRef, invoiceDataForDb);
       
       if (settings?.autoPrintInvoice === true) {
-        // Use client-side date for instant preview
         const invoiceDataForPrint = { ...invoiceDataForDb, createdAt: new Date() };
         setInvoiceToPrint(invoiceDataForPrint);
         setShowPrintPreview(true);
@@ -359,16 +382,19 @@ const Invoice = ({ internalUser }) => {
     if (shiftProductionEnabled && !selectedShift) {
         return alert("Please select a shift before saving the invoice.");
     }
-    setConfirmPaymentMethod('Cash');
-    setShowPaymentConfirm(true);
+    
+    if (selectedCustomer.isCreditCustomer) {
+        executeSaveInvoice('Credit');
+    } else {
+        setConfirmPaymentMethod('Cash');
+        setShowPaymentConfirm(true);
+    }
   };
-    // ... useEffect for payment confirmation keydown unchanged
+
     useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
-        
         const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
-
         if (e.key === 'ArrowRight') {
             const nextIndex = (currentIndex + 1) % paymentOptions.length;
             setConfirmPaymentMethod(paymentOptions[nextIndex]);
@@ -386,12 +412,13 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handlePaymentConfirmKeyDown);
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPaymentConfirm, confirmPaymentMethod, checkout, receivedAmount]);
+  }, [showPaymentConfirm, confirmPaymentMethod, checkout, receivedAmount, settings, selectedCustomer]);
 
   
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const balance = (Number(receivedAmount) || 0) - subtotal; 
+  // ✅ **3. Calculate new grand total and balance with delivery charge**
+  const total = subtotal + (Number(deliveryCharge) || 0);
+  const balance = (Number(receivedAmount) || 0) - total; 
   const received = Number(receivedAmount) || 0;
   const displayBalance = received === 0 ? 0 : balance;
   const isSaveDisabled = !selectedCustomer || checkout.length === 0 || (balance < 0 && received > 0);
@@ -405,7 +432,6 @@ const Invoice = ({ internalUser }) => {
         </div>
       )}
       
-      {/* ✅ **NEW: Render the print modal** */}
       {showPrintPreview && (
         <PrintPreviewModal 
             invoice={invoiceToPrint} 
@@ -418,7 +444,6 @@ const Invoice = ({ internalUser }) => {
         />
       )}
 
-      {/* ... (The rest of the JSX is unchanged) ... */}
       <button onClick={toggleFullscreen} style={styles.fullscreenButton}>{isFullscreen ? "Exit Fullscreen" : "Fullscreen"}</button>
       <div style={styles.leftPanel}>
         <div style={styles.header}>
@@ -430,7 +455,7 @@ const Invoice = ({ internalUser }) => {
         </div>
         <div style={styles.customerSection}><label style={styles.label}>CUSTOMER</label><Select options={customers} value={selectedCustomer} onChange={setSelectedCustomer} placeholder="Select a customer..."/></div>
         <div style={styles.itemEntrySection}><div style={{position: 'relative', flex: 1}}><label style={styles.label}>ADD ITEM</label><input ref={itemInputRef} value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={handleItemKeyDown} placeholder="Type item name, SKU, or scan barcode..." style={styles.input}/>{showDropdown && filteredItems.length > 0 && (<ul style={styles.dropdown}>{filteredItems.map((i, idx) => (<li key={i.id} style={{...styles.dropdownItem, ...(idx === selectedIndex ? styles.dropdownItemSelected : {})}} onClick={() => handleItemSelect(i)}>{i.itemName} <span style={styles.dropdownPrice}>Rs. {i.price.toFixed(2)}</span></li>))}</ul>)}</div><div style={{width: '120px'}}><label style={styles.label}>QTY</label><input ref={qtyInputRef} value={qtyInput} onChange={handleQtyChange} onKeyDown={handleQtyKeyDown} onFocus={(e) => e.target.select()} type="text" inputMode="decimal" style={styles.input}/></div><button onClick={addItemToCheckout} style={styles.addButton}>ADD</button></div>
-        <div style={styles.shortcutsHelp}><h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4><div style={styles.shortcutItem}><b>F2:</b> Focus 'Amount Received'</div><div style={styles.shortcutItem}><b>F10:</b> Activate Checkout List (use Arrows + Delete)</div><div style={styles.shortcutItem}><b>Alt + S:</b> Save Invoice</div><div style={styles.shortcutItem}><b>Esc:</b> Exit Modes / Popups</div></div>
+        <div style={styles.shortcutsHelp}><h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4><div style={styles.shortcutItem}><b>F2:</b> Focus 'Amount Received'</div><div style={styles.shortcutItem}><b>F5:</b> Focus 'Delivery Charges'</div><div style={styles.shortcutItem}><b>F10:</b> Activate Checkout List (use Arrows + Delete)</div><div style={styles.shortcutItem}><b>Alt + S:</b> Save Invoice</div><div style={styles.shortcutItem}><b>Esc:</b> Exit Modes / Popups</div></div>
       </div>
       <div style={styles.rightPanel}>
         <div style={{...styles.checkoutCard, ...(checkoutFocusMode ? styles.activeCard : {})}}>
@@ -438,10 +463,29 @@ const Invoice = ({ internalUser }) => {
             <div style={styles.tableContainer}>
                 <table style={styles.table}><thead><tr><th style={styles.th}>ITEM</th><th style={styles.th}>QTY</th><th style={styles.th}>TOTAL</th><th style={styles.th}></th></tr></thead><tbody>{checkout.length === 0 ? (<tr><td colSpan="4" style={styles.emptyState}>No items added</td></tr>) : (checkout.map((c, idx) => (<tr key={idx} style={idx === highlightedCheckoutIndex ? styles.highlightedRow : {}}><td style={styles.td}>{c.itemName}</td><td style={styles.td}>{c.quantity}</td><td style={styles.td}>Rs. {(c.price * c.quantity).toFixed(2)}</td><td style={styles.td}><button onClick={() => removeCheckoutItem(idx)} style={styles.removeButton}>✕</button></td></tr>)))}</tbody></table>
             </div>
-            <div style={styles.totalsSection}><div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div><div style={styles.grandTotalRow}><span>TOTAL</span><span>Rs. {subtotal.toFixed(2)}</span></div></div>
+            {/* ✅ **4. Conditionally render delivery charges and update totals** */}
+            <div style={styles.totalsSection}>
+                <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div>
+                {settings?.offerDelivery && (
+                    <div style={styles.totalRow}>
+                        <label htmlFor="deliveryCharge" style={{cursor: 'pointer'}}>Delivery (F5)</label>
+                        <input
+                            ref={deliveryChargeRef}
+                            id="deliveryCharge"
+                            type="number"
+                            value={deliveryCharge}
+                            onChange={e => setDeliveryCharge(e.target.value)}
+                            style={{...styles.input, ...styles.deliveryInput, ...(deliveryChargeMode ? styles.activeInput : {})}}
+                            placeholder="0.00"
+                        />
+                    </div>
+                )}
+                <div style={styles.grandTotalRow}><span>TOTAL</span><span>Rs. {total.toFixed(2)}</span></div>
+            </div>
+            
             <div style={styles.paymentSection}>
                 <label style={styles.label}>AMOUNT RECEIVED (F2)</label>
-                <input ref={receivedAmountRef} type="number" value={receivedAmount} onChange={e => setReceivedAmount(e.target.value)} placeholder="0.00" style={{...styles.input, ...styles.amountInput, ...(amountReceivedMode ? styles.activeInput : {})}}/>
+                <input ref={receivedAmountRef} type="number" value={selectedCustomer?.isCreditCustomer ? '' : receivedAmount} onChange={e => setReceivedAmount(e.target.value)} placeholder={selectedCustomer?.isCreditCustomer ? 'CREDIT SALE' : '0.00'} style={{...styles.input, ...styles.amountInput, ...(amountReceivedMode ? styles.activeInput : {})}} disabled={selectedCustomer?.isCreditCustomer} />
             </div>
             <div style={styles.balanceRow}>
               <span>BALANCE</span>
@@ -477,7 +521,6 @@ const Invoice = ({ internalUser }) => {
   );
 };
 
-// ... Main component styles are unchanged
 const styles = {
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
@@ -508,8 +551,9 @@ const styles = {
     emptyState: { textAlign: 'center', color: '#9ca3af', padding: '20px' },
     removeButton: { background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' },
     totalsSection: { padding: '16px', borderTop: '1px solid #e5e7eb' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px' },
+    totalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '14px' },
     grandTotalRow: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', color: '#16a34a', paddingTop: '8px', borderTop: '2px solid #e5e7eb' },
+    deliveryInput: { width: '120px', padding: '8px', textAlign: 'right' },
     paymentSection: { padding: '16px' },
     amountInput: { fontSize: '18px', fontWeight: 'bold', textAlign: 'right' },
     balanceRow: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', padding: '16px', borderTop: '1px solid #e5e7eb' },
@@ -526,12 +570,11 @@ const styles = {
     savingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 3000, color: '#1f2937', fontSize: '18px', fontWeight: '600' },
     savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
 };
-// ✅ **NEW: Styles for the printable layout**
 const printStyles = {
-    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
-    logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
-    companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
-    headerText: { margin: '2px 0', fontSize: '0.9em' },
+    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace" },
+    logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px', display: 'block', marginLeft: 'auto', marginRight: 'auto' },
+    companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold', textAlign: 'center' },
+    headerText: { margin: '2px 0', fontSize: '0.9em', textAlign: 'center' },
     itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
     th: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
     thItem: { textAlign: 'left' },
@@ -547,3 +590,4 @@ const printStyles = {
 };
 
 export default Invoice;
+

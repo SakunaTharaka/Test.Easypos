@@ -48,8 +48,11 @@ const Settings = () => {
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
   
-  // ✅ **NEW: State for the auto-print invoice setting**
   const [autoPrintInvoice, setAutoPrintInvoice] = useState(false);
+  
+  // ✅ **1. New state for the new toggles**
+  const [offerDelivery, setOfferDelivery] = useState(false);
+  const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
 
 
   useEffect(() => {
@@ -84,10 +87,11 @@ const Settings = () => {
           setUseShiftProduction(data.useShiftProduction || false);
           setProductionShifts(data.productionShifts || []);
           setExpenseCategories(data.expenseCategories || []);
-          // ✅ **NEW: Load the auto-print setting**
           setAutoPrintInvoice(data.autoPrintInvoice || false);
+          // ✅ **2. Load new settings from database**
+          setOfferDelivery(data.offerDelivery || false);
+          setMaintainCreditCustomers(data.maintainCreditCustomers || false);
         } else {
-          // --- NEW LOGIC: Fetch from Userinfo on first setup ---
           const userInfoRef = doc(db, "Userinfo", uid);
           const userInfoSnap = await getDoc(userInfoRef);
           
@@ -103,7 +107,6 @@ const Settings = () => {
             initialFullName = onboardingData.fullName || "";
             initialPhone = onboardingData.phone || "";
           }
-          // --- END NEW LOGIC ---
 
           const defaultSettings = {
             fullName: initialFullName,
@@ -120,12 +123,13 @@ const Settings = () => {
             useShiftProduction: false,
             productionShifts: [],
             expenseCategories: [],
-            // ✅ **NEW: Add auto-print to default settings**
             autoPrintInvoice: false,
+            // ✅ **3. Add new settings to the default object**
+            offerDelivery: false,
+            maintainCreditCustomers: false,
           };
           
           await setDoc(settingsDocRef, defaultSettings);
-          // Manually update the state with the newly created settings
           setUserInfo(defaultSettings);
           setFormInput({
             fullName: defaultSettings.fullName,
@@ -143,8 +147,10 @@ const Settings = () => {
           setUseShiftProduction(defaultSettings.useShiftProduction);
           setProductionShifts(defaultSettings.productionShifts);
           setExpenseCategories(defaultSettings.expenseCategories);
-          // ✅ **NEW: Set default state for auto-print**
           setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
+          // ✅ **2. Load new settings from default object**
+          setOfferDelivery(defaultSettings.offerDelivery);
+          setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
         }
 
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -184,7 +190,6 @@ const Settings = () => {
   };
   const handleSave = async () => {
     try {
-      // Exclude email from the update object
       const { email, ...updateData } = formInput;
       await updateDoc(getSettingsDocRef(), updateData);
       setUserInfo(prev => ({...prev, ...updateData}));
@@ -261,11 +266,22 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { defaultCustomerId: value });
   };
 
-  // ✅ **NEW: Handler function to save the auto-print setting**
   const handleAutoPrintChange = async (value) => {
     setAutoPrintInvoice(value);
     await updateDoc(getSettingsDocRef(), { autoPrintInvoice: value });
   };
+
+  // ✅ **4. Handlers for the new toggles**
+  const handleOfferDeliveryChange = async (value) => {
+    setOfferDelivery(value);
+    await updateDoc(getSettingsDocRef(), { offerDelivery: value });
+  };
+
+  const handleMaintainCreditCustomersChange = async (value) => {
+    setMaintainCreditCustomers(value);
+    await updateDoc(getSettingsDocRef(), { maintainCreditCustomers: value });
+  };
+
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -278,11 +294,9 @@ const Settings = () => {
 
   return (
     <div style={styles.container}>
-      {/* Personal Info Section */}
       <div style={styles.headerContainer}><h2 style={styles.header}>Settings</h2><p style={styles.subHeader}>Manage your account and application preferences</p></div>
       <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>{["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (<div style={styles.formGroup} key={field}><label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>{editMode ? (field === "email" ? (<input type="email" value={formInput[field]} style={styles.inputDisabled} readOnly/>) : (<input type="text" value={formInput[field]} onChange={(e) => setFormInput({ ...formInput, [field]: e.target.value })} style={styles.input} placeholder={`Enter your ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}/>)) : (<p style={styles.value}>{userInfo?.[field] || "Not provided"}</p>)}</div>))}{editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
 
-      {/* Inventory Settings Section */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Inventory Settings</h3>
         <div style={styles.formGroup}><label style={styles.label}>Inventory Type</label><select value={inventoryType} onChange={(e) => handleInventoryTypeChange(e.target.value)} style={styles.select}><option value="Buy and Sell only">Buy and Sell only</option><option value="Production Selling only">Production Selling only</option><option value="We doing both">We doing both</option></select><p style={styles.helpText}>{inventoryTypeDescriptions[inventoryType]}</p></div>
@@ -292,7 +306,6 @@ const Settings = () => {
         <div style={styles.formGroup}><label style={styles.label}>Measurement Units</label><div style={styles.unitsGrid}>{AVAILABLE_UNITS.map((unit) => (<label key={unit} style={styles.unitCheckbox}><input type="checkbox" checked={selectedUnits.includes(unit)} onChange={() => handleUnitChange(unit)}/>{unit}</label>))}</div></div>
       </div>
       
-      {/* Finance Settings Panel */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Finance Settings</h3>
         <div style={styles.formGroup}>
@@ -314,7 +327,6 @@ const Settings = () => {
         </div>
       </div>
       
-      {/* Invoicing Settings */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Invoicing</h3>
         <div style={styles.formGroup}>
@@ -326,7 +338,6 @@ const Settings = () => {
             <p style={styles.helpText}>This customer will be selected by default in new invoices.</p>
         </div>
         
-        {/* ✅ **NEW: Auto-Print Toggle Button** */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Print Invoice Automatically After Save</label>
             <div style={styles.toggleContainer}>
@@ -335,6 +346,26 @@ const Settings = () => {
             </div>
             <p style={styles.helpText}>If set to 'Yes', the print dialog will open automatically after an invoice is saved.</p>
         </div>
+
+        {/* ✅ **5. Add the new JSX for the toggles** */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Offer Delivery Facility</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleOfferDeliveryChange(true)} style={offerDelivery ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleOfferDeliveryChange(false)} style={!offerDelivery ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this if you offer delivery services for your sales.</p>
+        </div>
+
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Maintain Credit Customers</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleMaintainCreditCustomersChange(true)} style={maintainCreditCustomers ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleMaintainCreditCustomersChange(false)} style={!maintainCreditCustomers ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to manage credit sales and track customer balances.</p>
+        </div>
+
       </div>
 
       <div style={styles.logoutContainer}><button onClick={handleLogout} style={styles.logoutButton}><AiOutlineLogout size={18} /> Logout</button></div>

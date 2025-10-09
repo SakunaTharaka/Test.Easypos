@@ -12,7 +12,6 @@ const SalesReport = ({ internalUser }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [allCustomers, setAllCustomers] = useState([]);
   
-  // ✅ **1. New state to store IDs of credit customers for quick checking**
   const [creditCustomerIds, setCreditCustomerIds] = useState(new Set());
 
   const [selectedCustomers, setSelectedCustomers] = useState([]);
@@ -35,7 +34,12 @@ const SalesReport = ({ internalUser }) => {
       if (selectedCustomers.length > 0) { const customerIds = selectedCustomers.map(c => c.value); q = query(q, where("customerId", "in", customerIds)); }
       
       const docSnap = await getDocs(q);
-      const fetchedInvoices = docSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // ✅ **FIX: Filter out credit repayments from this report**
+      const fetchedInvoices = docSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(inv => inv.paymentMethod !== 'Credit-Repayment');
+
       setAllInvoices(fetchedInvoices);
     } catch (error) {
       console.error("Error fetching invoices:", error);
@@ -48,7 +52,6 @@ const SalesReport = ({ internalUser }) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     
-    // ✅ **2. Update fetchCustomers to identify and store credit customer IDs**
     const fetchCustomers = async () => {
       const customersColRef = collection(db, uid, "customers", "customer_list");
       const snap = await getDocs(query(customersColRef));
@@ -119,7 +122,10 @@ const SalesReport = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
-      <div style={styles.headerContainer}><h2 style={styles.header}>Sales Report</h2><p style={styles.subHeader}>View, filter, and manage recent invoices.</p></div>
+      <div style={styles.headerContainer}>
+        <h2 style={styles.header}>Sales Report</h2>
+        <p style={styles.subHeader}>View, filter, and manage originally created invoices. Credit repayments are not shown here.</p>
+      </div>
       <div style={styles.controlsContainer}>
           <div style={styles.filterGroup}><label>Date Range</label><div style={styles.dateInputs}><input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{...styles.input, paddingLeft: '10px'}}/><span>to</span><input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{...styles.input, paddingLeft: '10px'}}/></div></div>
           <div style={styles.filterGroup}><label>Customers</label><Select styles={selectStyles} options={allCustomers} isMulti onChange={setSelectedCustomers} placeholder="All Customers" /></div>
@@ -131,12 +137,10 @@ const SalesReport = ({ internalUser }) => {
               <thead><tr><th style={styles.th}>Inv #</th><th style={styles.th}>Customer</th><th style={styles.th}>Total Amount</th><th style={styles.th}>User</th><th style={styles.th}>Date</th><th style={styles.th}>Actions</th></tr></thead>
               <tbody>{currentDisplayInvoices.length > 0 ? currentDisplayInvoices.map(inv => {
                 const isLocked = reconciledDates.has(inv.createdAt?.toDate().toISOString().split('T')[0]);
-                // ✅ **3. Check if the invoice's customer is a credit customer**
                 const isCredit = creditCustomerIds.has(inv.customerId);
                 return (
                   <tr key={inv.id}>
                     <td style={styles.td}>{inv.invoiceNumber}</td>
-                    {/* ✅ **4. Apply red color style if it's a credit customer** */}
                     <td style={{...styles.td, color: isCredit ? 'red' : 'inherit', fontWeight: isCredit ? '500' : 'normal' }}>{inv.customerName}</td>
                     <td style={styles.td}>Rs. {inv.total.toFixed(2)}</td>
                     <td style={styles.td}>{inv.issuedBy}</td>
@@ -166,5 +170,5 @@ const SalesReport = ({ internalUser }) => {
   );
 };
 const selectStyles = { control: (provided) => ({ ...provided, minWidth: '250px', border: '1px solid #ddd', borderRadius: '6px' })};
-const styles = { container: { padding: '24px', fontFamily: "'Inter', sans-serif" }, headerContainer: { marginBottom: '20px' }, header: { fontSize: '24px', fontWeight: '600' }, subHeader: { color: '#6c757d' }, controlsContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '20px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb' }, filterGroup: { display: 'flex', flexDirection: 'column', gap: '8px' }, dateInputs: { display: 'flex', alignItems: 'center', gap: '8px' }, searchInputContainer: { position: 'relative' }, searchIcon: { position: 'absolute', top: '50%', left: '10px', transform: 'translateY(-50%)', color: '#9ca3af' }, input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box' }, tableContainer: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }, table: { width: '100%', borderCollapse: 'collapse' }, th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: '600', color: '#4b5563', fontSize: '12px', textTransform: 'uppercase' }, td: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }, actionButtons: { display: 'flex', gap: '10px' }, actionButton: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#3498db' }, noData: { textAlign: 'center', padding: '32px', color: '#6b7280' }, pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '20px' }, };
+const styles = { container: { padding: '24px', fontFamily: "'Inter', sans-serif" }, headerContainer: { marginBottom: '20px' }, header: { fontSize: '24px', fontWeight: '600' }, subHeader: { color: '#6c757d' }, controlsContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '20px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb' }, filterGroup: { display: 'flex', flexDirection: 'column', gap: '8px' }, dateInputs: { display: 'flex', alignItems: 'center', gap: '8px' }, searchInputContainer: { position: 'relative' }, input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box' }, tableContainer: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }, table: { width: '100%', borderCollapse: 'collapse' }, th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: '600', color: '#4b5563', fontSize: '12px', textTransform: 'uppercase' }, td: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }, actionButtons: { display: 'flex', gap: '10px' }, actionButton: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#3498db' }, noData: { textAlign: 'center', padding: '32px', color: '#6b7280' }, pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '20px' }, };
 export default SalesReport;

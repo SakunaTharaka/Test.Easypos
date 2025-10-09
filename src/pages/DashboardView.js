@@ -45,13 +45,21 @@ const DashboardView = ({ internalUser }) => {
         ]);
 
         let totalSales = 0;
+        let actualInvoiceCount = 0;
+
+        // ✅ **FIX: Loop through docs to calculate sales and count original invoices separately**
         invoicesSnap.forEach(doc => {
-            totalSales += doc.data().total || 0;
+            const invoiceData = doc.data();
+            totalSales += invoiceData.total || 0;
+
+            if (invoiceData.paymentMethod !== 'Credit-Repayment') {
+                actualInvoiceCount++;
+            }
         });
 
         setStats({
             totalSales: totalSales,
-            invoicesToday: invoicesSnap.size,
+            invoicesToday: actualInvoiceCount, // Use the corrected count
             newCustomers: customersSnap.size
         });
 

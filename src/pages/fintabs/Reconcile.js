@@ -4,20 +4,15 @@ import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp
 import { CashBookContext } from '../../context/CashBookContext';
 import { AiOutlineLock, AiOutlineUnlock, AiOutlineEye, AiOutlinePrinter, AiOutlineLeft, AiOutlineRight } from 'react-icons/ai';
 
-// ✨ COMPONENT: Modal for viewing a detailed reconciliation report
 const ReconciliationReportModal = ({ report, onClose }) => {
-    
-    // This effect MUST be called before any conditional returns.
     useEffect(() => {
-        // Only add the class if the modal is actually being rendered with a report
         if (report) {
             document.body.classList.add('modal-open-for-print');
         }
-        // The cleanup function runs when the component unmounts, removing the class
         return () => {
             document.body.classList.remove('modal-open-for-print');
         };
-    }, [report]); // Dependency array ensures this re-runs if the report changes
+    }, [report]);
 
     if (!report) return null;
 
@@ -28,30 +23,16 @@ const ReconciliationReportModal = ({ report, onClose }) => {
         <>
             <style>{`
                 @media print {
-                    /* These rules are now SAFELY SCOPED and will only apply when this modal is open */
-                    body.modal-open-for-print * {
-                        visibility: hidden;
-                    }
+                    body.modal-open-for-print * { visibility: hidden; }
                     body.modal-open-for-print .print-area,
-                    body.modal-open-for-print .print-area * {
-                        visibility: visible;
-                    }
-                    body.modal-open-for-print .print-area {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        width: 100%;
-                        padding: 20px;
-                    }
-                    
-                    /* General print styles for the report content */
+                    body.modal-open-for-print .print-area * { visibility: visible; }
+                    body.modal-open-for-print .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; }
                     .no-print { display: none !important; }
                     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
                     th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
                     h3, h4 { text-align: center; margin-bottom: 10px; }
                 }
             `}</style>
-
             <div style={styles.modalOverlay}>
                 <div style={{...styles.modal, maxWidth: '900px'}}>
                     <div className="print-area">
@@ -98,15 +79,12 @@ const ReconciliationReportModal = ({ report, onClose }) => {
 };
 
 
-// ✨ MAIN COMPONENT: Reconcile Page
 const Reconcile = () => {
     const { reconciledDates, refreshBalances } = useContext(CashBookContext);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [summaryData, setSummaryData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [isReconciling, setIsReconciling] = useState(false);
-    
-    // ✨ State for History Pagination
     const [reconciliationHistory, setReconciliationHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(true);
     const [lastVisible, setLastVisible] = useState(null);
@@ -114,8 +92,6 @@ const Reconcile = () => {
     const [historyPage, setHistoryPage] = useState(1);
     const [hasNextPage, setHasNextPage] = useState(false);
     const REPORTS_PER_PAGE = 40;
-
-    // ✨ State for Modal
     const [showReportModal, setShowReportModal] = useState(false);
     const [selectedReport, setSelectedReport] = useState(null);
 
@@ -138,25 +114,38 @@ const Reconcile = () => {
         const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
         
         try {
-            const historyQuery = query(collection(db, uid, 'user_data', 'reconciliation_history'), where('reconciliationDate', '==', date), orderBy('reconciledAt', 'desc'), limit(1));
-            const historySnap = await getDocs(historyQuery);
-            const lastReconciliationTimestamp = historySnap.empty ? null : historySnap.docs[0].data().reconciledAt;
-            const queryStartTimestamp = lastReconciliationTimestamp || startOfDay;
+            const customersRef = collection(db, uid, "customers", "customer_list");
+            const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
 
-            const [invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
-                getDocs(query(collection(db, uid, 'invoices', 'invoice_list'), where('createdAt', '>=', queryStartTimestamp), where('createdAt', '<=', endOfDay))),
-                getDocs(query(collection(db, uid, 'user_data', 'expenses'), where('createdAt', '>=', queryStartTimestamp), where('createdAt', '<=', endOfDay))),
-                getDocs(query(collection(db, uid, 'stock_payments', 'payments'), where('paidAt', '>=', queryStartTimestamp), where('paidAt', '<=', endOfDay)))
+            const [creditCustomersSnap, invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
+                getDocs(creditCustomersQuery),
+                getDocs(query(collection(db, uid, 'invoices', 'invoice_list'), where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay))),
+                getDocs(query(collection(db, uid, 'user_data', 'expenses'), where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay))),
+                getDocs(query(collection(db, uid, 'stock_payments', 'payments'), where('paidAt', '>=', startOfDay), where('paidAt', '<=', endOfDay)))
             ]);
 
-            const allInvoices = invoicesSnap.docs.map(d => d.data());
+            const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
+            
+            // ✅ **FIX: Apply the same filtering logic as SalesIncome and Summary**
+            const validInvoices = invoicesSnap.docs
+              .map(d => d.data())
+              .filter(inv => {
+                  const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
+                  const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
+                  return isCreditRepayment || !isFromCreditCustomer;
+              });
+
             const allExpenses = expensesSnap.docs.map(d => d.data());
             const allStockPayments = stockPaymentsSnap.docs.map(d => d.data());
+            
+            const cashSalesList = validInvoices.filter(i => i.paymentMethod === 'Cash' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Cash'));
+            const cardSalesList = validInvoices.filter(i => i.paymentMethod === 'Card' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Card'));
+            const onlineSalesList = validInvoices.filter(i => i.paymentMethod === 'Online' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Online'));
 
             setSummaryData({
-                cardSales: { list: allInvoices.filter(i => i.paymentMethod === 'Card'), total: allInvoices.filter(i => i.paymentMethod === 'Card').reduce((s,i) => s + i.total, 0) },
-                onlineSales: { list: allInvoices.filter(i => i.paymentMethod === 'Online'), total: allInvoices.filter(i => i.paymentMethod === 'Online').reduce((s,i) => s + i.total, 0) },
-                cashSales: { list: allInvoices.filter(i => i.paymentMethod === 'Cash'), total: allInvoices.filter(i => i.paymentMethod === 'Cash').reduce((s,i) => s + i.total, 0) },
+                cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + i.total, 0) },
+                onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + i.total, 0) },
+                cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + i.total, 0) },
                 expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + e.amount, 0) },
                 stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + p.amount, 0) },
             });
@@ -206,7 +195,6 @@ const Reconcile = () => {
         } finally {
             setHistoryLoading(false);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lastVisible, firstVisible]);
 
     useEffect(() => {
@@ -216,8 +204,7 @@ const Reconcile = () => {
         setFirstVisible(null);
         setHasNextPage(false);
         fetchHistory(selectedDate, 'initial');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedDate]);
+    }, [selectedDate, fetchSummaryData, fetchHistory]);
 
     const handlePageChange = (direction) => {
         if (direction === 'next') {
@@ -365,7 +352,6 @@ const Reconcile = () => {
     );
 };
 
-// Styles
 const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f9fafb' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' },

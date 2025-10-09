@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { db, auth } from "../../firebase";
-import { collection, query, getDocs, addDoc, serverTimestamp, orderBy, where, Timestamp } from "firebase/firestore";
-import { AiOutlineSearch, AiOutlineDollar, AiOutlineDown, AiOutlineRight, AiOutlineHistory } from "react-icons/ai";
+import { collection, query, getDocs, addDoc, serverTimestamp, orderBy, where } from "firebase/firestore";
+import { AiOutlineDollar, AiOutlineHistory } from "react-icons/ai";
 import Select from "react-select";
 
 const CreditCust = () => {
-  const [creditCustomers, setCreditCustomers] = useState([]);
+  const [allCreditCustomers, setAllCreditCustomers] = useState([]);
   const [allInvoices, setAllInvoices] = useState([]);
   const [allPayments, setAllPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [expandedCustomer, setExpandedCustomer] = useState(null);
+  
+  // ✅ **1. State for the selected customer from the dropdown**
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -28,29 +29,36 @@ const CreditCust = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
 
     try {
       const customersRef = collection(db, uid, "customers", "customer_list");
       const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
       const customersSnap = await getDocs(creditCustomersQuery);
-      const customersData = customersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setCreditCustomers(customersData);
+      const customersData = customersSnap.docs.map(doc => ({ value: doc.id, label: doc.data().name, ...doc.data() }));
+      setAllCreditCustomers(customersData);
 
-      const customerIds = customersData.map(c => c.id);
+      const customerIds = customersData.map(c => c.value);
       if (customerIds.length > 0) {
         const invoicesRef = collection(db, uid, "invoices", "invoice_list");
-        const invoicesQuery = query(invoicesRef, where("customerId", "in", customerIds), orderBy("createdAt", "desc"));
+        // Only fetch original credit invoices, not repayments
+        const invoicesQuery = query(invoicesRef, where("customerId", "in", customerIds), where("paymentMethod", "==", "Credit"), orderBy("createdAt", "desc"));
         const invoicesSnap = await getDocs(invoicesQuery);
         setAllInvoices(invoicesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } else {
+        setAllInvoices([]);
       }
       
       const paymentsRef = collection(db, uid, "credit_payments", "payments");
       const paymentsSnap = await getDocs(query(paymentsRef, orderBy("paymentDate", "desc")));
-      setAllPayments(paymentsSnap.docs.map(doc => doc.data()));
+      setAllPayments(paymentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
 
     } catch (error) {
       console.error("Error fetching credit data:", error);
+      alert("An error occurred while fetching data. Check the console for details.");
     }
     setLoading(false);
   }, []);
@@ -77,7 +85,6 @@ const CreditCust = () => {
     const user = getCurrentInternal();
 
     try {
-        // 1. Save to credit_payments collection
         const paymentDoc = {
             customerId: currentItemForPayment.customerId,
             customerName: currentItemForPayment.customerName,
@@ -90,7 +97,6 @@ const CreditCust = () => {
         const paymentsColRef = collection(db, uid, "credit_payments", "payments");
         await addDoc(paymentsColRef, paymentDoc);
         
-        // 2. Add a record to the main invoices collection to be counted as income
         const invoicesColRef = collection(db, uid, "invoices", "invoice_list");
         await addDoc(invoicesColRef, {
             total: paymentData.amount,
@@ -100,16 +106,15 @@ const CreditCust = () => {
             issuedBy: user.username,
             paymentMethod: 'Credit-Repayment',
             invoiceNumber: `PAY-${currentItemForPayment.invoiceNumber}`,
-            // Store payment details in the 'items' array for consistency in reports
             items: [{ 
-                itemName: `Payment via ${paymentData.method}`, 
+                itemName: `Payment for ${currentItemForPayment.invoiceNumber} via ${paymentData.method}`, 
                 price: paymentData.amount, 
                 quantity: 1 
             }],
-            method: paymentData.method, // For reconciliation logic
+            method: paymentData.method,
         });
         
-        await fetchData(); // Refresh all data
+        await fetchData();
         alert("Payment saved successfully!");
     } catch (error) {
         alert("Error saving payment: " + error.message);
@@ -119,96 +124,94 @@ const CreditCust = () => {
         setCurrentItemForPayment(null);
     }
   };
-
-  const toggleCustomer = (customerId) => {
-    setExpandedCustomer(prev => prev === customerId ? null : customerId);
-  };
   
-  const filteredCustomers = creditCustomers.filter((customer) => 
-    search ? customer.name.toLowerCase().includes(search.toLowerCase()) : true
-  );
+  // ✅ **2. Calculate unpaid invoices for the selected customer**
+  const unpaidInvoices = selectedCustomer 
+    ? allInvoices
+        .filter(inv => inv.customerId === selectedCustomer.value)
+        .map(invoice => {
+            const totalPaidForInvoice = allPayments
+                .filter(p => p.invoiceId === invoice.id)
+                .reduce((sum, p) => sum + p.amount, 0);
+            return { ...invoice, totalPaid: totalPaidForInvoice, balance: (invoice.total || 0) - totalPaidForInvoice };
+        })
+        .filter(invoice => Math.round(invoice.balance * 100) > 0) // Filter out fully paid invoices
+    : [];
 
   if (loading) return <div style={styles.loadingContainer}>Loading Credit Data...</div>;
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>Credit Customer Invoices & Payments</h2>
+      <h2 style={styles.title}>Credit Customer Payments</h2>
       <div style={styles.controlsContainer}>
         <div style={styles.filterGroup}>
-          <label>Filter by Customer Name</label>
-          <div style={styles.searchInputContainer}><AiOutlineSearch style={styles.searchIcon}/><input type="text" placeholder="Search customer..." value={search} onChange={e => setSearch(e.target.value)} style={{...styles.input, paddingLeft: '35px'}}/></div>
+          <label>Select a Credit Customer</label>
+          {/* ✅ **3. Replaced search input with a searchable dropdown** */}
+          <Select
+            options={allCreditCustomers}
+            value={selectedCustomer}
+            onChange={setSelectedCustomer}
+            placeholder="Type to search for a customer..."
+            isClearable
+            styles={{ control: (base) => ({ ...base, height: '45px' })}}
+          />
         </div>
       </div>
       
-      <div style={styles.customerListContainer}>
-        {filteredCustomers.length > 0 ? filteredCustomers.map(customer => {
-            const customerInvoices = allInvoices.filter(inv => inv.customerId === customer.id);
-            const totalBilled = customerInvoices.reduce((sum, inv) => sum + inv.total, 0);
-            const totalPaid = allPayments.filter(p => p.customerId === customer.id).reduce((sum, p) => sum + p.amount, 0);
-            const outstanding = totalBilled - totalPaid;
+      {/* ✅ **4. Display invoices only when a customer is selected** */}
+      {selectedCustomer && (
+        <div style={styles.customerCard}>
+            <div style={styles.customerHeader}>
+                <span style={{fontWeight: 'bold', fontSize: '18px'}}>{selectedCustomer.label}</span>
+                <span style={{color: '#e74c3c', fontWeight: 'bold', fontSize: '16px'}}>
+                    Total Outstanding: Rs. {unpaidInvoices.reduce((sum, inv) => sum + inv.balance, 0).toFixed(2)}
+                </span>
+            </div>
+            <div style={styles.invoiceTableWrapper}>
+                <table style={{...styles.table, marginTop: '10px'}}>
+                    <thead>
+                        <tr>
+                            <th style={styles.th}>Invoice #</th>
+                            <th style={styles.th}>Date</th>
+                            <th style={styles.th}>Inv. Total</th>
+                            <th style={styles.th}>Paid</th>
+                            <th style={styles.th}>Balance Due</th>
+                            <th style={styles.th}>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {unpaidInvoices.length > 0 ? unpaidInvoices.map(invoice => (
+                            <tr key={invoice.id}>
+                                <td style={styles.td}>{invoice.invoiceNumber}</td>
+                                <td style={styles.td}>{invoice.createdAt?.toDate().toLocaleDateString()}</td>
+                                <td style={styles.td}>Rs. {(invoice.total || 0).toFixed(2)}</td>
+                                <td style={styles.td}>Rs. {invoice.totalPaid.toFixed(2)}</td>
+                                <td style={{...styles.td, color: '#e74c3c', fontWeight: 'bold'}}>Rs. {invoice.balance.toFixed(2)}</td>
+                                <td style={styles.td}>
+                                    <div style={{display: 'flex', gap: '8px'}}>
+                                        <button style={styles.addPaymentButton} title="Add Payment" onClick={() => handleOpenPaymentModal(invoice, invoice.totalPaid)}><AiOutlineDollar /></button>
+                                        {invoice.totalPaid > 0 && <button style={styles.historyButton} title="View Payment History" onClick={() => handleOpenHistoryModal(invoice.id)}><AiOutlineHistory /></button>}
+                                    </div>
+                                </td>
+                            </tr>
+                        )) : (
+                            <tr><td colSpan="6" style={styles.noData}>This customer has no outstanding credit invoices.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      )}
 
-            return (
-                <div key={customer.id} style={styles.customerCard}>
-                    <div style={styles.customerHeader} onClick={() => toggleCustomer(customer.id)}>
-                        <span style={{fontWeight: 'bold', fontSize: '16px'}}>{customer.name}</span>
-                        <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
-                            <span style={{color: outstanding > 0 ? '#e74c3c' : '#2ecc71', fontWeight: 'bold'}}>
-                                Balance: Rs. {outstanding.toFixed(2)}
-                            </span>
-                            {expandedCustomer === customer.id ? <AiOutlineDown /> : <AiOutlineRight />}
-                        </div>
-                    </div>
-                    {expandedCustomer === customer.id && (
-                        <div style={styles.invoiceTableWrapper}>
-                            <table style={{...styles.table, marginTop: '10px'}}>
-                                <thead>
-                                    <tr>
-                                        <th style={styles.th}>Invoice #</th>
-                                        <th style={styles.th}>Date</th>
-                                        <th style={styles.th}>Total</th>
-                                        <th style={styles.th}>Paid</th>
-                                        <th style={styles.th}>Balance</th>
-                                        <th style={styles.th}>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {customerInvoices.map(invoice => {
-                                        const invoicePayments = allPayments.filter(p => p.invoiceId === invoice.id);
-                                        const totalPaidForInvoice = invoicePayments.reduce((sum, p) => sum + p.amount, 0);
-                                        const invoiceBalance = invoice.total - totalPaidForInvoice;
-                                        const hasBalance = Math.round(invoiceBalance * 100) > 0;
-                                        return (
-                                            <tr key={invoice.id}>
-                                                <td style={styles.td}>{invoice.invoiceNumber}</td>
-                                                <td style={styles.td}>{invoice.createdAt.toDate().toLocaleDateString()}</td>
-                                                <td style={styles.td}>Rs. {invoice.total.toFixed(2)}</td>
-                                                <td style={styles.td}>Rs. {totalPaidForInvoice.toFixed(2)}</td>
-                                                <td style={{...styles.td, color: hasBalance ? '#e74c3c' : '#2ecc71', fontWeight: 'bold'}}>Rs. {invoiceBalance.toFixed(2)}</td>
-                                                <td style={styles.td}>
-                                                    <div style={{display: 'flex', gap: '8px'}}>
-                                                        {hasBalance && <button style={styles.addPaymentButton} onClick={() => handleOpenPaymentModal(invoice, totalPaidForInvoice)}><AiOutlineDollar /></button>}
-                                                        {invoicePayments.length > 0 && <button style={styles.historyButton} onClick={() => handleOpenHistoryModal(invoice.id)}><AiOutlineHistory /></button>}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        )
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-            )
-        }) : <p style={styles.noData}>No credit customers found.</p>}
-      </div>
       {showPaymentModal && <PaymentModal record={currentItemForPayment} onSave={handleSavePayment} onCancel={() => setShowPaymentModal(false)} isSaving={isSaving} />}
       {showHistoryModal && <PaymentHistoryModal payments={paymentHistory} onClose={() => setShowHistoryModal(false)}/>}
     </div>
   );
 };
 
+// ... (Modal components and styles remain largely the same)
 const PaymentModal = ({ record, onSave, onCancel, isSaving }) => {
-    const invoiceBalance = record.total - record.totalPaid;
+    const invoiceBalance = (record.total || 0) - record.totalPaid;
     const [formData, setFormData] = useState({amount: invoiceBalance.toFixed(2), paymentMethod: 'Cash', reference: ''});
     const [error, setError] = useState('');
 
@@ -281,14 +284,14 @@ const PaymentHistoryModal = ({ payments, onClose }) => (
                     </tr>
                 </thead>
                 <tbody>
-                    {payments.map((p, i) => (
-                        <tr key={i}>
-                            <td style={styles.td}>{p.paymentDate.toDate().toLocaleString()}</td>
+                    {payments.length > 0 ? payments.map((p, i) => (
+                        <tr key={p.id}>
+                            <td style={styles.td}>{p.paymentDate?.toDate().toLocaleString()}</td>
                             <td style={styles.td}>Rs. {p.amount.toFixed(2)}</td>
                             <td style={styles.td}>{p.method}</td>
                             <td style={styles.td}>{p.paidBy}</td>
                         </tr>
-                    ))}
+                    )) : <tr><td colSpan="4" style={styles.noData}>No payments found for this invoice.</td></tr>}
                 </tbody>
             </table>
             <div style={styles.modalActions}>
@@ -310,8 +313,8 @@ const styles = {
     input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box' },
     customerListContainer: { display: 'flex', flexDirection: 'column', gap: '15px' },
     customerCard: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e5e7eb' },
-    customerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', cursor: 'pointer' },
-    invoiceTableWrapper: { padding: '0 15px 15px 15px', overflowX: 'auto' },
+    customerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', cursor: 'pointer', borderBottom: '1px solid #e5e7eb' },
+    invoiceTableWrapper: { padding: '15px', overflowX: 'auto' },
     table: { width: '100%', borderCollapse: 'collapse' },
     th: { padding: '10px', textAlign: 'left', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: '600', color: '#4b5563', fontSize: '12px', textTransform: 'uppercase' },
     td: { padding: '10px', borderBottom: '1px solid #e5e7eb', verticalAlign: 'middle', fontSize: '14px' },

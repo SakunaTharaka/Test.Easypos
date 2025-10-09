@@ -4,9 +4,6 @@ import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-/**
- * A self-contained header component designed to look like the dashboard.
- */
 const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady }) => {
     return (
         <div style={styles.navbar}>
@@ -35,16 +32,15 @@ const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady }) => {
     );
 };
 
-/**
- * A self-contained, printable layout for the invoice.
- */
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
   if (!invoice || !Array.isArray(invoice.items)) {
     return null;
   }
 
   const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const balanceToDisplay = invoice.received === 0 ? 0 : invoice.balance;
+  // ✅ **1. Update balance calculation to include delivery charges**
+  const totalBeforeReceived = subtotal + (invoice.deliveryCharge || 0);
+  const balanceToDisplay = invoice.received === 0 ? 0 : invoice.received - totalBeforeReceived;
 
   return (
     <div style={styles.invoiceBox}>
@@ -94,15 +90,18 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
 
       <div className="invoice-footer-section">
         <div className="remarks-area">
-            {/* You can add remarks here in the future if needed */}
         </div>
         <div style={styles.totalsContainer}>
             <div style={styles.totals}>
-            <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div>
-            <div style={styles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div>
-            <hr style={styles.hr} />
-            <div style={styles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div>
-            <div style={{ ...styles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div>
+                <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div>
+                {/* ✅ **2. Conditionally display delivery charges if they exist** */}
+                {invoice.deliveryCharge > 0 && (
+                    <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {invoice.deliveryCharge.toFixed(2)}</span></div>
+                )}
+                <div style={styles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div>
+                <hr style={styles.hr} />
+                <div style={styles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div>
+                <div style={{ ...styles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div>
             </div>
         </div>
       </div>
@@ -113,9 +112,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
   );
 };
 
-/**
- * The main component that fetches invoice data and manages the print-ready state.
- */
 const InvoiceViewer = () => {
   const { invoiceId } = useParams();
   const [invoice, setInvoice] = useState(null);
@@ -242,7 +238,6 @@ const InvoiceViewer = () => {
 
 // Styles object
 const styles = {
-  // Styles for the new header
   navbar: { 
     width: "100%", 
     padding: "16px 24px", 
@@ -252,7 +247,7 @@ const styles = {
     justifyContent: "space-between", 
     alignItems: "center", 
     boxSizing: "border-box",
-    fontFamily: "'Inter', sans-serif" // Font family added to match dashboard
+    fontFamily: "'Inter', sans-serif"
   },
   logoContainer: { display: "flex", alignItems: "center" },
   logoPlaceholder: { width: "52px", height: "52px", borderRadius: "12px", background: "linear-gradient(135deg, #3498db, #2c3e50)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "22px", fontWeight: "bold", marginRight: "16px" },
@@ -263,7 +258,6 @@ const styles = {
   headerPrintBtn: { padding: "10px 18px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #3498db 0%, #2980b9 100%)", color: "#fff", cursor: "pointer", fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" },
   headerPrintBtnDisabled: { padding: "10px 18px", border: "none", borderRadius: "8px", background: "#7f8c8d", color: "#fff", cursor: "not-allowed", fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" },
 
-  // Styles for the printable invoice layout
   invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
   logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
   companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },

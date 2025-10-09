@@ -43,7 +43,6 @@ const Summary = () => {
       const startOfDay = new Date(from); startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(to); endOfDay.setHours(23, 59, 59, 999);
 
-      // --- Fetch all required data concurrently ---
       const customersRef = collection(db, uid, "customers", "customer_list");
       const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
 
@@ -60,12 +59,13 @@ const Summary = () => {
 
       const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
       
-      // Filter invoices to exclude credit sales but include credit repayments
+      // ✅ **FIX: Filter invoices to exclude credit sales but include credit repayments**
       const validInvoices = invoicesSnap.docs
         .map(d => d.data())
         .filter(inv => {
             const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
             const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
+            // This is the key: include income if it's a repayment OR if the sale is not from a credit customer
             return isCreditRepayment || !isFromCreditCustomer;
         });
 
@@ -73,21 +73,21 @@ const Summary = () => {
       const itemCostMap = new Map();
       itemsSnap.docs.forEach(d => {
         const itemData = d.data();
-        if (itemData.pid) { // Assuming PID is the unique identifier for items
+        if (itemData.pid) {
+            // Using PID as a robust unique key for items
             itemCostMap.set(itemData.pid, itemData.costPrice || 0);
         }
       });
       
-      // --- Process KPIs based on valid invoices ---
       const totalRevenue = validInvoices.reduce((sum, inv) => sum + inv.total, 0);
       const totalExpenses = allExpenses.reduce((sum, exp) => sum + exp.amount, 0);
       
       const totalCOGS = validInvoices.reduce((sum, inv) => {
-        // Exclude COGS for credit repayments as they are not sales of goods
         if (inv.paymentMethod === 'Credit-Repayment') return sum;
         
         const invoiceCOGS = inv.items.reduce((itemSum, item) => {
-          const cost = itemCostMap.get(item.itemId) || 0; // Assuming itemId links to PID
+          // The itemId in the invoice should correspond to the PID of the item
+          const cost = itemCostMap.get(item.itemId) || 0;
           return itemSum + (cost * item.quantity);
         }, 0);
         return sum + invoiceCOGS;
@@ -97,7 +97,6 @@ const Summary = () => {
       const netIncome = grossProfit - totalExpenses;
       setKpiData({ totalRevenue, grossProfit, totalExpenses, netIncome });
 
-      // --- Process Sales Chart Data ---
       const dailySales = {};
       validInvoices.forEach(inv => {
         const date = inv.createdAt.toDate().toISOString().split('T')[0];
@@ -116,7 +115,6 @@ const Summary = () => {
         datasets: [{ label: 'Daily Sales', data: salesDataPoints, borderColor: '#3498db', backgroundColor: 'rgba(52, 152, 219, 0.1)', fill: true, tension: 0.1 }]
       });
 
-      // --- Process Expense Chart Data ---
       const expenseCategories = {};
       allExpenses.forEach(exp => {
         const category = exp.category || 'Uncategorized';
@@ -227,4 +225,3 @@ const styles = {
 };
 
 export default Summary;
-
