@@ -22,7 +22,6 @@ import DaySaleBal from "./fintabs/Reconcile";
 import Expenses from "./fintabs/Expenses";
 import Summary from "./fintabs/Summary";
 import CashBook from "./fintabs/CashBook"; 
-// ✅ **1. Import the new CreditCust component**
 import CreditCust from "./fintabs/CreditCust";
 import DashboardView from "./DashboardView";
 import Invoice from "./Invoice";
@@ -44,6 +43,9 @@ const Dashboard = () => {
   const [showProductionTabs, setShowProductionTabs] = useState(false);
   const [activeFinanceTab, setActiveFinanceTab] = useState("Sales Income");
   const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
+
+  // ✅ **1. State to hold the credit customer setting**
+  const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
 
   const [maintenanceStatus, setMaintenanceStatus] = useState({
     loading: true,
@@ -118,6 +120,8 @@ const Dashboard = () => {
             const settingsData = docSnap.data();
             setUserInfo(settingsData);
             setShowProductionTabs(settingsData.useShiftProduction === true);
+            // ✅ **2. Get the credit customer setting value**
+            setMaintainCreditCustomers(settingsData.maintainCreditCustomers === true);
           } else {
             setUserInfo({ companyName: "My Business" });
           }
@@ -207,6 +211,7 @@ const Dashboard = () => {
     if (activeTab === "Settings" && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
+      // ✅ **3. Pass the credit customer setting to the Customers component**
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
       case "Inventory": return (
         <div>
@@ -226,19 +231,25 @@ const Dashboard = () => {
         </div>
       );
       case "Sales Report": return <SalesReport internalUser={internalLoggedInUser} />;
-      case "Finance": return (
+      case "Finance": 
+        // ✅ **4. Conditionally create the list of finance sub-tabs**
+        const financeSubTabs = [ "Sales Income", "Stock Payments" ];
+        if (maintainCreditCustomers) {
+          financeSubTabs.push("Credit Customer Cash");
+        }
+        financeSubTabs.push("Reconcilation", "Expenses", "Summary", "Cash Book");
+        
+        return (
         <div>
-          {/* ✅ **2. Add the new sub-tab to the list** */}
           <div style={styles.inventorySubTabs}>
-            {[ "Sales Income", "Stock Payments", "Credit Customer Cash", "Reconcilation", "Expenses", "Summary", "Cash Book" ].map(tab => (
+            {financeSubTabs.map(tab => (
               <div key={tab} style={{...styles.inventorySubTab, ...(activeFinanceTab === tab ? styles.activeInventorySubTab : {})}} onClick={() => setActiveFinanceTab(tab)}>{tab}</div>
             ))}
           </div>
           <div style={styles.inventoryContent}>
             {activeFinanceTab === "Sales Income" && <SalesIncome />}
             {activeFinanceTab === "Stock Payments" && <StockPayment />}
-            {/* ✅ **3. Render the new component when the sub-tab is active** */}
-            {activeFinanceTab === "Credit Customer Cash" && <CreditCust />}
+            {activeFinanceTab === "Credit Customer Cash" && maintainCreditCustomers && <CreditCust />}
             {activeFinanceTab === "Reconcilation" && <DaySaleBal />}
             {activeFinanceTab === "Expenses" && <Expenses />}
             {activeFinanceTab === "Summary" && <Summary />}
@@ -255,7 +266,7 @@ const Dashboard = () => {
           </div>
           <div style={styles.inventoryContent}>
             {activeItemsCustomersTab === "Items" && <Items internalUser={internalLoggedInUser} />}
-            {activeItemsCustomersTab === "Customers" && <Customers internalUser={internalLoggedInUser} />}
+            {activeItemsCustomersTab === "Customers" && <Customers internalUser={internalLoggedInUser} maintainCreditCustomers={maintainCreditCustomers} />}
             {activeItemsCustomersTab === "Price Categories" && <PriceCat internalUser={internalLoggedInUser} />}
           </div>
         </div>

@@ -13,7 +13,8 @@ import {
 import { AiOutlinePlus, AiOutlineDelete, AiOutlineEdit } from "react-icons/ai";
 import { FaUserTag } from "react-icons/fa";
 
-const Customers = ({ internalUser }) => {
+// ✅ **1. Receive the new 'maintainCreditCustomers' prop**
+const Customers = ({ internalUser, maintainCreditCustomers }) => {
   const [customers, setCustomers] = useState([]);
   const [priceCategories, setPriceCategories] = useState([]);
   const [showCustomerPopup, setShowCustomerPopup] = useState(false);
@@ -261,8 +262,8 @@ const Customers = ({ internalUser }) => {
               ))}
             </select>
             
-            {/* ✅ **FIX: Checkbox is now hidden during edit mode** */}
-            {!editingCustomer && (
+            {/* ✅ **2. Conditionally render the credit customer section based on the setting** */}
+            {maintainCreditCustomers && !editingCustomer && (
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', gap: '10px' }}>
                   <input 
                       type="checkbox"
@@ -290,7 +291,6 @@ const Customers = ({ internalUser }) => {
                     <label htmlFor="overdueDays">days</label>
                 </div>
             )}
-
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
@@ -336,4 +336,3 @@ const popupInnerStyle = { background: "#fff", padding: 24, borderRadius: 8, widt
 const popupBtnStyle = { padding: "10px 16px", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 500 };
 
 export default Customers;
-
