@@ -43,8 +43,6 @@ const Dashboard = () => {
   const [showProductionTabs, setShowProductionTabs] = useState(false);
   const [activeFinanceTab, setActiveFinanceTab] = useState("Sales Income");
   const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
-
-  // ✅ **1. State to hold the credit customer setting**
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
 
   const [maintenanceStatus, setMaintenanceStatus] = useState({
@@ -119,8 +117,11 @@ const Dashboard = () => {
           if (docSnap.exists()) {
             const settingsData = docSnap.data();
             setUserInfo(settingsData);
-            setShowProductionTabs(settingsData.useShiftProduction === true);
-            // ✅ **2. Get the credit customer setting value**
+            
+            // ✅ **FIX: Updated logic to show production tabs based on Inventory Type**
+            const inventoryType = settingsData.inventoryType || "Buy and Sell only";
+            setShowProductionTabs(inventoryType === "Production Selling only" || inventoryType === "We doing both");
+            
             setMaintainCreditCustomers(settingsData.maintainCreditCustomers === true);
           } else {
             setUserInfo({ companyName: "My Business" });
@@ -211,7 +212,6 @@ const Dashboard = () => {
     if (activeTab === "Settings" && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
-      // ✅ **3. Pass the credit customer setting to the Customers component**
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
       case "Inventory": return (
         <div>
@@ -223,8 +223,8 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Stock-Out" && <StockOut internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Add Production" && <AddProduction internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Production Balance" && <ProductionBalance />}
+            {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
+            {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}
             {activeInventoryTab === "Purchasing Order" && <PurchasingOrder internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Stock Balance" && <StockBalance />}
           </div>
@@ -232,7 +232,6 @@ const Dashboard = () => {
       );
       case "Sales Report": return <SalesReport internalUser={internalLoggedInUser} />;
       case "Finance": 
-        // ✅ **4. Conditionally create the list of finance sub-tabs**
         const financeSubTabs = [ "Sales Income", "Stock Payments" ];
         if (maintainCreditCustomers) {
           financeSubTabs.push("Credit Customer Cash");
@@ -379,3 +378,4 @@ styleSheet.innerText = `
 document.head.appendChild(styleSheet);
 
 export default Dashboard;
+
