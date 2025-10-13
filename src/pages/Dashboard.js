@@ -27,6 +27,7 @@ import DashboardView from "./DashboardView";
 import Invoice from "./Invoice";
 import SalesReport from "./SalesReport";
 import Help from "./Help";
+import StockOutBal from "./tabs/StockOutBal";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showPopup, setShowPopup] = useState(false);
   const [activeTab, setActiveTab] = useState("Dashboard");
-  const [activeInventoryTab, setActiveInventoryTab] = useState("Stock-In");
+  const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order"); // Default to new first tab
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
   const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [internalUsers, setInternalUsers] = useState([]);
@@ -118,7 +119,6 @@ const Dashboard = () => {
             const settingsData = docSnap.data();
             setUserInfo(settingsData);
             
-            // ✅ **FIX: Updated logic to show production tabs based on Inventory Type**
             const inventoryType = settingsData.inventoryType || "Buy and Sell only";
             setShowProductionTabs(inventoryType === "Production Selling only" || inventoryType === "We doing both");
             
@@ -213,20 +213,35 @@ const Dashboard = () => {
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
-      case "Inventory": return (
+      case "Inventory":
+        // ✅ **FIX: Reordered and renamed the sub-tabs**
+        let inventorySubTabs = [
+          "Purchasing Order",
+          "Stock-In",
+          "Stock-Out",
+          "Stores Balance",     // Renamed
+          "Buy&Sell Balance",   // Renamed
+        ];
+
+        if (showProductionTabs) {
+          inventorySubTabs.push("Add Production", "Production Balance");
+        }
+
+        return (
         <div>
           <div style={styles.inventorySubTabs}>
-            {[ "Stock-In", "Stock-Out", ...(showProductionTabs ? ["Add Production", "Production Balance"] : []), "Purchasing Order", "Stock Balance" ].map(tab => (
+            {inventorySubTabs.map(tab => (
               <div key={tab} style={{...styles.inventorySubTab, ...(activeInventoryTab === tab ? styles.activeInventorySubTab : {})}} onClick={() => setActiveInventoryTab(tab)}>{tab}</div>
             ))}
           </div>
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Stock-Out" && <StockOut internalUser={internalLoggedInUser} />}
+            {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />} {/* Renamed */}
             {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}
             {activeInventoryTab === "Purchasing Order" && <PurchasingOrder internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Stock Balance" && <StockBalance />}
+            {activeInventoryTab === "Stores Balance" && <StockBalance />} {/* Renamed */}
           </div>
         </div>
       );
@@ -378,4 +393,3 @@ styleSheet.innerText = `
 document.head.appendChild(styleSheet);
 
 export default Dashboard;
-

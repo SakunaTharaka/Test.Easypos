@@ -49,7 +49,25 @@ const ProductionBalance = () => {
             const startTimestamp = Timestamp.fromDate(startOfDay);
             const endTimestamp = Timestamp.fromDate(endOfDay);
 
-            // 1. Fetch Production Data for date and shift
+            // ✅ 1. Fetch Master List of 'ourProduct' items first to create a filter
+            const itemsColRef = collection(db, uid, "items", "item_list");
+            const itemsQuery = query(itemsColRef, where("type", "==", "ourProduct"));
+            const itemsSnap = await getDocs(itemsQuery);
+            const itemNameMap = new Map();
+            const ourProductIds = new Set();
+            itemsSnap.docs.forEach(doc => {
+                itemNameMap.set(doc.id, doc.data().name);
+                ourProductIds.add(doc.id);
+            });
+
+            // If no products are defined, no need to query further.
+            if (ourProductIds.size === 0) {
+                setBalanceData([]);
+                setLoading(false);
+                return;
+            }
+
+            // 2. Fetch Production Data for date and shift
             const prodColRef = collection(db, uid, "production", "production_records");
             const prodQuery = query(prodColRef, 
                 where("productionDate", ">=", startTimestamp), 
@@ -60,12 +78,15 @@ const ProductionBalance = () => {
             const productionMap = new Map();
             prodSnap.docs.forEach(doc => {
                 doc.data().lineItems.forEach(item => {
-                    const currentQty = productionMap.get(item.id) || 0;
-                    productionMap.set(item.id, currentQty + item.quantity);
+                    // ✅ Filter: Only count if the item is one of 'ourProduct's
+                    if (ourProductIds.has(item.id)) {
+                        const currentQty = productionMap.get(item.id) || 0;
+                        productionMap.set(item.id, currentQty + item.quantity);
+                    }
                 });
             });
 
-            // 2. Fetch Invoice (Billed) Data for date and shift
+            // 3. Fetch Invoice (Billed) Data for date and shift
             const invColRef = collection(db, uid, "invoices", "invoice_list");
             const invQuery = query(invColRef, 
                 where("createdAt", ">=", startTimestamp), 
@@ -76,17 +97,12 @@ const ProductionBalance = () => {
             const billedMap = new Map();
             invSnap.docs.forEach(doc => {
                 doc.data().items.forEach(item => {
-                    const currentQty = billedMap.get(item.itemId) || 0;
-                    billedMap.set(item.itemId, currentQty + item.quantity);
+                    // ✅ Filter: Only count if the item is one of 'ourProduct's
+                    if (ourProductIds.has(item.itemId)) {
+                        const currentQty = billedMap.get(item.itemId) || 0;
+                        billedMap.set(item.itemId, currentQty + item.quantity);
+                    }
                 });
-            });
-
-            // 3. Fetch Master Item List to get names
-            const itemsColRef = collection(db, uid, "items", "item_list");
-            const itemsSnap = await getDocs(query(itemsColRef));
-            const itemNameMap = new Map();
-            itemsSnap.docs.forEach(doc => {
-                itemNameMap.set(doc.id, doc.data().name);
             });
             
             // 4. Merge and Calculate Balance
@@ -107,13 +123,13 @@ const ProductionBalance = () => {
                     difference,
                     status
                 };
-            });
+            }).sort((a, b) => a.itemName.localeCompare(b.itemName)); // Sort alphabetically
 
             setBalanceData(finalData);
 
         } catch (error) {
             console.error("Error fetching balance data:", error);
-            alert("Error fetching balance data. See console for details.");
+            alert("Error fetching balance data. A Firestore index might be required. See console for details.");
         }
         setLoading(false);
     };
@@ -158,7 +174,7 @@ const ProductionBalance = () => {
                                     <td style={styles.td}>{item.status}</td>
                                 </tr>
                             ))}
-                            {balanceData.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', padding: '20px'}}>No data for the selected date and shift.</td></tr>}
+                            {balanceData.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', padding: '20px'}}>No 'Our Product' items found with production or sales activity for the selected date and shift.</td></tr>}
                         </tbody>
                     </table>
                 )}

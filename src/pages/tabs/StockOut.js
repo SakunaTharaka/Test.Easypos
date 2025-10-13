@@ -12,9 +12,10 @@ const StockOut = ({ internalUser }) => {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({
     stockInId: "",
-    itemId: "", // This will now hold a unique identifier for the line item
+    itemId: "",
     category: "",
     item: "",
+    type: "", // ✅ 1. Added 'type' to the form state
     quantity: "",
     receiverId: "",
     receiverName: "",
@@ -50,26 +51,22 @@ const StockOut = ({ internalUser }) => {
         const stockInColRef = collection(db, uid, "inventory", "stock_in");
         const invSnap = await getDocs(query(stockInColRef));
         
-        // 💡 FIX: Use flatMap to create a flat list of all line items from all stock-in documents.
-        // Each line item will now be a selectable option in the dropdown.
         const itemOptions = invSnap.docs.flatMap(doc => {
             const stockInData = doc.data();
             const stockInId = stockInData.stockInId;
             const docId = doc.id;
 
-            // Ensure lineItems exists and is an array before mapping
             if (Array.isArray(stockInData.lineItems)) {
                 return stockInData.lineItems.map((lineItem, index) => ({
-                    // Create a unique value for each line item to avoid conflicts in the Select component
                     value: `${docId}-${index}`, 
                     label: `${lineItem.name} (from ${stockInId})`,
                     category: lineItem.category,
                     unit: lineItem.unit,
+                    type: lineItem.type, // ✅ 2. Read 'type' from the stocked-in item
                     stockInId: stockInId,
                     itemName: lineItem.name,
                 }));
             }
-            // Return an empty array for documents that don't have the new structure, preventing errors.
             return []; 
         });
         setAvailableItems(itemOptions);
@@ -94,20 +91,19 @@ const StockOut = ({ internalUser }) => {
     setForm({ ...form, [name]: value });
   };
   
-  // 💡 FIX: This handler now correctly populates the form from the selected line item.
   const handleItemSelect = (selectedOption) => {
     if (selectedOption) {
         setForm({ 
             ...form, 
-            itemId: selectedOption.value, // The unique value for the line item
+            itemId: selectedOption.value,
             item: selectedOption.itemName, 
             category: selectedOption.category, 
             unit: selectedOption.unit, 
+            type: selectedOption.type, // ✅ 3. Set the item's 'type' in the form
             stockInId: selectedOption.stockInId 
         });
     } else {
-        // Reset form fields when the selection is cleared
-        setForm({ ...form, itemId: "", item: "", category: "", unit: "", stockInId: "" });
+        setForm({ ...form, itemId: "", item: "", category: "", unit: "", type: "", stockInId: "" });
     }
   };
 
@@ -140,12 +136,13 @@ const StockOut = ({ internalUser }) => {
       const stockOutId = await getNextStockOutId(uid);
       if (stockOutId === null) return;
       const stockOutColRef = collection(db, uid, "inventory", "stock_out");
+      // ✅ 4. The entire form object, including the new 'type' field, is saved
       const stockOutData = { ...form, quantity: Number(form.quantity), stockOutId, addedBy, createdAt: serverTimestamp() };
       const docRef = await addDoc(stockOutColRef, stockOutData);
       const newItem = { ...stockOutData, id: docRef.id, createdAt: new Date() };
       setStockOutList((prev) => [newItem, ...prev]);
-      // Clear form completely after saving
-      setForm({ itemId: "", category: "", item: "", quantity: "", receiverId: "", receiverName: "", unit: "", remark: "", stockInId: "" });
+      // ✅ 5. Reset the form completely, including 'type'
+      setForm({ itemId: "", category: "", item: "", quantity: "", receiverId: "", receiverName: "", unit: "", remark: "", stockInId: "", type: "" });
       setShowModal(false);
     } catch (error) {
       alert("Error adding stock-out record: " + error.message);
@@ -182,10 +179,30 @@ const StockOut = ({ internalUser }) => {
     <div style={styles.container}>
       <div style={styles.headerContainer}><h2 style={styles.header}>Stock Out</h2><p style={styles.subHeader}>Record inventory items leaving your stock</p></div>
       <div style={styles.controlsContainer}><div style={styles.searchContainer}><div style={styles.searchInputContainer}><AiOutlineSearch style={styles.searchIcon} /><input type="text" placeholder="Search records..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} /></div><button style={styles.filterToggle} onClick={() => setShowFilters(!showFilters)}><AiOutlineFilter style={{ marginRight: '6px' }} />Filters</button></div>{showFilters && (<div style={styles.filterPanel}><div style={styles.dateFilters}><div style={styles.filterGroup}><label style={styles.filterLabel}>From Date</label><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} /></div><div style={styles.filterGroup}><label style={styles.filterLabel}>To Date</label><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={styles.dateInput} /></div></div></div>)}<button style={styles.stockOutBtn} onClick={() => setShowModal(true)}><AiOutlinePlus size={20} /> New Stock Out</button></div>
-      {showModal && (<div style={styles.modalOverlay}><div style={styles.modal}><div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock Out</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div><div style={styles.formGrid}><div style={styles.formGroupFull}><label style={styles.label}>Select Item *</label><Select options={availableItems} onChange={handleItemSelect} placeholder="Search by item name or Stock In ID..." isClearable /></div><div style={styles.formGroup}><label style={styles.label}>Category</label><input type="text" value={form.category} style={styles.inputDisabled} readOnly /></div><div style={styles.formGroup}><label style={styles.label}>Unit</label><input type="text" value={form.unit} style={styles.inputDisabled} readOnly /></div><div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div><hr style={styles.hr} /><div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div><div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div><div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div></div><div style={styles.modalButtons}><button style={styles.cancelButton} onClick={() => setShowModal(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Stock Out</button></div></div></div>)}
+      {showModal && (<div style={styles.modalOverlay}><div style={styles.modal}><div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock Out</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div><div style={styles.formGrid}>
+        <div style={styles.formGroupFull}><label style={styles.label}>Select Item *</label><Select options={availableItems} onChange={handleItemSelect} placeholder="Search by item name or Stock In ID..." isClearable /></div>
+        {/* ✅ NEW: Display section for item details */}
+        <div style={styles.formGroupFull}>
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px'}}>
+                <div style={styles.formGroup}>
+                    <label style={styles.label}>Category</label>
+                    <input type="text" value={form.category || 'N/A'} style={styles.inputDisabled} readOnly />
+                </div>
+                <div style={styles.formGroup}>
+                    <label style={styles.label}>Type</label>
+                    <input type="text" value={form.type || 'N/A'} style={styles.inputDisabled} readOnly />
+                </div>
+                <div style={styles.formGroup}>
+                    <label style={styles.label}>Unit</label>
+                    <input type="text" value={form.unit || 'N/A'} style={styles.inputDisabled} readOnly />
+                </div>
+            </div>
+        </div>
+        <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div><hr style={styles.hr} /><div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div><div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div><div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div></div><div style={styles.modalButtons}><button style={styles.cancelButton} onClick={() => setShowModal(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Stock Out</button></div></div></div>)}
       <div style={styles.tableContainer}><div style={styles.tableHeader}><span style={styles.tableTitle}>Stock Out History</span><label><input type="checkbox" checked={showStockInId} onChange={() => setShowStockInId(!showStockInId)} /> Show Stock In ID</label></div><div style={styles.tableWrapper}>
           <table style={styles.table}>
-            <thead><tr><th style={styles.th}>Stock Out ID</th>{showStockInId && <th style={styles.th}>From Stock In ID</th>}<th style={styles.th}>Item</th><th style={styles.th}>Category</th><th style={styles.th}>Quantity</th><th style={styles.th}>Receiver</th><th style={styles.th}>Added By</th><th style={styles.th}>Date & Time</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
+            {/* ✅ NEW: Added 'Type' column to the table */}
+            <thead><tr><th style={styles.th}>Stock Out ID</th>{showStockInId && <th style={styles.th}>From Stock In ID</th>}<th style={styles.th}>Item</th><th style={styles.th}>Type</th><th style={styles.th}>Category</th><th style={styles.th}>Quantity</th><th style={styles.th}>Receiver</th><th style={styles.th}>Added By</th><th style={styles.th}>Date & Time</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
             <tbody>
               {currentItems.length > 0 ? (currentItems.map((item) => (
                   <tr key={item.id} style={styles.tr}>
@@ -194,6 +211,7 @@ const StockOut = ({ internalUser }) => {
                     </td>
                     {showStockInId && <td style={styles.td}>{item.stockInId}</td>}
                     <td style={styles.td}>{item.item}</td>
+                    <td style={styles.td}>{item.type}</td>
                     <td style={styles.td}>{item.category}</td>
                     <td style={styles.td}>{item.quantity} {item.unit}</td>
                     <td style={styles.td}>{item.receiverName} ({item.receiverId})</td>
@@ -201,7 +219,7 @@ const StockOut = ({ internalUser }) => {
                     <td style={styles.td}>{item.createdAt ? (item.createdAt.toDate ? item.createdAt.toDate().toLocaleString() : item.createdAt.toLocaleString()) : 'N/A'}</td>
                     {isAdmin && (<td style={styles.td}><button style={styles.deleteBtn} onClick={() => handleDelete(item.id)} title="Delete entry"><AiOutlineDelete size={16}/></button></td>)}
                   </tr>
-                ))) : (<tr><td colSpan={isAdmin ? (showStockInId ? 9 : 8) : (showStockInId ? 8 : 7)} style={styles.noData}>No stock out records found.</td></tr>)}
+                ))) : (<tr><td colSpan={isAdmin ? (showStockInId ? 10 : 9) : (showStockInId ? 9 : 8)} style={styles.noData}>No stock out records found.</td></tr>)}
             </tbody>
           </table>
         </div>{totalPages > 1 && (<div style={styles.pagination}><button style={styles.paginationButton} onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>Previous</button><span style={styles.paginationInfo}>Page {currentPage} of {totalPages}</span><button style={styles.paginationButton} onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>Next</button></div>)}</div>
@@ -209,7 +227,6 @@ const StockOut = ({ internalUser }) => {
   );
 };
 
-// Styles remain the same
 const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f8f9fa' },
     loadingContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#6c757d' },
