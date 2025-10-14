@@ -72,6 +72,14 @@ const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
     const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
 
+    // This adds a class to the <body> so our print styles only apply when the modal is open.
+    useEffect(() => {
+        document.body.classList.add('print-modal-active');
+        return () => {
+            document.body.classList.remove('print-modal-active');
+        };
+    }, []);
+
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Enter' && isPrintReady) {
@@ -94,41 +102,56 @@ const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
 
     return (
         <>
-            {/* ✅ FIX: Updated CSS to ensure content prints from the top */}
             <style>{`
                 @page {
+                    /* This removes the printer's default margin. */
+                    margin: 0;
                     size: 80mm auto;
-                    margin: 3mm;
                 }
+                
                 @media print {
+                    /* Reset body styles for printing */
                     body {
                         background-color: #fff !important;
+                        /* ✅ FIX: Add margin and padding reset to the body to remove the top gap */
+                        margin: 0 !important;
+                        padding: 0 !important;
                     }
-                    .no-print {
-                        display: none !important;
+
+                    /* Hide everything except our modal */
+                    body.print-modal-active > * {
+                        visibility: hidden !important;
                     }
-                    /* This is the key fix: We override the screen centering for printing */
-                    .print-preview-overlay {
-                        align-items: flex-start !important; /* Aligns content to the top */
-                        justify-content: flex-start !important;
-                        background-color: transparent !important;
+                    body.print-modal-active .print-preview-overlay,
+                    body.print-modal-active .print-preview-overlay * {
+                        visibility: visible !important;
                     }
+
+                    /* Force the modal to the absolute top-left corner. */
+                    body.print-modal-active .print-preview-overlay {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        display: block !important;
+                    }
+                    
+                    /* Clean up the inner container styles */
                     .print-area-container {
                         box-shadow: none !important;
                         margin: 0 !important;
                         padding: 0 !important;
                         width: 100% !important;
-                        transform: none !important; /* Removes the screen scaling effect */
+                        transform: none !important;
                     }
-                    .print-area {
-                        page: thermal;
-                        font-family: 'Courier New', monospace;
+                    .no-print {
+                        display: none !important;
                     }
                 }
             `}</style>
-            {/* ✅ FIX: Added className="print-preview-overlay" to the main div */}
+            
             <div className="print-preview-overlay" style={styles.confirmOverlay}>
-                <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '10px', transform: 'scale(1.1)', transformOrigin: 'top center' }}>
+                <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '10px', transformOrigin: 'top center' }}>
                     <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
                         {isPrintReady ? 'Press ENTER to Print or ESC to Close' : 'Loading preview...'}
                     </div>
