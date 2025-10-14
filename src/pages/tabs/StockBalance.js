@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
-import { collection, getDocs, query, doc, getDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore"; // Removed unused collection/query imports
 import { AiOutlineReload, AiOutlineDownload, AiOutlineExclamationCircle } from "react-icons/ai";
+import { calculateStockBalances } from "../../utils/inventoryUtils"; // 💡 Import the new utility function
 
 const StockBalance = () => {
+  // ... (all state variables remain the same) ...
   const [loading, setLoading] = useState(true);
   const [stockData, setStockData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -12,6 +14,7 @@ const StockBalance = () => {
   const [showUnbalancedOnly, setShowUnbalancedOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 40;
+
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -22,6 +25,7 @@ const StockBalance = () => {
   }, []);
 
   const fetchStockReminderSettings = async () => {
+    // ... (this function remains exactly the same) ...
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     
@@ -43,55 +47,8 @@ const StockBalance = () => {
     
     setLoading(true);
     try {
-      const stockInSnap = await getDocs(query(collection(db, uid, "inventory", "stock_in")));
-      const stockInData = stockInSnap.docs.map(doc => doc.data());
-
-      const stockOutSnap = await getDocs(query(collection(db, uid, "inventory", "stock_out")));
-      const stockOutData = stockOutSnap.docs.map(doc => doc.data());
-
-      // 💡 FIX: Updated aggregation logic to handle the new `lineItems` array structure.
-      const itemsMap = {};
-
-      // Process Stock In data by iterating through lineItems
-      stockInData.forEach((doc) => {
-        if (Array.isArray(doc.lineItems)) { // Check for the new structure
-          doc.lineItems.forEach((lineItem) => {
-            const key = lineItem.name; // Use item name as the unique key for aggregation
-            if (!itemsMap[key]) {
-              itemsMap[key] = {
-                item: lineItem.name,
-                category: lineItem.category || 'N/A', // Use category from line item
-                totalStockIn: 0,
-                totalStockOut: 0,
-              };
-            }
-            itemsMap[key].totalStockIn += Number(lineItem.quantity) || 0;
-          });
-        }
-      });
-
-      // Process Stock Out data using the item name as the key
-      stockOutData.forEach((out) => {
-        const key = out.item; // The item name from the stock_out record
-        if (!key) return; // Skip if there's no item name
-
-        if (!itemsMap[key]) {
-          // This handles cases where an item is stocked out without a corresponding stock-in record
-          itemsMap[key] = {
-            item: out.item,
-            category: out.category || 'N/A',
-            totalStockIn: 0,
-            totalStockOut: 0,
-          };
-        }
-        itemsMap[key].totalStockOut += Number(out.quantity) || 0;
-      });
-
-      const stockList = Object.keys(itemsMap).map((key) => ({
-        ...itemsMap[key],
-        availableQty: itemsMap[key].totalStockIn - itemsMap[key].totalStockOut,
-      }));
-
+      // 💡 FIX: Replaced the entire aggregation logic with a single call to our utility function.
+      const stockList = await calculateStockBalances(db, uid);
       setStockData(stockList);
     } catch (error) {
       console.error("Error fetching stock balance:", error);
@@ -100,6 +57,7 @@ const StockBalance = () => {
     setLoading(false);
   };
 
+  // ... (all other functions like isLowStock, handleSort, exportToCSV, and the entire return JSX remain exactly the same) ...
   // Helper functions for checking stock status
   const isLowStock = (item) => {
     if (!stockReminderThreshold || item.totalStockIn <= 0) return false;
@@ -226,8 +184,7 @@ const StockBalance = () => {
     </div>
   );
 };
-
-// Styles (no changes needed)
+// ... (styles remain the same) ...
 const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f8f9fa' },
     loadingContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#6c757d' },

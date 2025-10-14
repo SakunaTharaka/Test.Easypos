@@ -1,19 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, onSnapshot } from "firebase/firestore";
-import { FaDollarSign, FaUserPlus, FaFileInvoice, FaExclamationTriangle, FaUserClock } from "react-icons/fa";
+// 💡 Added FaRegTimesCircle for the dismiss button
+import { FaDollarSign, FaUserPlus, FaFileInvoice, FaExclamationTriangle, FaUserClock, FaRegTimesCircle } from "react-icons/fa";
 import {
   Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
+  CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
+import { calculateStockBalances } from "../utils/inventoryUtils"; // 💡 Import the utility function
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler
@@ -21,12 +16,13 @@ ChartJS.register(
 
 const DashboardView = ({ internalUser }) => {
   const [stats, setStats] = useState({ totalSales: 0, newCustomers: 0, invoicesToday: 0 });
+  
+  // ✅ States are already here, we will now use them!
   const [lowStockItems, setLowStockItems] = useState([]);
   const [showLowStockAlert, setShowLowStockAlert] = useState(false);
+  
   const [loading, setLoading] = useState(true);
   const [globalAnnouncement, setGlobalAnnouncement] = useState(null);
-  
-  // ✅ **1. New state for chart and overdue customers**
   const [salesChartData, setSalesChartData] = useState({ labels: [], datasets: [] });
   const [overdueCustomers, setOverdueCustomers] = useState([]);
 
@@ -37,19 +33,14 @@ const DashboardView = ({ internalUser }) => {
       return;
     }
 
-    const isAlertDismissed = sessionStorage.getItem('lowStockAlertDismissed') === 'true';
-
     const fetchData = async () => {
       setLoading(true);
       try {
         const uid = user.uid;
         
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
-        
-        // --- Fetch all required data concurrently ---
+        // --- Concurrently fetch all dashboard data ---
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
         const todayInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(todayStart)), where("createdAt", "<=", Timestamp.fromDate(todayEnd)));
         const todayCustomersQuery = query(collection(db, uid, "customers", "customer_list"), where("createdAt", ">=", Timestamp.fromDate(todayStart)), where("createdAt", "<=", Timestamp.fromDate(todayEnd)));
         const settingsRef = doc(db, uid, "settings");
@@ -60,7 +51,7 @@ const DashboardView = ({ internalUser }) => {
             getDoc(settingsRef)
         ]);
         
-        // --- Calculate KPIs ---
+        // ... (KPI calculation logic remains the same) ...
         let totalSales = 0;
         let actualInvoiceCount = 0;
         invoicesSnap.forEach(doc => {
@@ -70,13 +61,33 @@ const DashboardView = ({ internalUser }) => {
                 actualInvoiceCount++;
             }
         });
-        setStats({
-            totalSales: totalSales,
-            invoicesToday: actualInvoiceCount,
-            newCustomers: customersSnap.size
-        });
+        setStats({ totalSales, invoicesToday: actualInvoiceCount, newCustomers: customersSnap.size });
 
-        // --- Fetch and process data for Sales Chart (last 7 days) ---
+        // 💡 FIX: Fetch and process low stock items
+        if (settingsSnap.exists()) {
+            const threshold = settingsSnap.data().stockReminder;
+            const stockReminderThreshold = threshold === "Do not remind" ? null : parseInt(threshold);
+
+            if (stockReminderThreshold !== null) {
+                const allStock = await calculateStockBalances(db, uid);
+                const lowItems = allStock.filter(item => {
+                    if (item.totalStockIn <= 0) return false;
+                    const percentage = (item.availableQty / item.totalStockIn) * 100;
+                    return percentage <= stockReminderThreshold;
+                });
+
+                if (lowItems.length > 0) {
+                    setLowStockItems(lowItems);
+                    // Check sessionStorage to see if the user already dismissed the alert
+                    const isAlertDismissed = sessionStorage.getItem('lowStockAlertDismissed') === 'true';
+                    if (!isAlertDismissed) {
+                        setShowLowStockAlert(true);
+                    }
+                }
+            }
+        }
+        
+        // ... (Sales Chart and Overdue Customers logic remains the same) ...
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 6);
         weekAgo.setHours(0, 0, 0, 0);
@@ -123,8 +134,6 @@ const DashboardView = ({ internalUser }) => {
             }]
         });
 
-
-        // --- Fetch and process Overdue Customers ---
         const creditCustomers = creditCustomersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         if (creditCustomers.length > 0) {
             const creditInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("customerId", "in", creditCustomers.map(c=>c.id)), where("paymentMethod", "==", "Credit"));
@@ -167,6 +176,7 @@ const DashboardView = ({ internalUser }) => {
             setOverdueCustomers(Object.entries(overdue).map(([name, amount]) => ({ name, amount })));
         }
 
+
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
@@ -188,7 +198,15 @@ const DashboardView = ({ internalUser }) => {
     return () => unsubscribe();
   }, []);
 
+  // 💡 FIX: Handler to dismiss the low stock alert
+  const handleDismissLowStockAlert = () => {
+    setShowLowStockAlert(false);
+    sessionStorage.setItem('lowStockAlertDismissed', 'true');
+  };
+
+
   if (loading) return (
+    // ... (loading JSX remains the same) ...
     <div style={styles.loadingContainer}>
       <div style={styles.loadingSpinner}></div>
       <p>Loading Dashboard...</p>
@@ -197,6 +215,7 @@ const DashboardView = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
+      {/* ... (global announcement JSX remains the same) ... */}
       {globalAnnouncement && (
         <div style={styles.criticalAlert}>
             <div style={styles.criticalAlertHeader}>
@@ -207,11 +226,29 @@ const DashboardView = ({ internalUser }) => {
         </div>
       )}
 
+      {/* 💡 FIX: Low Stock Alert Notification */}
+      {showLowStockAlert && lowStockItems.length > 0 && (
+        <div style={styles.lowStockAlert}>
+            <div style={styles.lowStockAlertHeader}>
+                <FaExclamationTriangle style={{ color: '#d46b08' }}/>
+                <h4 style={styles.lowStockAlertTitle}>Low Stock Warning</h4>
+            </div>
+            <p style={styles.lowStockAlertText}>
+                The following {lowStockItems.length} item(s) are running low: <strong>{lowStockItems.map(i => i.item).join(', ')}</strong>.
+            </p>
+            <button onClick={handleDismissLowStockAlert} style={styles.dismissButton}>
+                <FaRegTimesCircle />
+            </button>
+        </div>
+      )}
+
       <div style={styles.header}>
+        {/* ... (header JSX remains the same) ... */}
         <h1 style={styles.title}>Hi, {internalUser?.username || "Admin"}!</h1>
         <p style={styles.subtitle}>Welcome back, here's a look at your business today.</p>
       </div>
-
+      
+      {/* ... (rest of the JSX for cards, charts, etc. remains the same) ... */}
       <div style={styles.cardsContainer}>
         <div style={styles.card}>
           <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #68d391, #2f855a)'}}>
@@ -237,7 +274,6 @@ const DashboardView = ({ internalUser }) => {
       </div>
 
       <div style={styles.mainContent}>
-        {/* ✅ **2. Overdue Customers Panel** */}
         <div style={styles.activitySection}>
           <h3 style={styles.sectionTitle}><FaUserClock style={{marginRight: '8px'}}/> Overdue Customers</h3>
           {overdueCustomers.length > 0 ? (
@@ -253,7 +289,6 @@ const DashboardView = ({ internalUser }) => {
             <p style={styles.chartPlaceholder}>No overdue credit customers.</p>
           )}
         </div>
-        {/* ✅ **3. Weekly Sales Chart** */}
         <div style={styles.chartSection}>
           <h3 style={styles.sectionTitle}>Sales This Week</h3>
           <div style={styles.chartWrapper}>
@@ -266,6 +301,7 @@ const DashboardView = ({ internalUser }) => {
 };
 
 const styles = {
+  // ... (all existing styles) ...
   container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
   loadingContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px', flexDirection: 'column', gap: '20px' },
   loadingSpinner: { border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '50px', height: '50px', animation: 'spin 1s linear infinite' },
@@ -273,6 +309,33 @@ const styles = {
   criticalAlertHeader: { display: 'flex', alignItems: 'center', gap: '12px' },
   criticalAlertTitle: { margin: 0, fontSize: '18px', fontWeight: '600' },
   criticalAlertText: { margin: '8px 0 0 0', fontSize: '15px', lineHeight: '1.5' },
+  
+  // 💡 FIX: Added styles for the new low stock alert
+  lowStockAlert: {
+    position: 'relative',
+    backgroundColor: '#fffbe6',
+    border: '1px solid #ffe58f',
+    color: '#d46b08',
+    borderRadius: '12px',
+    padding: '16px 20px',
+    marginBottom: '24px',
+    boxShadow: '0 4px 12px rgba(212,107,8,0.1)',
+  },
+  lowStockAlertHeader: { display: 'flex', alignItems: 'center', gap: '12px' },
+  lowStockAlertTitle: { margin: 0, fontSize: '16px', fontWeight: '600' },
+  lowStockAlertText: { margin: '8px 0 0 0', fontSize: '14px', lineHeight: '1.5', paddingRight: '30px' },
+  dismissButton: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    background: 'transparent',
+    border: 'none',
+    color: '#d46b08',
+    cursor: 'pointer',
+    fontSize: '20px',
+    opacity: 0.7,
+  },
+  
   header: { marginBottom: '24px' },
   title: { fontSize: '32px', fontWeight: 'bold', color: '#111827', margin: 0 },
   subtitle: { fontSize: '16px', color: '#6b7280', marginTop: '4px' },
@@ -292,6 +355,7 @@ const styles = {
   overdueAmount: { fontWeight: 'bold', color: '#e74c3c' },
 };
 
+// ... (styleSheet append logic remains the same) ...
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -301,5 +365,5 @@ styleSheet.innerText = `
 `;
 document.head.appendChild(styleSheet);
 
-export default DashboardView;
 
+export default DashboardView;

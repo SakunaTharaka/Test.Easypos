@@ -94,8 +94,40 @@ const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
 
     return (
         <>
-            <style>{`@page{size:80mm auto;margin:3mm;}@media print{body{background-color:#fff !important;} .no-print{display:none !important;}.print-area-container{box-shadow:none;margin:0;width:100%;}.print-area{page:thermal;font-family:'Courier New',monospace;}}`}</style>
-            <div style={styles.confirmOverlay}>
+            {/* ✅ FIX: Updated CSS to ensure content prints from the top */}
+            <style>{`
+                @page {
+                    size: 80mm auto;
+                    margin: 3mm;
+                }
+                @media print {
+                    body {
+                        background-color: #fff !important;
+                    }
+                    .no-print {
+                        display: none !important;
+                    }
+                    /* This is the key fix: We override the screen centering for printing */
+                    .print-preview-overlay {
+                        align-items: flex-start !important; /* Aligns content to the top */
+                        justify-content: flex-start !important;
+                        background-color: transparent !important;
+                    }
+                    .print-area-container {
+                        box-shadow: none !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        width: 100% !important;
+                        transform: none !important; /* Removes the screen scaling effect */
+                    }
+                    .print-area {
+                        page: thermal;
+                        font-family: 'Courier New', monospace;
+                    }
+                }
+            `}</style>
+            {/* ✅ FIX: Added className="print-preview-overlay" to the main div */}
+            <div className="print-preview-overlay" style={styles.confirmOverlay}>
                 <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '10px', transform: 'scale(1.1)', transformOrigin: 'top center' }}>
                     <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
                         {isPrintReady ? 'Press ENTER to Print or ESC to Close' : 'Loading preview...'}
