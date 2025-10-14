@@ -1,8 +1,6 @@
-// fileName: StockOutBal.js
-
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { db, auth } from '../../firebase';
-import { collection, getDocs, query, where, Timestamp, doc, setDoc, getDoc, serverTimestamp, deleteDoc, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, doc, setDoc, getDoc, serverTimestamp, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { FaSearch, FaSpinner, FaClipboardList, FaSave, FaBook, FaTrash } from 'react-icons/fa';
 
 // --- Reusable Toast Notification ---
@@ -13,7 +11,7 @@ const Toast = ({ message, type, onDismiss }) => {
     zIndex: 2000, boxShadow: '0 4px 15px rgba(0,0,0,0.2)', animation: 'fadeInOut 4s ease-in-out',
     backgroundColor: type === 'success' ? '#2ecc71' : '#e74c3c',
   };
-  React.useEffect(() => {
+  useEffect(() => {
     const timer = setTimeout(onDismiss, 3900);
     return () => clearTimeout(timer);
   }, [onDismiss]);
@@ -28,7 +26,7 @@ const toDateString = (date) => {
 
 // --- Main Component ---
 const StockOutBal = () => {
-    const [viewMode, setViewMode] = useState('summary'); // 'summary' or 'saved'
+    const [viewMode, setViewMode] = useState('summary');
     const [toast, setToast] = useState(null);
 
     // State for Daily Summary
@@ -37,6 +35,7 @@ const StockOutBal = () => {
     const [actualQuantities, setActualQuantities] = useState({});
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [hasFetchedSummary, setHasFetchedSummary] = useState(false);
+    const [lastSaveTimestamp, setLastSaveTimestamp] = useState(null);
 
     // State for Saved Reports
     const [savedReportDate, setSavedReportDate] = useState(toDateString(new Date()));
@@ -44,42 +43,90 @@ const StockOutBal = () => {
     const [savedReportLoading, setSavedReportLoading] = useState(false);
     const [hasFetchedSaved, setHasFetchedSaved] = useState(false);
 
+    useEffect(() => {
+        setLastSaveTimestamp(null);
+        setHasFetchedSummary(false);
+        setSummaryData([]);
+    }, [summaryDate]);
+
     const showToast = (message, type = 'success') => setToast({ message, type });
 
     const handleFetchSummary = useCallback(async () => {
         if (!summaryDate) { alert("Please select a date."); return; }
         setSummaryLoading(true);
         setHasFetchedSummary(true);
-        setActualQuantities({});
+        
         const uid = auth.currentUser.uid;
-        const startTimestamp = Timestamp.fromDate(new Date(summaryDate + 'T00:00:00'));
-        const endTimestamp = Timestamp.fromDate(new Date(summaryDate + 'T23:59:59'));
+        const startOfDay = Timestamp.fromDate(new Date(summaryDate + 'T00:00:00'));
+        const endOfDay = Timestamp.fromDate(new Date(summaryDate + 'T23:59:59'));
+        
         try {
-            const stockOutRef = collection(db, uid, 'inventory', 'stock_out');
-            const stockOutQuery = query(stockOutRef, where('createdAt', '>=', startTimestamp), where('createdAt', '<=', endTimestamp), where('type', '==', 'buySell'));
+            // Check for the most recently saved report for this day
+            const reportsRef = collection(db, uid, 'reports', 'daily_summaries');
+            const latestReportQuery = query(reportsRef, where("reportDate", "==", summaryDate), orderBy("savedAt", "desc"), limit(1));
+            const latestReportSnap = await getDocs(latestReportQuery);
+
+            let invoiceQueryStartTime = startOfDay;
+            let initialData = [];
+
+            if (!latestReportSnap.empty) {
+                // A report exists. Load its state as the starting point.
+                const latestReport = latestReportSnap.docs[0].data();
+                invoiceQueryStartTime = latestReport.savedAt; 
+                setLastSaveTimestamp(latestReport.savedAt);
+
+                // Reconstruct the summary from the last saved state
+                initialData = latestReport.items.map(item => ({
+                    name: item.name,
+                    stockOutQty: item.actualQty, // New stock-out is the last actual qty
+                    invoicedQty: 0, 
+                }));
+
+            } else {
+                // No reports saved yet. This is the first fetch of the day.
+                setLastSaveTimestamp(null);
+                const stockOutRef = collection(db, uid, 'inventory', 'stock_out');
+                const stockOutQuery = query(stockOutRef, where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay), where('type', '==', 'buySell'));
+                const stockOutSnap = await getDocs(stockOutQuery);
+                const summaryMap = {};
+                stockOutSnap.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const itemName = data.item;
+                    if (itemName) {
+                        if (!summaryMap[itemName]) summaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
+                        summaryMap[itemName].stockOutQty += Number(data.quantity);
+                    }
+                });
+                initialData = Object.values(summaryMap);
+            }
+            
+            // Fetch any new invoices created since the start of the day or the last save
             const invoicesRef = collection(db, uid, 'invoices', 'invoice_list');
-            const invoicesQuery = query(invoicesRef, where('createdAt', '>=', startTimestamp), where('createdAt', '<=', endTimestamp));
-            const [stockOutSnap, invoicesSnap] = await Promise.all([ getDocs(stockOutQuery), getDocs(invoicesQuery) ]);
-            const summaryMap = {};
-            stockOutSnap.forEach(docSnap => {
-                const data = docSnap.data();
-                const itemName = data.item;
-                if (itemName) {
-                    if (!summaryMap[itemName]) summaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
-                    summaryMap[itemName].stockOutQty += Number(data.quantity);
-                }
-            });
+            const invoicesQuery = query(invoicesRef, where('createdAt', '>=', invoiceQueryStartTime), where('createdAt', '<=', endOfDay));
+            const invoicesSnap = await getDocs(invoicesQuery);
+            
+            const newInvoicesMap = {};
             invoicesSnap.forEach(docSnap => {
                 docSnap.data().items?.forEach(item => {
                     const itemName = item.itemName;
                     if (itemName) {
-                        if (!summaryMap[itemName]) summaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
-                        summaryMap[itemName].invoicedQty += Number(item.quantity);
+                        if (!newInvoicesMap[itemName]) newInvoicesMap[itemName] = { invoicedQty: 0 };
+                        newInvoicesMap[itemName].invoicedQty += Number(item.quantity);
                     }
                 });
             });
-            const combinedData = Object.values(summaryMap).sort((a, b) => a.name.localeCompare(b.name));
-            setSummaryData(combinedData);
+
+            // Merge new invoices with the initial data
+            const finalData = initialData.map(item => {
+                const newItem = { ...item };
+                if (newInvoicesMap[item.name]) {
+                    newItem.invoicedQty += newInvoicesMap[item.name].invoicedQty;
+                }
+                return newItem;
+            }).sort((a,b) => a.name.localeCompare(b.name));
+            
+            setSummaryData(finalData);
+
         } catch (error) {
             console.error("Error fetching summary: ", error);
             showToast("Failed to fetch summary: " + error.message, 'error');
@@ -88,15 +135,8 @@ const StockOutBal = () => {
         }
     }, [summaryDate]);
 
-    const handleActualQtyChange = (itemName, value) => {
-        setActualQuantities(prev => ({ ...prev, [itemName]: value }));
-    };
-
     const handleSaveReport = async () => {
-        if (summaryData.length === 0) {
-            alert("There is no data to save.");
-            return;
-        }
+        if (summaryData.length === 0) { alert("There is no data to save."); return; }
         const uid = auth.currentUser.uid;
         const reportId = `${summaryDate}_${Date.now()}`;
         const reportRef = doc(db, uid, 'reports', 'daily_summaries', reportId);
@@ -108,19 +148,39 @@ const StockOutBal = () => {
             return { ...item, actualQty, shortage };
         });
 
+        const saveTimestamp = Timestamp.now();
+
         try {
             await setDoc(reportRef, {
                 reportDate: summaryDate,
                 items: reportPayload,
-                savedAt: serverTimestamp(),
+                savedAt: saveTimestamp, // Use client-side timestamp for consistency
             });
-            showToast("Report saved successfully!");
+
+            const nextStateData = summaryData.map(item => {
+                const actualQty = Number(actualQuantities[item.name]) || 0;
+                return {
+                    ...item,
+                    stockOutQty: actualQty,
+                    invoicedQty: 0,
+                };
+            });
+
+            setSummaryData(nextStateData);
+            setActualQuantities({});
+            setLastSaveTimestamp(saveTimestamp);
+            showToast("Report saved! Ready for next invoices.");
+
         } catch (error) {
             console.error("Error saving report: ", error);
             showToast("Failed to save report: " + error.message, 'error');
         }
     };
-
+    
+    const handleActualQtyChange = (itemName, value) => {
+        setActualQuantities(prev => ({ ...prev, [itemName]: value }));
+    };
+    
     const handleFetchSavedReport = async () => {
         if (!savedReportDate) { alert("Please select a date to view."); return; }
         setSavedReportLoading(true);
@@ -144,7 +204,7 @@ const StockOutBal = () => {
     };
 
     const handleDeleteReport = async (reportId) => {
-        if (!window.confirm("Are you sure you want to delete this report permanently?")) {
+        if (!window.confirm("Are you sure you want to delete this report permanently? This action cannot be undone.")) {
             return;
         }
         const uid = auth.currentUser.uid;
@@ -166,18 +226,17 @@ const StockOutBal = () => {
                     <label style={styles.label}>Select Date:</label>
                     <input type="date" value={summaryDate} onChange={e => setSummaryDate(e.target.value)} style={styles.input} max={toDateString(new Date())}/>
                 </div>
-                 <button onClick={handleFetchSummary} disabled={summaryLoading || !summaryDate} style={summaryLoading || !summaryDate ? styles.buttonDisabled : styles.button}>
+                <button onClick={handleFetchSummary} disabled={summaryLoading || !summaryDate} style={summaryLoading || !summaryDate ? styles.buttonDisabled : styles.button}>
                     {summaryLoading ? <FaSpinner className="spinner" /> : <FaSearch />}
-                    {summaryLoading ? 'Fetching...' : 'Fetch Summary'}
+                    {summaryLoading ? 'Fetching...' : lastSaveTimestamp ? 'Fetch New Invoices' : 'Fetch Summary'}
                 </button>
             </div>
-
             {summaryLoading ? (
                 <div style={styles.promptContainer}><FaSpinner className="spinner" size={48} color="#9ca3af" /><h3 style={styles.promptTitle}>Loading Summary...</h3></div>
             ) : !hasFetchedSummary ? (
                 <div style={styles.promptContainer}><FaClipboardList size={48} color="#9ca3af" /><h3 style={styles.promptTitle}>Fetch Daily Summary</h3><p style={styles.promptText}>Select a date and click "Fetch Summary" to see the data.</p></div>
             ) : summaryData.length === 0 ? (
-                <div style={styles.promptContainer}><h3 style={styles.promptTitle}>No Activity Found</h3><p style={styles.promptText}>No 'buySell' stock outs or sales were recorded on this date.</p></div>
+                <div style={styles.promptContainer}><h3 style={styles.promptTitle}>No Activity Found</h3><p style={styles.promptText}>No 'buySell' stock outs or sales were recorded for this period.</p></div>
             ) : (
                 <>
                 <div style={styles.tableContainer}>
@@ -221,7 +280,7 @@ const StockOutBal = () => {
             )}
         </div>
     );
-
+    
     const renderSavedReportsView = () => (
          <div style={styles.card}>
             <div style={styles.controls}>
@@ -259,7 +318,6 @@ const StockOutBal = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {/* --- FIX IS HERE --- */}
                                     {report.items && Array.isArray(report.items) && report.items.map(item => {
                                         const netStockOut = item.stockOutQty - (item.actualQty || 0);
                                         return (
@@ -308,7 +366,6 @@ const StockOutBal = () => {
 };
 
 const styles = {
-    // Styles are unchanged
     container: { fontFamily: "'Inter', sans-serif", padding: '24px', backgroundColor: '#f3f4f6', minHeight: '100vh' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' },
     title: { margin: 0, fontSize: '28px', fontWeight: 700, color: '#111827' },
