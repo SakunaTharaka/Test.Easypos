@@ -11,6 +11,9 @@ import {
   doc,
   getDoc,
   runTransaction,
+  orderBy,
+  limit,
+  startAfter,
 } from "firebase/firestore";
 import { 
   AiOutlinePlus, 
@@ -20,35 +23,40 @@ import {
 } from "react-icons/ai";
 import Select from "react-select";
 
+const ITEMS_PER_PAGE = 25;
+
 const Inventory = ({ internalUser }) => {
   const [inventory, setInventory] = useState([]);
-  const [filteredInventory, setFilteredInventory] = useState([]);
   const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stockableItems, setStockableItems] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
-  const [paidStockInIds, setPaidStockInIds] = useState(new Set()); // State to track paid stock IDs
+  const [paidStockInIds, setPaidStockInIds] = useState(new Set());
 
-  // --- State for the new multi-item modal ---
+  // --- Pagination State ---
+  const [page, setPage] = useState(1);
+  const [lastVisible, setLastVisible] = useState(null);
+  const [pageHistory, setPageHistory] = useState([null]);
+  const [isLastPage, setIsLastPage] = useState(false);
+
+  // --- Modal State ---
   const [showModal, setShowModal] = useState(false);
   const [stagedItems, setStagedItems] = useState([]);
   const [supplierInfo, setSupplierInfo] = useState({ name: "", mobile: "", company: "" });
   const [selectedPO, setSelectedPO] = useState(null);
   
-  // --- State for the item entry row ---
+  // --- Item Entry State ---
   const [currentItem, setCurrentItem] = useState(null);
   const [currentQty, setCurrentQty] = useState(1);
   const [currentPrice, setCurrentPrice] = useState("");
   const [currentUnit, setCurrentUnit] = useState("");
   const itemSelectRef = useRef(null);
   
-  // --- Other state ---
+  // --- Search & Filter State ---
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
   
   const getCurrentInternal = () => {
     try {
@@ -58,55 +66,113 @@ const Inventory = ({ internalUser }) => {
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
+  // --- Core Data Fetching Function with Server-Side Pagination ---
+  const fetchInventory = async (direction = 'initial') => {
+    setLoading(true);
+    const user = auth.currentUser;
+    if (!user) { setLoading(false); return; }
+    const uid = user.uid;
+    const invColRef = collection(db, uid, "inventory", "stock_in");
+    
+    let q = query(invColRef, orderBy("createdAt", "desc"));
+
+    // Apply server-side date filtering
+    if (dateFrom) {
+      q = query(q, where("createdAt", ">=", new Date(dateFrom + "T00:00:00")));
+    }
+    if (dateTo) {
+      q = query(q, where("createdAt", "<=", new Date(dateTo + "T23:59:59")));
+    }
+
+    try {
+      let querySnapshot;
+      if (direction === 'next' && lastVisible) {
+        q = query(q, limit(ITEMS_PER_PAGE), startAfter(lastVisible));
+      } else if (direction === 'prev' && page > 1) {
+        const prevPageStart = pageHistory[page - 2];
+        q = query(q, limit(ITEMS_PER_PAGE), startAfter(prevPageStart));
+      } else {
+        q = query(q, limit(ITEMS_PER_PAGE));
+      }
+
+      querySnapshot = await getDocs(q);
+      const invData = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setInventory(invData);
+
+      if (invData.length > 0) {
+        setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+        if (direction === 'next') {
+          setPageHistory(prev => [...prev, querySnapshot.docs[0]]);
+        }
+      }
+      setIsLastPage(invData.length < ITEMS_PER_PAGE);
+    } catch (error) {
+      console.error("Error fetching inventory data:", error);
+      alert("Error fetching data: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Fetch initial data and dropdowns only once on component mount
   useEffect(() => {
+    fetchInventory('initial');
+    
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
 
-    const fetchData = async () => {
+    const fetchDropdownData = async () => {
       try {
-        setLoading(true);
-        // Fetch inventory records
-        const invColRef = collection(db, uid, "inventory", "stock_in");
-        const invSnap = await getDocs(query(invColRef));
-        const invData = invSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        setInventory(invData);
-
-        // Fetch settings
         const settingsRef = doc(db, uid, "settings");
         const settingsSnap = await getDoc(settingsRef);
         if (settingsSnap.exists()) setUnits(settingsSnap.data().itemUnits || []);
 
-        // Fetch stockable items
         const itemsColRef = collection(db, uid, "items", "item_list");
         const itemsQuery = query(itemsColRef, where("type", "in", ["storesItem", "buySell"]));
         const itemsSnap = await getDocs(itemsQuery);
-        const itemOptions = itemsSnap.docs.map(doc => ({
-            value: doc.id,
-            label: `${doc.data().name} (SKU: ${doc.data().sku || 'N/A'})`,
-            ...doc.data()
-        }));
+        const itemOptions = itemsSnap.docs.map(doc => ({ value: doc.id, label: `${doc.data().name} (SKU: ${doc.data().sku || 'N/A'})`, ...doc.data() }));
         setStockableItems(itemOptions);
         
-        // Fetch purchase orders
         const poColRef = collection(db, uid, "purchase_orders", "po_list");
         const poSnap = await getDocs(query(poColRef));
         setPurchaseOrders(poSnap.docs.map(d => ({ value: d.id, label: d.data().poNumber })));
         
-        // ✨ Fetch payments to check for deletable stock records
         const paymentsColRef = collection(db, uid, "stock_payments", "payments");
         const paymentsSnap = await getDocs(paymentsColRef);
         const idsWithPayments = new Set(paymentsSnap.docs.map(pDoc => pDoc.data().stockInId));
         setPaidStockInIds(idsWithPayments);
-
-      } catch (error) {
-        alert("Error fetching data: " + error.message);
+      } catch(error) {
+        console.error("Error fetching auxiliary data:", error);
       }
-      setLoading(false);
     };
-    fetchData();
+    fetchDropdownData();
   }, []);
-  
+
+  const handleApplyFilters = () => {
+    setPage(1);
+    setLastVisible(null);
+    setPageHistory([null]);
+    fetchInventory('initial');
+  };
+
+  const handleNextPage = () => {
+    if (!isLastPage) {
+      setPage(prev => prev + 1);
+      fetchInventory('next');
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (page > 1) {
+      const newPageHistory = [...pageHistory];
+      newPageHistory.pop();
+      setPageHistory(newPageHistory);
+      setPage(prev => prev - 1);
+      fetchInventory('prev');
+    }
+  };
+
   const getNextStockInId = async (uid) => {
     const counterRef = doc(db, uid, "counters");
     try {
@@ -166,9 +232,10 @@ const Inventory = ({ internalUser }) => {
         createdAt: serverTimestamp(),
       };
       
-      const docRef = await addDoc(stockInColRef, newDoc);
-      const newItem = { ...newDoc, id: docRef.id, createdAt: new Date() };
-      setInventory((prev) => [newItem, ...prev]);
+      await addDoc(stockInColRef, newDoc);
+      
+      // Refetch the first page to show the new item at the top
+      handleApplyFilters();
       
       setShowModal(false);
       setStagedItems([]);
@@ -181,50 +248,55 @@ const Inventory = ({ internalUser }) => {
     }
   };
 
-  // ✨ Updated handleDelete function with payment check
   const handleDelete = async (item) => {
-    // First, check if payments exist for this stockInId
     if (paidStockInIds.has(item.stockInId)) {
         alert("This stock record cannot be deleted because payments have been made against it.\n\nPlease delete the associated payments from the Transaction History page first.");
-        return; // Block the deletion
+        return;
     }
-
-    // If no payments, proceed with the original deletion logic
     if (!window.confirm("Are you sure you want to delete this record? This will remove all items associated with this Stock In ID.")) return;
     
     const uid = auth.currentUser.uid;
     const docRef = doc(db, uid, "inventory", "stock_in", item.id);
     try {
       await deleteDoc(docRef);
-      setInventory((prev) => prev.filter((i) => i.id !== item.id));
+      // Refetch the current page's data to reflect the deletion
+      fetchInventory(page > 1 ? 'prev' : 'initial');
     } catch (error) {
       alert("Error deleting item: " + error.message);
     }
   };
   
-  useEffect(() => {
-    let filtered = inventory.filter(item => {
-      const searchTermMatch = search ? 
-        Object.values(item).some(val => String(val).toLowerCase().includes(search.toLowerCase())) ||
-        (item.lineItems && item.lineItems.some(line => line.name.toLowerCase().includes(search.toLowerCase())))
-        : true;
-      const dateFromMatch = dateFrom ? (item.createdAt?.toDate() ?? new Date()) >= new Date(dateFrom + "T00:00:00") : true;
-      const dateToMatch = dateTo ? (item.createdAt?.toDate() ?? new Date()) <= new Date(dateTo + "T23:59:59") : true;
-      return searchTermMatch && dateFromMatch && dateToMatch;
-    });
-    setFilteredInventory(filtered);
-    setCurrentPage(1);
-  }, [search, dateFrom, dateTo, inventory]);
-  
-  const totalPages = Math.ceil(filteredInventory.length / itemsPerPage);
-  const currentItems = filteredInventory.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  // Client-side search for the current page
+  const filteredInventory = inventory.filter(item => {
+    if (!search) return true;
+    return Object.values(item).some(val => String(val).toLowerCase().includes(search.toLowerCase())) ||
+      (item.lineItems && item.lineItems.some(line => line.name.toLowerCase().includes(search.toLowerCase())));
+  });
 
-  if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p>Loading inventory data...</p></div> );
+  if (loading && page === 1 && inventory.length === 0) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p>Loading inventory data...</p></div> );
 
   return (
     <div style={styles.container}>
       <div style={styles.headerContainer}><h2 style={styles.header}>Stock-In / Inventory</h2><p style={styles.subHeader}>Record new items coming into your inventory</p></div>
-      <div style={styles.controlsContainer}><div style={styles.searchContainer}><div style={styles.searchInputContainer}><AiOutlineSearch style={styles.searchIcon} /><input type="text" placeholder="Search records..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} /></div><button style={styles.filterToggle} onClick={() => setShowFilters(!showFilters)}><AiOutlineFilter style={{ marginRight: '6px' }} />Filters</button></div>{showFilters && (<div style={styles.filterPanel}><div style={styles.dateFilters}><div style={styles.filterGroup}><label style={styles.filterLabel}>From Date</label><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} /></div><div style={styles.filterGroup}><label style={styles.filterLabel}>To Date</label><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={styles.dateInput} /></div></div></div>)}<button style={styles.addButton} onClick={() => setShowModal(true)}><AiOutlinePlus size={20} /> New Stock-In</button></div>
+      <div style={styles.controlsContainer}>
+        <div style={styles.searchContainer}>
+          <div style={styles.searchInputContainer}>
+            <AiOutlineSearch style={styles.searchIcon} />
+            <input type="text" placeholder="Search current page..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
+          </div>
+          <button style={styles.filterToggle} onClick={() => setShowFilters(!showFilters)}><AiOutlineFilter style={{ marginRight: '6px' }} />Filters</button>
+        </div>
+        {showFilters && (
+          <div style={styles.filterPanel}>
+            <div style={styles.dateFilters}>
+              <div style={styles.filterGroup}><label style={styles.filterLabel}>From Date</label><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} /></div>
+              <div style={styles.filterGroup}><label style={styles.filterLabel}>To Date</label><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={styles.dateInput} /></div>
+              <button onClick={handleApplyFilters} style={styles.applyFilterBtn}>Apply</button>
+            </div>
+          </div>
+        )}
+        <button style={styles.addButton} onClick={() => setShowModal(true)}><AiOutlinePlus size={20} /> New Stock-In</button>
+      </div>
 
       {showModal && (
         <div style={styles.modalOverlay}>
@@ -261,12 +333,13 @@ const Inventory = ({ internalUser }) => {
       )}
 
       <div style={styles.tableContainer}>
-        <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock-In History</span><span style={styles.resultCount}>{filteredInventory.length} record(s) found</span></div>
+        {loading && <div style={styles.loadingOverlay}><span>Loading...</span></div>}
+        <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock-In History</span></div>
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
             <thead><tr><th style={styles.th}>Stock In ID</th><th style={styles.th}>Item</th><th style={styles.th}>Category/Brand</th><th style={styles.th}>Supplier</th><th style={styles.th}>Quantity</th><th style={styles.th}>Unit Price</th><th style={styles.th}>Added By</th><th style={styles.th}>Date</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
             <tbody>
-              {currentItems.flatMap((item, recIndex) => 
+              {filteredInventory.flatMap((item) => 
                   (item.lineItems || [{...item}]).map((lineItem, lineIndex) => (
                       <tr key={`${item.id}-${lineIndex}`}>
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.stockInId}</td>}
@@ -278,7 +351,6 @@ const Inventory = ({ internalUser }) => {
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.addedBy}</td>}
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>}
                           {isAdmin && lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>
-                            {/* ✨ Pass the entire item object to the delete handler */}
                             <button style={styles.deleteBtn} onClick={() => handleDelete(item)} title="Delete item">
                                 <AiOutlineDelete size={16} />
                             </button>
@@ -286,11 +358,15 @@ const Inventory = ({ internalUser }) => {
                       </tr>
                   ))
               )}
-              {currentItems.length === 0 && (<tr><td colSpan={isAdmin ? 9 : 8} style={styles.noData}>No inventory records found.</td></tr>)}
+              {filteredInventory.length === 0 && !loading && (<tr><td colSpan={isAdmin ? 9 : 8} style={styles.noData}>No inventory records found.</td></tr>)}
             </tbody>
           </table>
         </div>
-        {totalPages > 1 && (<div style={styles.pagination}><button style={styles.paginationButton} onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>Previous</button><span style={styles.paginationInfo}>Page {currentPage} of {totalPages}</span><button style={styles.paginationButton} onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>Next</button></div>)}
+        <div style={styles.pagination}>
+            <button style={styles.paginationButton} onClick={handlePrevPage} disabled={page === 1}>Previous</button>
+            <span style={styles.paginationInfo}>Page {page}</span>
+            <button style={styles.paginationButton} onClick={handleNextPage} disabled={isLastPage}>Next</button>
+        </div>
       </div>
     </div>
   );
@@ -300,6 +376,7 @@ const styles = {
   container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f8f9fa' },
   loadingContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#6c757d' },
   loadingSpinner: { border: '3px solid #f3f3f3', borderTop: '3px solid #3498db', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '15px' },
+  loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '12px' },
   headerContainer: { marginBottom: '24px' },
   header: { fontSize: '28px', fontWeight: '700', color: '#2c3e50' },
   subHeader: { fontSize: '16px', color: '#6c757d', margin: '4px 0 0 0' },
@@ -309,8 +386,9 @@ const styles = {
   searchIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6c757d', fontSize: '18px' },
   searchInput: { padding: '12px 12px 12px 40px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', width: '100%', boxSizing: 'border-box' },
   filterToggle: { display: 'flex', alignItems: 'center', padding: '10px 16px', backgroundColor: 'transparent', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', color: '#6c757d' },
-  filterPanel: { padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px', marginBottom: '16px', width: '100%' },
-  dateFilters: { display: 'flex', gap: '16px', flexWrap: 'wrap' },
+  filterPanel: { padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px', margin: '16px 0 0 0', width: '100%', gridColumn: 'span 2'},
+  dateFilters: { display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' },
+  applyFilterBtn: { padding: '8px 16px', border: 'none', backgroundColor: '#3498db', color: 'white', borderRadius: '6px', cursor: 'pointer' },
   filterGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
   filterLabel: { fontSize: '14px', fontWeight: '500', color: '#495057' },
   dateInput: { padding: '8px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px' },
@@ -332,10 +410,9 @@ const styles = {
   modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },
   saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: '600' },
   cancelButton: { padding: '12px 24px', backgroundColor: 'transparent', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', color: '#6c757d' },
-  tableContainer: { backgroundColor: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' },
+  tableContainer: { position: 'relative', backgroundColor: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', minHeight: '400px' },
   tableHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid #eaeaea' },
   tableTitle: { fontSize: '18px', fontWeight: '600', color: '#2c3e50' },
-  resultCount: { fontSize: '14px', color: '#6c757d' },
   tableWrapper: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { padding: '16px', textAlign: 'left', backgroundColor: '#f8f9fa', fontWeight: '600', color: '#495057', fontSize: '14px', borderBottom: '1px solid #eaeaea' },

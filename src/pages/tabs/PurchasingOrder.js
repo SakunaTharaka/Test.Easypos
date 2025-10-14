@@ -9,19 +9,29 @@ import {
   serverTimestamp,
   doc,
   runTransaction,
-  deleteDoc
+  deleteDoc,
+  orderBy,
+  limit,
+  startAfter,
+  where
 } from "firebase/firestore";
-import { AiOutlinePlus, AiOutlineSearch, AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
+import { AiOutlinePlus, AiOutlineSearch, AiOutlineEye, AiOutlineDelete, AiOutlineFilter } from "react-icons/ai";
 import Select from "react-select";
+
+const ITEMS_PER_PAGE = 20;
 
 const PurchasingOrder = ({ internalUser }) => {
   const [orders, setOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [itemsForDropdown, setItemsForDropdown] = useState([]);
-  // ✅ **NEW: State to hold company info for the print header**
   const [companyInfo, setCompanyInfo] = useState(null);
-  
+
+  // --- Pagination State ---
+  const [page, setPage] = useState(1);
+  const [lastVisible, setLastVisible] = useState(null);
+  const [pageHistory, setPageHistory] = useState([null]); // History of the first doc of each page
+  const [isLastPage, setIsLastPage] = useState(false);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [form, setForm] = useState({
     poNumber: "",
@@ -39,6 +49,7 @@ const PurchasingOrder = ({ internalUser }) => {
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   
+  // --- Filtering & Searching State ---
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -46,56 +57,119 @@ const PurchasingOrder = ({ internalUser }) => {
   const printComponentRef = useRef();
 
   const getCurrentInternal = () => {
-    if (internalUser && Object.keys(internalUser).length) return internalUser;
     try {
       const stored = localStorage.getItem("internalLoggedInUser");
-      if (stored) return JSON.parse(stored);
-    } catch (e) {}
-    return null;
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) { return null; }
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
+  // --- Core Data Fetching Function ---
+  const fetchOrders = async (direction = 'initial') => {
+    setLoading(true);
+    const user = auth.currentUser;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    const uid = user.uid;
+    const poColRef = collection(db, uid, "purchase_orders", "po_list");
+
+    let q = query(poColRef, orderBy("createdAt", "desc"));
+
+    // Apply date filters to the server query
+    if (dateFrom) {
+        q = query(q, where("createdAt", ">=", new Date(dateFrom + "T00:00:00")));
+    }
+    if (dateTo) {
+        q = query(q, where("createdAt", "<=", new Date(dateTo + "T23:59:59")));
+    }
+    
+    try {
+        let querySnapshot;
+        if (direction === 'next' && lastVisible) {
+            q = query(q, limit(ITEMS_PER_PAGE), startAfter(lastVisible));
+        } else if (direction === 'prev' && page > 1) {
+            const prevPageStart = pageHistory[page - 2];
+            q = query(q, limit(ITEMS_PER_PAGE), startAfter(prevPageStart));
+        } else { // Initial or filter apply
+            q = query(q, limit(ITEMS_PER_PAGE));
+        }
+        
+        querySnapshot = await getDocs(q);
+
+        const poData = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setOrders(poData);
+
+        if (poData.length > 0) {
+            setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+            const firstDoc = querySnapshot.docs[0];
+
+            if (direction === 'next') {
+                setPageHistory(prev => [...prev, firstDoc]);
+            }
+        }
+        setIsLastPage(poData.length < ITEMS_PER_PAGE);
+
+    } catch (error) {
+        console.error("Error fetching purchase orders:", error);
+        alert("Could not fetch purchase orders.");
+    } finally {
+        setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    // Initial fetch
+    fetchOrders('initial');
+
+    // Fetch dropdown items and company info once
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
 
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        // Fetch Purchase Orders
-        const poColRef = collection(db, uid, "purchase_orders", "po_list");
-        const poSnap = await getDocs(query(poColRef));
-        const poData = poSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => (b.poNumber?.localeCompare(a.poNumber, undefined, { numeric: true })) || 0);
-        setOrders(poData);
+    const fetchInitialDropdowns = async () => {
+        try {
+            const itemsColRef = collection(db, uid, "items", "item_list");
+            const itemsSnap = await getDocs(query(itemsColRef));
+            const itemsData = itemsSnap.docs.map(d => ({
+                value: d.id, label: `${d.data().name} (SKU: ${d.data().sku || 'N/A'})`, ...d.data()
+            }));
+            setItemsForDropdown(itemsData);
 
-        // Fetch Items
-        const itemsColRef = collection(db, uid, "items", "item_list");
-        const itemsSnap = await getDocs(query(itemsColRef));
-        const itemsData = itemsSnap.docs.map(d => ({
-          value: d.id,
-          label: `${d.data().name} (SKU: ${d.data().sku || 'N/A'})`,
-          ...d.data()
-        }));
-        setItemsForDropdown(itemsData);
-
-        // ✅ **NEW: Fetch Company Info from settings**
-        const settingsRef = doc(db, uid, "settings");
-        const settingsSnap = await getDoc(settingsRef);
-        if (settingsSnap.exists()) {
-          setCompanyInfo(settingsSnap.data());
+            const settingsRef = doc(db, uid, "settings");
+            const settingsSnap = await getDoc(settingsRef);
+            if (settingsSnap.exists()) setCompanyInfo(settingsSnap.data());
+        } catch(error) {
+             console.error("Error fetching dropdowns/settings:", error);
         }
-
-      } catch (error) {
-        console.error("Error fetching data:", error);
-        alert("Could not fetch data. Please try again.");
-      }
-      setLoading(false);
     };
-    fetchData();
+    fetchInitialDropdowns();
   }, []);
+
+  const handleApplyFilters = () => {
+    setPage(1);
+    setLastVisible(null);
+    setPageHistory([null]);
+    fetchOrders('initial');
+  };
+
+  const handleNextPage = () => {
+    if (!isLastPage) {
+        setPage(prev => prev + 1);
+        fetchOrders('next');
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (page > 1) {
+        const newPageHistory = [...pageHistory];
+        newPageHistory.pop(); // Remove current page's start
+        setPageHistory(newPageHistory);
+        setPage(prev => prev - 1);
+        fetchOrders('prev');
+    }
+  };
 
   const getNextPONumber = async (uid) => {
     const counterRef = doc(db, uid, "counters");
@@ -145,7 +219,6 @@ const PurchasingOrder = ({ internalUser }) => {
     setForm({ ...form, lineItems: updatedLineItems });
   };
   
-  // ✅ **NEW: Handler with phone number filtering**
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     if (name === 'supplierContact') {
@@ -157,7 +230,6 @@ const PurchasingOrder = ({ internalUser }) => {
         setForm({ ...form, [name]: value });
     }
   };
-
 
   useEffect(() => {
     const subtotal = form.lineItems.reduce((acc, item) => acc + item.total, 0);
@@ -171,7 +243,6 @@ const PurchasingOrder = ({ internalUser }) => {
     if (!form.supplierName || form.lineItems.some(item => !item.itemId || !item.quantity)) {
         return alert("Please fill in Supplier Name and ensure all line items are complete.");
     }
-    // ✅ **NEW: Phone number validation on save (optional field)**
     if (form.supplierContact) {
         const phoneRegex = /^0\d{9}$/;
         if (!phoneRegex.test(form.supplierContact)) {
@@ -187,12 +258,13 @@ const PurchasingOrder = ({ internalUser }) => {
     if (!poNumber) return;
 
     try {
-        const addedBy = JSON.parse(localStorage.getItem("internalLoggedInUser"))?.username || "Admin";
+        const addedBy = getCurrentInternal()?.username || "Admin";
         const poColRef = collection(db, uid, "purchase_orders", "po_list");
         const newOrderData = { ...form, poNumber, addedBy, createdAt: serverTimestamp() };
 
         const docRef = await addDoc(poColRef, newOrderData);
-        setOrders(prev => [{ id: docRef.id, ...newOrderData, createdAt: new Date() }, ...prev]);
+        // Refetch the first page to show the new item
+        handleApplyFilters();
 
         setShowCreateModal(false);
         setForm({ poNumber: "", poDate: new Date().toISOString().split('T')[0], supplierName: "", supplierAddress: "", supplierContact: "", lineItems: [{ itemId: "", name: "", quantity: 1, price: 0, total: 0 }], subtotal: 0, tax: 0, shipping: 0, total: 0 });
@@ -209,31 +281,24 @@ const PurchasingOrder = ({ internalUser }) => {
     try {
         const orderDocRef = doc(db, user.uid, "purchase_orders", "po_list", orderId);
         await deleteDoc(orderDocRef);
-        setOrders(prev => prev.filter(order => order.id !== orderId));
+        // After deleting, refetch the current page
+        fetchOrders(page > 1 ? 'prev' : 'initial');
         alert("Purchase Order deleted successfully.");
     } catch(error) {
         alert("Error deleting Purchase Order: " + error.message);
     }
   };
 
-  useEffect(() => {
-    let filtered = orders.filter(order => {
-        const searchTermMatch = search ? 
-            order.poNumber.toLowerCase().includes(search.toLowerCase()) || 
-            order.supplierName.toLowerCase().includes(search.toLowerCase()) ||
-            order.lineItems.some(item => item.name.toLowerCase().includes(search.toLowerCase()))
-            : true;
-        
-        const poDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.poDate);
-        const dateFromMatch = dateFrom ? poDate >= new Date(dateFrom + "T00:00:00") : true;
-        const dateToMatch = dateTo ? poDate <= new Date(dateTo + "T23:59:59") : true;
-
-        return searchTermMatch && dateFromMatch && dateToMatch;
-    });
-    setFilteredOrders(filtered);
-  }, [search, dateFrom, dateTo, orders]);
+  // Client-side search on the currently displayed page of orders
+  const searchedOrders = orders.filter(order =>
+    search ?
+    order.poNumber.toLowerCase().includes(search.toLowerCase()) ||
+    order.supplierName.toLowerCase().includes(search.toLowerCase()) ||
+    order.lineItems.some(item => item.name.toLowerCase().includes(search.toLowerCase())) :
+    true
+  );
   
-  if (loading) return <p>Loading Purchase Orders...</p>;
+  if (loading && page === 1 && orders.length === 0) return <p>Loading Purchase Orders...</p>;
 
   return (
     <div style={styles.container}>
@@ -245,18 +310,23 @@ const PurchasingOrder = ({ internalUser }) => {
             </button>
         </div>
         <div style={styles.controlsContainer}>
-            <div style={styles.searchInputContainer}><AiOutlineSearch style={styles.searchIcon} /><input type="text" placeholder="Search by PO#, Supplier, or Item..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} /></div>
+            <div style={styles.searchInputContainer}>
+                <AiOutlineSearch style={styles.searchIcon} />
+                <input type="text" placeholder="Search current page..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
+            </div>
             <div style={styles.dateFilters}>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} />
-            <span>to</span>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={styles.dateInput} />
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} />
+                <span>to</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={styles.dateInput} />
+                <button style={styles.filterButton} onClick={handleApplyFilters}><AiOutlineFilter/> Apply</button>
             </div>
         </div>
         <div style={styles.tableContainer}>
+            {loading && <div style={styles.loadingOverlay}><span>Loading...</span></div>}
             <table style={styles.table}>
             <thead><tr><th style={styles.th}>PO #</th><th style={styles.th}>Date</th><th style={styles.th}>Supplier</th><th style={styles.th}>Total Amount</th><th style={styles.th}>Actions</th></tr></thead>
             <tbody>
-                {filteredOrders.map(order => (
+                {searchedOrders.map(order => (
                 <tr key={order.id}>
                     <td style={styles.td}>{order.poNumber}</td>
                     <td style={styles.td}>{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString() : new Date(order.poDate).toLocaleDateString()}</td>
@@ -272,9 +342,14 @@ const PurchasingOrder = ({ internalUser }) => {
                     </td>
                 </tr>
                 ))}
-                {filteredOrders.length === 0 && <tr><td colSpan="5" style={styles.noData}>No purchase orders found.</td></tr>}
+                {searchedOrders.length === 0 && !loading && <tr><td colSpan="5" style={styles.noData}>No purchase orders found.</td></tr>}
             </tbody>
             </table>
+        </div>
+        <div style={styles.paginationControls}>
+            <button onClick={handlePrevPage} disabled={page === 1}>Previous</button>
+            <span>Page {page}</span>
+            <button onClick={handleNextPage} disabled={isLastPage}>Next</button>
         </div>
       </div>
 
@@ -286,7 +361,6 @@ const PurchasingOrder = ({ internalUser }) => {
                     <div style={styles.formGroup}><label>PO Date</label><input type="date" name="poDate" value={form.poDate} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroup}><label>Supplier Name *</label><input name="supplierName" value={form.supplierName} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroup}><label>Supplier Address</label><input name="supplierAddress" value={form.supplierAddress} onChange={handleFormChange} style={styles.input}/></div>
-                    {/* ✅ **FIX: Added placeholder and using new handler for phone validation** */}
                     <div style={styles.formGroup}><label>Supplier Contact</label><input name="supplierContact" type="tel" placeholder="E.g., 0712345678" value={form.supplierContact} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroupFull}>
                         <h4>Line Items</h4>
@@ -322,7 +396,6 @@ const PurchasingOrder = ({ internalUser }) => {
                     <h3>Purchase Order Details</h3>
                     <button style={styles.closeButton} onClick={() => setShowViewModal(false)}>&times;</button>
                 </div>
-                {/* ✅ **FIX: Print view now includes company header** */}
                 <div ref={printComponentRef} style={styles.printView}>
                     <div style={styles.printHeader}>
                         {companyInfo?.companyLogo && <img src={companyInfo.companyLogo} alt="Logo" style={styles.printLogo} />}
@@ -332,7 +405,6 @@ const PurchasingOrder = ({ internalUser }) => {
                             <p style={{margin: 0}}>{companyInfo?.phone}</p>
                         </div>
                     </div>
-
                     <h2 style={{textAlign: 'center', textDecoration: 'underline'}}>Purchase Order</h2>
                     <div style={styles.poHeader}>
                         <div><strong>PO #:</strong> {selectedOrder.poNumber}</div>
@@ -374,7 +446,6 @@ const PurchasingOrder = ({ internalUser }) => {
 };
 
 const styles = {
-    //... (previous styles are unchanged) ...
     container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
     headerContainer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
     header: { fontSize: '28px', fontWeight: '700', color: '#2c3e50' },
@@ -385,12 +456,15 @@ const styles = {
     searchInput: { width: '100%', padding: '10px 10px 10px 40px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box' },
     dateFilters: { display: 'flex', alignItems: 'center', gap: '8px' },
     dateInput: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd' },
-    tableContainer: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', overflowX: 'auto' },
+    filterButton: { display: 'flex', alignItems: 'center', gap: '5px', padding: '10px 15px', border: 'none', backgroundColor: '#34495e', color: 'white', borderRadius: '6px', cursor: 'pointer' },
+    tableContainer: { position: 'relative', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', overflowX: 'auto', minHeight: '300px' },
+    loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(255, 255, 255, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '8px' },
     table: { width: '100%', borderCollapse: 'collapse' },
     th: { padding: '12px', textAlign: 'left', backgroundColor: '#f8f9fa', fontWeight: '600', color: '#495057' },
     td: { padding: '12px', borderBottom: '1px solid #eaeaea' },
     noData: { padding: '40px', textAlign: 'center', color: '#6c757d' },
     actionButton: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#3498db' },
+    paginationControls: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', marginTop: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
     modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '40px' },
     modal: { backgroundColor: 'white', borderRadius: '12px', width: '100%', maxHeight: '90vh', overflowY: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' },
     modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #eaeaea', flexShrink: 0 },
@@ -406,8 +480,6 @@ const styles = {
     modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },
     saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
     cancelButton: { padding: '12px 24px', backgroundColor: '#ecf0f1', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
-    
-    // ✅ **NEW AND UPDATED PRINT STYLES**
     printView: { padding: '40px', fontFamily: 'serif' },
     printHeader: { display: 'flex', alignItems: 'center', gap: '20px', borderBottom: '2px solid #000', paddingBottom: '20px', marginBottom: '30px' },
     printLogo: { maxHeight: '80px', maxWidth: '150px' },
@@ -416,7 +488,6 @@ const styles = {
 };
 
 const styleSheet = document.createElement("style");
-// ✅ **FIX: Added A5 page formatting**
 styleSheet.innerText = `
   @media print {
     body {

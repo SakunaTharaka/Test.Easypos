@@ -6,6 +6,7 @@ import Select from "react-select";
 
 const AddProduction = ({ internalUser }) => {
     const [loading, setLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false); // 💡 1. New state for save loading
     const [shifts, setShifts] = useState([]);
     const [allItems, setAllItems] = useState([]);
     const [productionRecords, setProductionRecords] = useState([]);
@@ -118,8 +119,12 @@ const AddProduction = ({ internalUser }) => {
             return;
         }
         const user = auth.currentUser;
-        if (!user) return alert("You are not logged in.");
+        if (!user) {
+            alert("You are not logged in.");
+            return;
+        }
 
+        setIsSaving(true); // 💡 2. Set loading to true before starting
         try {
             const addedBy = internalUser?.username || "Admin";
             const prodColRef = collection(db, user.uid, "production", "production_records");
@@ -147,17 +152,20 @@ const AddProduction = ({ internalUser }) => {
 
         } catch (error) {
             alert("Error saving production: " + error.message);
+        } finally {
+            setIsSaving(false); // 💡 3. Set loading to false after completion (success or fail)
         }
     };
     
     const handleDeleteProduction = async (recordId) => {
-        if (!window.confirm("Are you sure you want to delete this production record?")) return;
+        if (!window.confirm("Are you sure you want to delete this production record? This cannot be undone.")) return;
         const user = auth.currentUser;
         if (!user) return;
         
         try {
             const docRef = doc(db, user.uid, "production", "production_records", recordId);
             await deleteDoc(docRef);
+            // 💡 4. This line correctly filters the state, causing the list to update automatically.
             setProductionRecords(prev => prev.filter(rec => rec.id !== recordId));
             alert("Record deleted.");
         } catch(error) {
@@ -191,7 +199,12 @@ const AddProduction = ({ internalUser }) => {
                             ))}
                         </tbody>
                     </table>
-                    <div style={{textAlign: 'right', marginTop: '16px'}}><button onClick={handleSaveProduction} style={styles.saveButton}>Save Production Run</button></div>
+                    {/* 💡 5. Update save button to be disabled and show loading text when saving */}
+                    <div style={{textAlign: 'right', marginTop: '16px'}}>
+                        <button onClick={handleSaveProduction} style={styles.saveButton} disabled={isSaving}>
+                            {isSaving ? 'Saving...' : 'Save Production Run'}
+                        </button>
+                    </div>
                 </div>
             )}
             
@@ -204,7 +217,6 @@ const AddProduction = ({ internalUser }) => {
                     <div style={styles.formGroup}><label>Filter by Shift</label><select value={filterShift} onChange={e => setFilterShift(e.target.value)} style={styles.input}><option value="">All Shifts</option>{shifts.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                 </div>
                 <table style={styles.table}>
-                    {/* 💡 FIX: Updated table headers */}
                     <thead style={styles.thead}>
                         <tr>
                             <th style={styles.th}>Date</th>
@@ -216,9 +228,8 @@ const AddProduction = ({ internalUser }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {/* 💡 FIX: Updated table body to render each item on a new row, grouped by production run */}
                         {filteredRecords.length > 0 ? (
-                            filteredRecords.flatMap((rec, recIndex) => 
+                            filteredRecords.flatMap((rec) => 
                                 rec.lineItems.map((item, itemIndex) => (
                                     <tr key={`${rec.id}-${itemIndex}`}>
                                         {itemIndex === 0 && (
@@ -260,12 +271,32 @@ const styles = {
     table: { width: '100%', borderCollapse: 'collapse' },
     thead: { backgroundColor: '#e9ecef' },
     th: { padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6' },
-    td: { padding: '12px', borderBottom: '1px solid #dee2e6', verticalAlign: 'top' }, // Added verticalAlign
+    td: { padding: '12px', borderBottom: '1px solid #dee2e6', verticalAlign: 'top' },
     deleteBtn: { background: 'transparent', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: '16px' },
-    saveButton: { padding: '12px 24px', border: 'none', background: '#2ecc71', color: 'white', borderRadius: '6px', cursor: 'pointer', fontSize: '16px' },
+    saveButton: { 
+        padding: '12px 24px', 
+        border: 'none', 
+        background: '#2ecc71', 
+        color: 'white', 
+        borderRadius: '6px', 
+        cursor: 'pointer', 
+        fontSize: '16px',
+        transition: 'background-color 0.2s', // Smooth transition for color change
+    },
     hr: { border: 'none', borderTop: '1px solid #eee', margin: '32px 0' },
     historyContainer: {},
     filters: { display: 'flex', gap: '20px', marginBottom: '20px', backgroundColor: '#fff', padding: '16px', borderRadius: '8px' },
 };
+
+// Add a style rule for the disabled save button
+const styleSheet = document.createElement("style");
+styleSheet.innerText = `
+  button:disabled {
+    background-color: #95a5a6 !important;
+    cursor: not-allowed;
+  }
+`;
+document.head.appendChild(styleSheet);
+
 
 export default AddProduction;
