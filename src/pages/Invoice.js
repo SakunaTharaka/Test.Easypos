@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from "react";
+/* global qz */
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { auth, db } from "../firebase";
 import {
   collection,
@@ -13,10 +14,10 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 
+// This component remains the same, it's just for generating the invoice HTML
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     if (!invoice || !Array.isArray(invoice.items)) return null;
     const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    // ✅ **FIX: Add delivery charges to subtotal for balance calculation if they exist**
     const totalBeforeReceived = subtotal + (invoice.deliveryCharge || 0);
     const balanceToDisplay = invoice.received === 0 ? 0 : invoice.received - totalBeforeReceived;
     const createdAtDate = invoice.createdAt instanceof Date ? invoice.createdAt : invoice.createdAt?.toDate();
@@ -51,7 +52,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
           <div style={printStyles.totalsContainer}>
             <div style={printStyles.totals}>
                 <div style={printStyles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div>
-                {/* ✅ **FIX: Conditionally display delivery charges in print view** */}
                 {invoice.deliveryCharge > 0 && (
                     <div style={printStyles.totalRow}><strong>Delivery:</strong><span>Rs. {invoice.deliveryCharge.toFixed(2)}</span></div>
                 )}
@@ -68,99 +68,166 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     );
 };
 
-const PrintPreviewModal = ({ invoice, companyInfo, onClose }) => {
-    const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
-    const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
 
-    // This adds a class to the <body> so our print styles only apply when the modal is open.
-    useEffect(() => {
-        document.body.classList.add('print-modal-active');
-        return () => {
-            document.body.classList.remove('print-modal-active');
-        };
-    }, []);
+// --- NEW QZ TRAY MODAL ---
+const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
+    const [status, setStatus] = useState('Initializing...');
+    const [isConnecting, setIsConnecting] = useState(true);
+    const [printers, setPrinters] = useState([]);
+    const [selectedPrinter, setSelectedPrinter] = useState('');
+    const [isPrinting, setIsPrinting] = useState(false);
+    const [autoPrintingStatus, setAutoPrintingStatus] = useState('');
+    const printableRef = useRef(null);
+
+    const handlePrint = useCallback(async () => {
+        if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) {
+            alert('QZ Tray is not connected.');
+            return;
+        }
+        if (!selectedPrinter) {
+            alert('Please select a printer.');
+            return;
+        }
+
+        setIsPrinting(true);
+
+        try {
+            const config = qz.configs.create(selectedPrinter, { units: 'mm', width: 80 });
+            const printData = [{ type: 'html', format: 'plain', data: printableRef.current.innerHTML }];
+            await qz.print(config, printData);
+
+            const drawerCommand = '\x1B\x70\x00\x19\xFA'; 
+            await qz.print(config, [drawerCommand]);
+
+            alert('Print successful and drawer kicked!');
+            onClose();
+
+        } catch (err) {
+            console.error(err);
+            alert('Printing failed: ' + err.toString());
+            setAutoPrintingStatus('');
+        } finally {
+            setIsPrinting(false);
+        }
+    }, [selectedPrinter, onClose]);
 
     useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (e.key === 'Enter' && isPrintReady) {
-                e.preventDefault();
-                window.print();
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                onClose();
-            }
+        // Wait for the parent component to confirm the QZ script is loaded
+        if (!isQzReady) {
+            setStatus('Waiting for QZ Tray library...');
+            return;
+        }
+
+        const findPrintersAndPrint = () => {
+            qz.printers.find().then(foundPrinters => {
+                setPrinters(foundPrinters);
+                const savedPrinter = localStorage.getItem('selectedPrinter');
+
+                if (savedPrinter && foundPrinters.includes(savedPrinter)) {
+                    setAutoPrintingStatus(`Found saved printer: "${savedPrinter}". Printing automatically...`);
+                    setSelectedPrinter(savedPrinter);
+                } else {
+                    setIsConnecting(false);
+                    if (foundPrinters.length > 0) {
+                        const defaultPrinter = foundPrinters.find(p => p.toLowerCase().includes('tm-t') || p.toLowerCase().includes('80mm')) || foundPrinters[0];
+                        setSelectedPrinter(defaultPrinter);
+                    }
+                }
+            }).catch(err => {
+                console.error(err);
+                setStatus('Error finding printers.');
+                setIsConnecting(false);
+            });
         };
-        const handleAfterPrint = () => onClose();
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('afterprint', handleAfterPrint);
+        
+        setStatus('Connecting to QZ Tray...');
+        if (!qz.websocket.isActive()) {
+            qz.websocket.connect().then(() => {
+                setStatus('Connected to QZ Tray.');
+                findPrintersAndPrint();
+            }).catch(err => {
+                console.error(err);
+                setStatus('Connection Failed. Is QZ Tray running?');
+                setIsConnecting(false);
+            });
+        } else {
+            setStatus('Connected to QZ Tray.');
+            findPrintersAndPrint();
+        }
+
+        qz.websocket.onClosed = () => setStatus('Connection Closed. Please ensure QZ Tray is running.');
+        qz.websocket.onError = () => setStatus('Connection Error. Is QZ Tray running?');
+        
         return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('afterprint', handleAfterPrint);
-        };
-    }, [onClose, isPrintReady]);
+             if (qz && qz.websocket) {
+                qz.websocket.onClosed = null;
+                qz.websocket.onError = null;
+            }
+        }
+    }, [isQzReady]); // This effect now depends on the script-ready signal
+
+    useEffect(() => {
+        if (autoPrintingStatus && selectedPrinter) {
+            const timer = setTimeout(() => {
+                handlePrint();
+            }, 500); 
+            return () => clearTimeout(timer);
+        }
+    }, [autoPrintingStatus, selectedPrinter, handlePrint]);
+
+    useEffect(() => {
+        if (selectedPrinter) {
+            localStorage.setItem('selectedPrinter', selectedPrinter);
+        }
+    }, [selectedPrinter]);
+
+    const showControls = !isConnecting && !autoPrintingStatus;
 
     return (
-        <>
-            <style>{`
-                @page {
-                    /* This removes the printer's default margin. */
-                    margin: 0;
-                    size: 80mm auto;
-                }
+        <div style={styles.confirmOverlay}>
+            <div style={{...styles.confirmPopup, minWidth: '450px'}}>
+                <h4>Direct Print with QZ Tray</h4>
+                <div style={styles.qzStatus}>
+                    <strong>Status:</strong>
+                    <span style={{ color: (isQzReady && qz.websocket && qz.websocket.isActive()) ? '#10b981' : '#ef4444', marginLeft: '8px' }}>
+                         {autoPrintingStatus || status}
+                    </span>
+                </div>
+
+                {showControls && (
+                    <div style={styles.qzControls}>
+                        <label style={styles.label} htmlFor="printer-select">Select a printer to save for next time</label>
+                        <select
+                            id="printer-select"
+                            value={selectedPrinter}
+                            onChange={e => setSelectedPrinter(e.target.value)}
+                            style={{ ...styles.input, width: '100%', marginBottom: '20px' }}
+                            disabled={printers.length === 0}
+                        >
+                            {printers.length === 0 ? <option>No printers found</option> : printers.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        
+                        <button 
+                            onClick={handlePrint} 
+                            disabled={isPrinting || !selectedPrinter}
+                            style={{...styles.saveButton, ...(isPrinting || !selectedPrinter ? styles.saveButtonDisabled : {})}}
+                        >
+                           {isPrinting ? 'Printing...' : 'Print & Open Drawer'}
+                        </button>
+                    </div>
+                )}
                 
-                @media print {
-                    /* Reset body styles for printing */
-                    body {
-                        background-color: #fff !important;
-                        /* ✅ FIX: Add margin and padding reset to the body to remove the top gap */
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
+                {autoPrintingStatus && (
+                     <div style={styles.savingSpinner}></div>
+                )}
 
-                    /* Hide everything except our modal */
-                    body.print-modal-active > * {
-                        visibility: hidden !important;
-                    }
-                    body.print-modal-active .print-preview-overlay,
-                    body.print-modal-active .print-preview-overlay * {
-                        visibility: visible !important;
-                    }
-
-                    /* Force the modal to the absolute top-left corner. */
-                    body.print-modal-active .print-preview-overlay {
-                        position: absolute !important;
-                        left: 0 !important;
-                        top: 0 !important;
-                        width: 100% !important;
-                        display: block !important;
-                    }
-                    
-                    /* Clean up the inner container styles */
-                    .print-area-container {
-                        box-shadow: none !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        width: 100% !important;
-                        transform: none !important;
-                    }
-                    .no-print {
-                        display: none !important;
-                    }
-                }
-            `}</style>
-            
-            <div className="print-preview-overlay" style={styles.confirmOverlay}>
-                <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '10px', transformOrigin: 'top center' }}>
-                    <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
-                        {isPrintReady ? 'Press ENTER to Print or ESC to Close' : 'Loading preview...'}
-                    </div>
-                    <div className="print-area">
-                        {invoice ? <PrintableLayout invoice={invoice} companyInfo={companyInfo} onImageLoad={() => setIsImageLoaded(true)} /> : <p>Loading...</p>}
-                    </div>
+                <button onClick={onClose} style={styles.closeButton}>Cancel</button>
+                
+                <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }} ref={printableRef}>
+                   {invoice && <PrintableLayout invoice={invoice} companyInfo={companyInfo} />}
                 </div>
             </div>
-        </>
+        </div>
     );
 };
 
@@ -190,19 +257,47 @@ const Invoice = ({ internalUser }) => {
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const paymentOptions = ['Cash', 'Card', 'Online'];
   
-  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showQZPrintModal, setShowQZPrintModal] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
+  const [isQzReady, setIsQzReady] = useState(false); // State to track script loading
   
-  // ✅ **1. New state and ref for delivery charges**
   const [deliveryCharge, setDeliveryCharge] = useState("");
   const deliveryChargeRef = useRef(null);
   const [deliveryChargeMode, setDeliveryChargeMode] = useState(false);
-
 
   const containerRef = useRef(null);
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
+  
+  // Effect to load QZ Tray script and set a ready flag
+  useEffect(() => {
+    const loadScript = (src, id) => {
+      return new Promise((resolve, reject) => {
+        if (document.getElementById(id)) {
+          resolve();
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.id = id;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Script load error for ${src}`));
+        document.head.appendChild(script);
+      });
+    };
+
+    // Load the modern version of QZ Tray (v2.2.3). Dependencies are bundled.
+    loadScript('https://cdn.jsdelivr.net/npm/qz-tray@2.2.3/qz-tray.js', 'qz-tray-lib')
+      .then(() => {
+        console.log('QZ Tray library loaded successfully.');
+        setIsQzReady(true); // Signal that the script is loaded
+      })
+      .catch(error => {
+        console.error('Failed to load QZ Tray library:', error);
+        setIsQzReady(false);
+      });
+  }, []);
 
     const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -307,11 +402,10 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (showPaymentConfirm || isSaving || showPrintPreview) return;
+      if (showPaymentConfirm || isSaving || showQZPrintModal) return;
       if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
       if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(prev => !prev); }
       if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(prev => !prev); }
-      // ✅ **2. New F5 shortcut for delivery charge**
       if (e.key === "F5") { 
           e.preventDefault(); 
           setCheckoutFocusMode(false); 
@@ -321,7 +415,7 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm, isSaving, showPrintPreview]);
+  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm, isSaving, showQZPrintModal]);
 
   useEffect(() => {
     if (amountReceivedMode) { receivedAmountRef.current?.focus(); receivedAmountRef.current?.select(); }
@@ -390,7 +484,7 @@ const Invoice = ({ internalUser }) => {
     setInvoiceNumber(newInvNum);
     setCheckout([]);
     setReceivedAmount("");
-    setDeliveryCharge(""); // Reset delivery charge
+    setDeliveryCharge(""); 
     itemInputRef.current?.focus();
   };
   
@@ -406,8 +500,8 @@ const Invoice = ({ internalUser }) => {
       const invoiceDataForDb = {
         customerId: selectedCustomer.value, customerName: selectedCustomer.label,
         items: checkout, 
-        total: total, // Use the new grand total
-        deliveryCharge: Number(deliveryCharge) || 0, // Save delivery charge
+        total: total, 
+        deliveryCharge: Number(deliveryCharge) || 0,
         received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
         balance: selectedCustomer.isCreditCustomer ? total : balance,
         createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
@@ -420,7 +514,7 @@ const Invoice = ({ internalUser }) => {
       if (settings?.autoPrintInvoice === true) {
         const invoiceDataForPrint = { ...invoiceDataForDb, createdAt: new Date() };
         setInvoiceToPrint(invoiceDataForPrint);
-        setShowPrintPreview(true);
+        setShowQZPrintModal(true);
       } else {
         alert("Invoice saved successfully!");
         await resetForm();
@@ -471,7 +565,6 @@ const Invoice = ({ internalUser }) => {
 
   
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  // ✅ **3. Calculate new grand total and balance with delivery charge**
   const total = subtotal + (Number(deliveryCharge) || 0);
   const balance = (Number(receivedAmount) || 0) - total; 
   const received = Number(receivedAmount) || 0;
@@ -480,19 +573,20 @@ const Invoice = ({ internalUser }) => {
 
   return (
     <div ref={containerRef} style={styles.container}>
-      {isSaving && !showPrintPreview && (
+      {isSaving && !showQZPrintModal && (
         <div style={styles.savingOverlay}>
             <div style={styles.savingSpinner}></div>
             <p>Saving...</p>
         </div>
       )}
       
-      {showPrintPreview && (
-        <PrintPreviewModal 
+      {showQZPrintModal && (
+        <QZPrintModal 
             invoice={invoiceToPrint} 
             companyInfo={settings}
+            isQzReady={isQzReady} // Pass the ready state to the modal
             onClose={() => {
-                setShowPrintPreview(false);
+                setShowQZPrintModal(false);
                 setInvoiceToPrint(null);
                 resetForm();
             }}
@@ -518,7 +612,6 @@ const Invoice = ({ internalUser }) => {
             <div style={styles.tableContainer}>
                 <table style={styles.table}><thead><tr><th style={styles.th}>ITEM</th><th style={styles.th}>QTY</th><th style={styles.th}>TOTAL</th><th style={styles.th}></th></tr></thead><tbody>{checkout.length === 0 ? (<tr><td colSpan="4" style={styles.emptyState}>No items added</td></tr>) : (checkout.map((c, idx) => (<tr key={idx} style={idx === highlightedCheckoutIndex ? styles.highlightedRow : {}}><td style={styles.td}>{c.itemName}</td><td style={styles.td}>{c.quantity}</td><td style={styles.td}>Rs. {(c.price * c.quantity).toFixed(2)}</td><td style={styles.td}><button onClick={() => removeCheckoutItem(idx)} style={styles.removeButton}>✕</button></td></tr>)))}</tbody></table>
             </div>
-            {/* ✅ **4. Conditionally render delivery charges and update totals** */}
             <div style={styles.totalsSection}>
                 <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div>
                 {settings?.offerDelivery && (
@@ -624,25 +717,28 @@ const styles = {
     shortcutItem: { marginBottom: '4px' },
     savingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 3000, color: '#1f2937', fontSize: '18px', fontWeight: '600' },
     savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
+    // Styles for the new QZ Tray Modal
+    qzStatus: { padding: '15px', margin: '15px 0', backgroundColor: '#f3f4f6', borderRadius: '6px', textAlign: 'left' },
+    qzControls: { textAlign: 'left', marginTop: '10px' },
+    closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }
 };
 const printStyles = {
-    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace" },
+    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace", fontSize: '12px', width: '80mm' },
     logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px', display: 'block', marginLeft: 'auto', marginRight: 'auto' },
     companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold', textAlign: 'center' },
     headerText: { margin: '2px 0', fontSize: '0.9em', textAlign: 'center' },
-    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
-    th: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
+    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '15px' },
+    th: { borderBottom: '1px solid #000', padding: '5px', textAlign: 'right' },
     thItem: { textAlign: 'left' },
-    td: { padding: '8px', borderBottom: '1px dotted #ccc' },
+    td: { padding: '5px', borderBottom: '1px dotted #ccc' },
     tdCenter: { textAlign: 'center' },
     tdRight: { textAlign: 'right' },
     totalsContainer: { width: '100%' },
     totals: { paddingTop: '10px' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1em' },
+    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '1em' },
     hr: { border: 'none', borderTop: '1px dashed #000' },
-    footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
+    footer: { textAlign: 'center', marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
     creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
 };
 
 export default Invoice;
-

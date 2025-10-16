@@ -97,11 +97,22 @@ const Home = () => {
             <div style={styles.logoIcon}></div>
             <h1 style={styles.headerTitle}>EasyPOS.lk</h1>
           </div>
-          <nav style={styles.nav}>
-            <a href="#features" style={styles.navLink}>Features</a>
-            <a href="#pricing" style={styles.navLink}>Pricing</a>
-            <a href="#contact" style={styles.navLink}>Contact</a>
-          </nav>
+          <div style={styles.headerRight}>
+            <nav style={styles.nav}>
+              <a href="#features" style={styles.navLink}>Features</a>
+              <a href="#pricing" style={styles.navLink}>Pricing</a>
+              <a href="#contact" style={styles.navLink}>Contact</a>
+              {/* --- UPDATED QZ TRAY DOWNLOAD LINK --- */}
+              <a 
+                href="https://qz.io/download/" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                style={styles.navLink}
+              >
+                Download QZ Tray
+              </a>
+            </nav>
+          </div>
         </div>
       </header>
 
@@ -246,6 +257,7 @@ const Home = () => {
           </div>
           <div style={styles.footerBottom}>
             <p>© 2025 EasyPOS.lk | All Rights Reserved</p>
+
             {isAdminButtonVisible && (
               <button onClick={openMasterAdmin} style={styles.adminButton}>
                 Master Admin Panel
@@ -341,6 +353,12 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '40px',
   },
 
   logo: {
@@ -682,3 +700,4 @@ styleSheet.innerText = `
 document.head.appendChild(styleSheet);
 
 export default Home;
+
