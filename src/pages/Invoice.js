@@ -12,6 +12,8 @@ import {
   serverTimestamp,
   runTransaction
 } from "firebase/firestore";
+// ADDED IMPORT FOR FIREBASE FUNCTIONS
+import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
 // This component remains the same, it's just for generating the invoice HTML
@@ -79,6 +81,7 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const [autoPrintingStatus, setAutoPrintingStatus] = useState('');
     const printableRef = useRef(null);
 
+    // --- THIS ENTIRE FUNCTION IS UPDATED ---
     const handlePrint = useCallback(async () => {
         if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) {
             alert('QZ Tray is not connected.');
@@ -92,8 +95,32 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
         setIsPrinting(true);
 
         try {
+            // --- NEW: Set up the signing process ---
+            qz.security.setSignaturePromise(async (toSign) => {
+                try {
+                    console.log("Requesting signature for:", toSign);
+                    const functions = getFunctions();
+                    const getQzSignature = httpsCallable(functions, 'getQzSignature');
+                    
+                    // Call your Firebase function with the data QZ needs signed
+                    const result = await getQzSignature({ requestToSign: toSign });
+                    
+                    // Return the signature received from your backend
+                    console.log("Signature received from server.");
+                    return result.data.signature;
+
+                } catch (error) {
+                    console.error("Signature promise error:", error);
+                    alert("Failed to get print signature from the server.");
+                    return null; // Returning null cancels the print job
+                }
+            });
+            // --- End of new signing logic ---
+
             const config = qz.configs.create(selectedPrinter, { units: 'mm', width: 80 });
             const printData = [{ type: 'html', format: 'plain', data: printableRef.current.innerHTML }];
+            
+            // This print call will now be automatically signed
             await qz.print(config, printData);
 
             const drawerCommand = '\x1B\x70\x00\x19\xFA'; 
