@@ -12,11 +12,10 @@ import {
   serverTimestamp,
   runTransaction
 } from "firebase/firestore";
-// ADDED IMPORT FOR FIREBASE FUNCTIONS
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
-// This component remains the same, it's just for generating the invoice HTML
+// PrintableLayout component for generating invoice HTML
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     if (!invoice || !Array.isArray(invoice.items)) return null;
     const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -43,35 +42,205 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
           </div>
         </div>
         <table style={printStyles.itemsTable}>
-          <thead><tr><th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th><th style={printStyles.th}>Qty</th><th style={printStyles.th}>Rate</th><th style={printStyles.th}>Total</th></tr></thead>
+          <thead>
+            <tr>
+              <th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th>
+              <th style={printStyles.th}>Qty</th>
+              <th style={printStyles.th}>Rate</th>
+              <th style={printStyles.th}>Total</th>
+            </tr>
+          </thead>
           <tbody>
             {invoice.items.map((item, index) => (
-              <tr key={index}><td style={printStyles.td}>{item.itemName}</td><td style={{ ...printStyles.td, ...printStyles.tdCenter }}>{item.quantity}</td><td style={{ ...printStyles.td, ...printStyles.tdRight }}>{item.price.toFixed(2)}</td><td style={{ ...printStyles.td, ...printStyles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td></tr>
+              <tr key={index}>
+                <td style={printStyles.td}>{item.itemName}</td>
+                <td style={{ ...printStyles.td, ...printStyles.tdCenter }}>{item.quantity}</td>
+                <td style={{ ...printStyles.td, ...printStyles.tdRight }}>{item.price.toFixed(2)}</td>
+                <td style={{ ...printStyles.td, ...printStyles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+              </tr>
             ))}
           </tbody>
         </table>
         <div className="invoice-footer-section">
           <div style={printStyles.totalsContainer}>
             <div style={printStyles.totals}>
-                <div style={printStyles.totalRow}><strong>Subtotal:</strong><span>Rs. {subtotal.toFixed(2)}</span></div>
+                <div style={printStyles.totalRow}>
+                  <strong>Subtotal:</strong>
+                  <span>Rs. {subtotal.toFixed(2)}</span>
+                </div>
                 {invoice.deliveryCharge > 0 && (
-                    <div style={printStyles.totalRow}><strong>Delivery:</strong><span>Rs. {invoice.deliveryCharge.toFixed(2)}</span></div>
+                    <div style={printStyles.totalRow}>
+                      <strong>Delivery:</strong>
+                      <span>Rs. {invoice.deliveryCharge.toFixed(2)}</span>
+                    </div>
                 )}
-                <div style={printStyles.totalRow}><strong>Grand Total:</strong><span>Rs. {invoice.total.toFixed(2)}</span></div>
+                <div style={printStyles.totalRow}>
+                  <strong>Grand Total:</strong>
+                  <span>Rs. {invoice.total.toFixed(2)}</span>
+                </div>
                 <hr style={printStyles.hr} />
-                <div style={printStyles.totalRow}><strong>Amount Received:</strong><span>Rs. {invoice.received.toFixed(2)}</span></div>
-                <div style={{ ...printStyles.totalRow, fontSize: '1.1em' }}><strong>Balance:</strong><span>Rs. {balanceToDisplay.toFixed(2)}</span></div>
+                <div style={printStyles.totalRow}>
+                  <strong>Amount Received:</strong>
+                  <span>Rs. {invoice.received.toFixed(2)}</span>
+                </div>
+                <div style={{ ...printStyles.totalRow, fontSize: '1.1em', fontWeight: 'bold' }}>
+                  <strong>Balance:</strong>
+                  <span>Rs. {balanceToDisplay.toFixed(2)}</span>
+                </div>
             </div>
           </div>
         </div>
-        <div style={printStyles.footer}><p>Thank you for your business!</p></div>
-        <div style={printStyles.creditFooter}><p>Wayne Software Solutions | 078 722 3407</p></div>
+        <div style={printStyles.footer}>
+          <p>Thank you for your business!</p>
+        </div>
+        <div style={printStyles.creditFooter}>
+          <p>Wayne Software Solutions | 078 722 3407</p>
+        </div>
       </div>
     );
 };
 
+// Browser Print Component (Optimized for 80mm thermal paper)
+const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
+    const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
+    const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
 
-// --- NEW QZ TRAY MODAL ---
+    useEffect(() => {
+        document.body.classList.add('print-modal-active');
+        return () => {
+            document.body.classList.remove('print-modal-active');
+        };
+    }, []);
+
+    useEffect(() => {
+        // --- THIS IS THE FIXED CSS ---
+        const printStylesCSS = `
+            @page {
+                /* This removes the printer's default margin. */
+                margin: 0;
+                size: 80mm auto;
+            }
+            
+            /* Force removal of all default margins everywhere */
+            * {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            
+            @media print {
+                /* Reset body styles for printing */
+                body {
+                    background-color: #fff !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                html {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+
+                /* Hide everything except our modal */
+                body.print-modal-active > * {
+                    visibility: hidden !important;
+                }
+                body.print-modal-active .print-preview-overlay,
+                body.print-modal-active .print-preview-overlay * {
+                    visibility: visible !important;
+                }
+
+                /* Force the modal to the absolute top-left corner. */
+                body.print-modal-active .print-preview-overlay {
+                    position: fixed !important;
+                    left: 0 !important;
+                    top: 0 !important;
+                    width: 100% !important;
+                    height: 100% !important;
+                    display: block !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                /* Clean up the inner container styles */
+                .print-area-container {
+                    box-shadow: none !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    width: 100% !important;
+                    transform: none !important;
+                }
+                
+                .print-area {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                .no-print {
+                    display: none !important;
+                }
+            }
+        `;
+        
+        const styleElement = document.createElement('style');
+        styleElement.id = 'browser-print-styles';
+        styleElement.innerHTML = printStylesCSS;
+        document.head.appendChild(styleElement);
+
+        return () => {
+            const style = document.getElementById('browser-print-styles');
+            if (style && style.parentNode) {
+                style.parentNode.removeChild(style);
+            }
+        };
+    }, []);
+    
+    useEffect(() => {
+        if (isPrintReady) {
+            const timer = setTimeout(() => window.print(), 250);
+            return () => clearTimeout(timer);
+        }
+    }, [isPrintReady]);
+
+    useEffect(() => {
+        const handleAfterPrint = () => onPrintFinished();
+        const handleKeyDown = (e) => {
+             if (e.key === 'Escape') {
+                e.preventDefault();
+                onPrintFinished();
+            }
+        };
+
+        window.addEventListener('afterprint', handleAfterPrint);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('afterprint', handleAfterPrint);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [onPrintFinished]);
+
+    // --- THIS IS THE FIXED JSX (HTML) ---
+    return (
+        <div className="print-preview-overlay" style={styles.confirmOverlay}>
+            {/* This structure matches the .txt file and removes padding */}
+            <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '0', margin: '0' }}>
+                <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
+                    {isPrintReady ? 'Printing... (Press ESC to cancel)' : 'Loading preview...'}
+                </div>
+                <div className="print-area">
+                    {invoice ? 
+                        <PrintableLayout 
+                            invoice={invoice} 
+                            companyInfo={companyInfo} 
+                            onImageLoad={() => setIsImageLoaded(true)} 
+                        /> 
+                        : <p>Loading...</p>
+                    }
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// QZ Tray Print Modal
 const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const [status, setStatus] = useState('Initializing...');
     const [isConnecting, setIsConnecting] = useState(true);
@@ -81,7 +250,6 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const [autoPrintingStatus, setAutoPrintingStatus] = useState('');
     const printableRef = useRef(null);
 
-    // --- THIS ENTIRE FUNCTION IS UPDATED ---
     const handlePrint = useCallback(async () => {
         if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) {
             alert('QZ Tray is not connected.');
@@ -95,32 +263,24 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
         setIsPrinting(true);
 
         try {
-            // --- NEW: Set up the signing process ---
             qz.security.setSignaturePromise(async (toSign) => {
                 try {
                     console.log("Requesting signature for:", toSign);
                     const functions = getFunctions();
                     const getQzSignature = httpsCallable(functions, 'getQzSignature');
-                    
-                    // Call your Firebase function with the data QZ needs signed
                     const result = await getQzSignature({ requestToSign: toSign });
-                    
-                    // Return the signature received from your backend
                     console.log("Signature received from server.");
                     return result.data.signature;
-
                 } catch (error) {
                     console.error("Signature promise error:", error);
                     alert("Failed to get print signature from the server.");
-                    return null; // Returning null cancels the print job
+                    return null;
                 }
             });
-            // --- End of new signing logic ---
 
             const config = qz.configs.create(selectedPrinter, { units: 'mm', width: 80 });
             const printData = [{ type: 'html', format: 'plain', data: printableRef.current.innerHTML }];
             
-            // This print call will now be automatically signed
             await qz.print(config, printData);
 
             const drawerCommand = '\x1B\x70\x00\x19\xFA'; 
@@ -139,7 +299,6 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     }, [selectedPrinter, onClose]);
 
     useEffect(() => {
-        // Wait for the parent component to confirm the QZ script is loaded
         if (!isQzReady) {
             setStatus('Waiting for QZ Tray library...');
             return;
@@ -191,7 +350,7 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
                 qz.websocket.onError = null;
             }
         }
-    }, [isQzReady]); // This effect now depends on the script-ready signal
+    }, [isQzReady]);
 
     useEffect(() => {
         if (autoPrintingStatus && selectedPrinter) {
@@ -258,7 +417,7 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     );
 };
 
-
+// Main Invoice Component
 const Invoice = ({ internalUser }) => {
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -286,18 +445,19 @@ const Invoice = ({ internalUser }) => {
   
   const [showQZPrintModal, setShowQZPrintModal] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
-  const [isQzReady, setIsQzReady] = useState(false); // State to track script loading
+  const [isQzReady, setIsQzReady] = useState(false);
   
   const [deliveryCharge, setDeliveryCharge] = useState("");
   const deliveryChargeRef = useRef(null);
   const [deliveryChargeMode, setDeliveryChargeMode] = useState(false);
+  
+  const [isPrintingBrowser, setIsPrintingBrowser] = useState(false);
 
   const containerRef = useRef(null);
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
   
-  // Effect to load QZ Tray script and set a ready flag
   useEffect(() => {
     const loadScript = (src, id) => {
       return new Promise((resolve, reject) => {
@@ -314,11 +474,10 @@ const Invoice = ({ internalUser }) => {
       });
     };
 
-    // Load the modern version of QZ Tray (v2.2.3). Dependencies are bundled.
     loadScript('https://cdn.jsdelivr.net/npm/qz-tray@2.2.3/qz-tray.js', 'qz-tray-lib')
       .then(() => {
         console.log('QZ Tray library loaded successfully.');
-        setIsQzReady(true); // Signal that the script is loaded
+        setIsQzReady(true);
       })
       .catch(error => {
         console.error('Failed to load QZ Tray library:', error);
@@ -326,7 +485,7 @@ const Invoice = ({ internalUser }) => {
       });
   }, []);
 
-    const toggleFullscreen = () => {
+  const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen().catch(err => alert(`Error: ${err.message}`));
     } else {
@@ -400,17 +559,19 @@ const Invoice = ({ internalUser }) => {
     initialize();
   }, []);
   
-    useEffect(() => {
+  useEffect(() => {
     if (selectedShift) {
         localStorage.setItem('savedSelectedShift', selectedShift);
     }
   }, [selectedShift]);
 
-
   useEffect(() => {
     const fetchItemsForCustomer = async () => {
       const user = auth.currentUser;
-      if (!selectedCustomer || !user) { setItems([]); return; }
+      if (!selectedCustomer || !user) { 
+        setItems([]); 
+        return; 
+      }
       const pricedItemsColRef = collection(db, user.uid, "price_categories", "priced_items");
       const q = query(pricedItemsColRef, where("categoryId", "==", selectedCustomer.priceCategoryId));
       const itemsSnap = await getDocs(q);
@@ -420,8 +581,15 @@ const Invoice = ({ internalUser }) => {
   }, [selectedCustomer]);
 
   useEffect(() => {
-    if (!itemInput.trim()) { setFilteredItems([]); setShowDropdown(false); return; }
-    const filtered = items.filter(i => i.itemName.toLowerCase().includes(itemInput.toLowerCase()) || i.itemSKU?.toLowerCase().includes(itemInput.toLowerCase()));
+    if (!itemInput.trim()) { 
+      setFilteredItems([]); 
+      setShowDropdown(false); 
+      return; 
+    }
+    const filtered = items.filter(i => 
+      i.itemName.toLowerCase().includes(itemInput.toLowerCase()) || 
+      i.itemSKU?.toLowerCase().includes(itemInput.toLowerCase())
+    );
     setFilteredItems(filtered);
     setSelectedIndex(0);
     setShowDropdown(filtered.length > 0);
@@ -429,10 +597,23 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (showPaymentConfirm || isSaving || showQZPrintModal) return;
-      if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
-      if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(prev => !prev); }
-      if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(prev => !prev); }
+      if (showPaymentConfirm || isSaving || showQZPrintModal || isPrintingBrowser) return;
+      if (e.altKey && e.key.toLowerCase() === "s") { 
+        e.preventDefault(); 
+        handleSaveAttempt(); 
+      }
+      if (e.key === "F2") { 
+        e.preventDefault(); 
+        setCheckoutFocusMode(false); 
+        setDeliveryChargeMode(false); 
+        setAmountReceivedMode(prev => !prev); 
+      }
+      if (e.key === "F10") { 
+        e.preventDefault(); 
+        setAmountReceivedMode(false); 
+        setDeliveryChargeMode(false); 
+        setCheckoutFocusMode(prev => !prev); 
+      }
       if (e.key === "F5") { 
           e.preventDefault(); 
           setCheckoutFocusMode(false); 
@@ -442,20 +623,40 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm, isSaving, showQZPrintModal]);
+  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, showPaymentConfirm, isSaving, showQZPrintModal, isPrintingBrowser]);
 
   useEffect(() => {
-    if (amountReceivedMode) { receivedAmountRef.current?.focus(); receivedAmountRef.current?.select(); }
-    else if (deliveryChargeMode) { deliveryChargeRef.current?.focus(); deliveryChargeRef.current?.select(); }
-    else if (checkoutFocusMode) { itemInputRef.current?.blur(); qtyInputRef.current?.blur(); receivedAmountRef.current?.blur(); setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); }
-    else { itemInputRef.current?.focus(); setHighlightedCheckoutIndex(-1); }
+    if (amountReceivedMode) { 
+      receivedAmountRef.current?.focus(); 
+      receivedAmountRef.current?.select(); 
+    }
+    else if (deliveryChargeMode) { 
+      deliveryChargeRef.current?.focus(); 
+      deliveryChargeRef.current?.select(); 
+    }
+    else if (checkoutFocusMode) { 
+      itemInputRef.current?.blur(); 
+      qtyInputRef.current?.blur(); 
+      receivedAmountRef.current?.blur(); 
+      setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); 
+    }
+    else { 
+      itemInputRef.current?.focus(); 
+      setHighlightedCheckoutIndex(-1); 
+    }
   }, [amountReceivedMode, checkoutFocusMode, deliveryChargeMode, checkout.length]);
 
   useEffect(() => {
     const handleCheckoutNav = (e) => {
         if (!checkoutFocusMode) return;
-        if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightedCheckoutIndex(prev => Math.min(prev + 1, checkout.length - 1)); }
-        if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightedCheckoutIndex(prev => Math.max(prev - 1, 0)); }
+        if (e.key === 'ArrowDown') { 
+          e.preventDefault(); 
+          setHighlightedCheckoutIndex(prev => Math.min(prev + 1, checkout.length - 1)); 
+        }
+        if (e.key === 'ArrowUp') { 
+          e.preventDefault(); 
+          setHighlightedCheckoutIndex(prev => Math.max(prev - 1, 0)); 
+        }
         if (e.key === 'Delete') {
             e.preventDefault();
             if (highlightedCheckoutIndex > -1) {
@@ -463,16 +664,28 @@ const Invoice = ({ internalUser }) => {
                 setHighlightedCheckoutIndex(prev => Math.max(0, Math.min(prev, checkout.length - 2)));
             }
         }
-        if (e.key === 'Escape') { e.preventDefault(); setCheckoutFocusMode(false); }
+        if (e.key === 'Escape') { 
+          e.preventDefault(); 
+          setCheckoutFocusMode(false); 
+        }
     };
     window.addEventListener('keydown', handleCheckoutNav);
     return () => window.removeEventListener('keydown', handleCheckoutNav);
   }, [checkoutFocusMode, checkout, highlightedCheckoutIndex]);
   
   const handleItemKeyDown = (e) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex(prev => (prev + 1) % filteredItems.length); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex(prev => (prev - 1 + filteredItems.length) % filteredItems.length); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filteredItems[selectedIndex]) handleItemSelect(filteredItems[selectedIndex]); }
+    if (e.key === "ArrowDown") { 
+      e.preventDefault(); 
+      setSelectedIndex(prev => (prev + 1) % filteredItems.length); 
+    }
+    else if (e.key === "ArrowUp") { 
+      e.preventDefault(); 
+      setSelectedIndex(prev => (prev - 1 + filteredItems.length) % filteredItems.length); 
+    }
+    else if (e.key === "Enter") { 
+      e.preventDefault(); 
+      if (filteredItems[selectedIndex]) handleItemSelect(filteredItems[selectedIndex]); 
+    }
   };
   
   const handleItemSelect = (item) => {
@@ -481,11 +694,20 @@ const Invoice = ({ internalUser }) => {
     setTimeout(() => qtyInputRef.current?.focus(), 50);
   };
   
-  const handleQtyKeyDown = (e) => { if (e.key === "Enter") { e.preventDefault(); addItemToCheckout(); } };
+  const handleQtyKeyDown = (e) => { 
+    if (e.key === "Enter") { 
+      e.preventDefault(); 
+      addItemToCheckout(); 
+    } 
+  };
+  
   const handleQtyChange = (e) => {
     const value = e.target.value;
-    if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) { setQtyInput(value); }
+    if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) { 
+      setQtyInput(value); 
+    }
   };
+  
   const addItemToCheckout = () => {
     if (!itemInput || !qtyInput || isNaN(qtyInput) || qtyInput <= 0) return;
     const itemData = items.find(i => i.itemName === itemInput);
@@ -503,6 +725,7 @@ const Invoice = ({ internalUser }) => {
     setShowDropdown(false);
     itemInputRef.current?.focus();
   };
+  
   const removeCheckoutItem = (index) => setCheckout(prev => prev.filter((_, i) => i !== index));
 
   const resetForm = async () => {
@@ -525,14 +748,17 @@ const Invoice = ({ internalUser }) => {
     try {
       const invoicesColRef = collection(db, user.uid, "invoices", "invoice_list");
       const invoiceDataForDb = {
-        customerId: selectedCustomer.value, customerName: selectedCustomer.label,
+        customerId: selectedCustomer.value, 
+        customerName: selectedCustomer.label,
         items: checkout, 
         total: total, 
         deliveryCharge: Number(deliveryCharge) || 0,
         received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
         balance: selectedCustomer.isCreditCustomer ? total : balance,
-        createdAt: serverTimestamp(), invoiceNumber: invoiceNumber,
-        issuedBy: internalUser?.username || "Admin", shift: selectedShift || "",
+        createdAt: serverTimestamp(), 
+        invoiceNumber: invoiceNumber,
+        issuedBy: internalUser?.username || "Admin", 
+        shift: selectedShift || "",
         paymentMethod: finalPaymentMethod,
       };
 
@@ -541,7 +767,12 @@ const Invoice = ({ internalUser }) => {
       if (settings?.autoPrintInvoice === true) {
         const invoiceDataForPrint = { ...invoiceDataForDb, createdAt: new Date() };
         setInvoiceToPrint(invoiceDataForPrint);
-        setShowQZPrintModal(true);
+
+        if (settings?.openCashDrawerWithPrint === true) {
+            setShowQZPrintModal(true);
+        } else {
+            setIsPrintingBrowser(true);
+        }
       } else {
         alert("Invoice saved successfully!");
         await resetForm();
@@ -554,7 +785,9 @@ const Invoice = ({ internalUser }) => {
   };
   
   const handleSaveAttempt = () => {
-    if (!selectedCustomer || checkout.length === 0) { return alert("Please select a customer and add items."); }
+    if (!selectedCustomer || checkout.length === 0) { 
+      return alert("Please select a customer and add items."); 
+    }
     if (shiftProductionEnabled && !selectedShift) {
         return alert("Please select a shift before saving the invoice.");
     }
@@ -567,7 +800,7 @@ const Invoice = ({ internalUser }) => {
     }
   };
 
-    useEffect(() => {
+  useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
         const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
@@ -588,9 +821,8 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handlePaymentConfirmKeyDown);
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
-  }, [showPaymentConfirm, confirmPaymentMethod, checkout, receivedAmount, settings, selectedCustomer]);
+  }, [showPaymentConfirm, confirmPaymentMethod]);
 
-  
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + (Number(deliveryCharge) || 0);
   const balance = (Number(receivedAmount) || 0) - total; 
@@ -600,7 +832,7 @@ const Invoice = ({ internalUser }) => {
 
   return (
     <div ref={containerRef} style={styles.container}>
-      {isSaving && !showQZPrintModal && (
+      {isSaving && !showQZPrintModal && !isPrintingBrowser && (
         <div style={styles.savingOverlay}>
             <div style={styles.savingSpinner}></div>
             <p>Saving...</p>
@@ -611,7 +843,7 @@ const Invoice = ({ internalUser }) => {
         <QZPrintModal 
             invoice={invoiceToPrint} 
             companyInfo={settings}
-            isQzReady={isQzReady} // Pass the ready state to the modal
+            isQzReady={isQzReady}
             onClose={() => {
                 setShowQZPrintModal(false);
                 setInvoiceToPrint(null);
@@ -619,28 +851,154 @@ const Invoice = ({ internalUser }) => {
             }}
         />
       )}
+      
+      {isPrintingBrowser && invoiceToPrint && (
+        <BrowserPrintComponent
+            invoice={invoiceToPrint}
+            companyInfo={settings}
+            onPrintFinished={async () => {
+                setIsPrintingBrowser(false);
+                setInvoiceToPrint(null);
+                await resetForm();
+            }}
+        />
+      )}
 
-      <button onClick={toggleFullscreen} style={styles.fullscreenButton}>{isFullscreen ? "Exit Fullscreen" : "Fullscreen"}</button>
+      <button onClick={toggleFullscreen} style={styles.fullscreenButton}>
+        {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+      </button>
+      
       <div style={styles.leftPanel}>
         <div style={styles.header}>
-            <div style={{textAlign: 'left'}}><div style={styles.invoiceLabel}>INVOICE #</div><div style={styles.invoiceNumber}>{invoiceNumber}</div></div>
+            <div style={{textAlign: 'left'}}>
+              <div style={styles.invoiceLabel}>INVOICE #</div>
+              <div style={styles.invoiceNumber}>{invoiceNumber}</div>
+            </div>
             {shiftProductionEnabled && (
-                <div style={{textAlign: 'center'}}><label style={styles.invoiceLabel}>SHIFT</label><select value={selectedShift} onChange={e => setSelectedShift(e.target.value)} style={styles.shiftSelect}><option value="">Select Shift</option>{availableShifts.map(s => (<option key={s} value={s}>{s}</option>))}</select></div>
+                <div style={{textAlign: 'center'}}>
+                  <label style={styles.invoiceLabel}>SHIFT</label>
+                  <select 
+                    value={selectedShift} 
+                    onChange={e => setSelectedShift(e.target.value)} 
+                    style={styles.shiftSelect}
+                  >
+                    <option value="">Select Shift</option>
+                    {availableShifts.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
             )}
-            <div style={{textAlign: 'right'}}><div style={styles.invoiceLabel}>ISSUED BY</div><div style={styles.invoiceNumber}>{internalUser?.username || 'Admin'}</div></div>
+            <div style={{textAlign: 'right'}}>
+              <div style={styles.invoiceLabel}>ISSUED BY</div>
+              <div style={styles.invoiceNumber}>{internalUser?.username || 'Admin'}</div>
+            </div>
         </div>
-        <div style={styles.customerSection}><label style={styles.label}>CUSTOMER</label><Select options={customers} value={selectedCustomer} onChange={setSelectedCustomer} placeholder="Select a customer..."/></div>
-        <div style={styles.itemEntrySection}><div style={{position: 'relative', flex: 1}}><label style={styles.label}>ADD ITEM</label><input ref={itemInputRef} value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={handleItemKeyDown} placeholder="Type item name, SKU, or scan barcode..." style={styles.input}/>{showDropdown && filteredItems.length > 0 && (<ul style={styles.dropdown}>{filteredItems.map((i, idx) => (<li key={i.id} style={{...styles.dropdownItem, ...(idx === selectedIndex ? styles.dropdownItemSelected : {})}} onClick={() => handleItemSelect(i)}>{i.itemName} <span style={styles.dropdownPrice}>Rs. {i.price.toFixed(2)}</span></li>))}</ul>)}</div><div style={{width: '120px'}}><label style={styles.label}>QTY</label><input ref={qtyInputRef} value={qtyInput} onChange={handleQtyChange} onKeyDown={handleQtyKeyDown} onFocus={(e) => e.target.select()} type="text" inputMode="decimal" style={styles.input}/></div><button onClick={addItemToCheckout} style={styles.addButton}>ADD</button></div>
-        <div style={styles.shortcutsHelp}><h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4><div style={styles.shortcutItem}><b>F2:</b> Focus 'Amount Received'</div><div style={styles.shortcutItem}><b>F5:</b> Focus 'Delivery Charges'</div><div style={styles.shortcutItem}><b>F10:</b> Activate Checkout List (use Arrows + Delete)</div><div style={styles.shortcutItem}><b>Alt + S:</b> Save Invoice</div><div style={styles.shortcutItem}><b>Esc:</b> Exit Modes / Popups</div></div>
+        
+        <div style={styles.customerSection}>
+          <label style={styles.label}>CUSTOMER</label>
+          <Select 
+            options={customers} 
+            value={selectedCustomer} 
+            onChange={setSelectedCustomer} 
+            placeholder="Select a customer..."
+          />
+        </div>
+        
+        <div style={styles.itemEntrySection}>
+          <div style={{position: 'relative', flex: 1}}>
+            <label style={styles.label}>ADD ITEM</label>
+            <input 
+              ref={itemInputRef} 
+              value={itemInput} 
+              onChange={e => setItemInput(e.target.value)} 
+              onKeyDown={handleItemKeyDown} 
+              placeholder="Type item name, SKU, or scan barcode..." 
+              style={styles.input}
+            />
+            {showDropdown && filteredItems.length > 0 && (
+              <ul style={styles.dropdown}>
+                {filteredItems.map((i, idx) => (
+                  <li 
+                    key={i.id} 
+                    style={{
+                      ...styles.dropdownItem, 
+                      ...(idx === selectedIndex ? styles.dropdownItemSelected : {})
+                    }} 
+                    onClick={() => handleItemSelect(i)}
+                  >
+                    {i.itemName} 
+                    <span style={styles.dropdownPrice}>Rs. {i.price.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div style={{width: '120px'}}>
+            <label style={styles.label}>QTY</label>
+            <input 
+              ref={qtyInputRef} 
+              value={qtyInput} 
+              onChange={handleQtyChange} 
+              onKeyDown={handleQtyKeyDown} 
+              onFocus={(e) => e.target.select()} 
+              type="text" 
+              inputMode="decimal" 
+              style={styles.input}
+            />
+          </div>
+          <button onClick={addItemToCheckout} style={styles.addButton}>ADD</button>
+        </div>
+        
+        <div style={styles.shortcutsHelp}>
+          <h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4>
+          <div style={styles.shortcutItem}><b>F2:</b> Focus 'Amount Received'</div>
+          <div style={styles.shortcutItem}><b>F5:</b> Focus 'Delivery Charges'</div>
+          <div style={styles.shortcutItem}><b>F10:</b> Activate Checkout List (use Arrows + Delete)</div>
+          <div style={styles.shortcutItem}><b>Alt + S:</b> Save Invoice</div>
+          <div style={styles.shortcutItem}><b>Esc:</b> Exit Modes / Popups</div>
+        </div>
       </div>
+      
       <div style={styles.rightPanel}>
         <div style={{...styles.checkoutCard, ...(checkoutFocusMode ? styles.activeCard : {})}}>
             <h3 style={styles.checkoutTitle}>CHECKOUT (F10)</h3>
             <div style={styles.tableContainer}>
-                <table style={styles.table}><thead><tr><th style={styles.th}>ITEM</th><th style={styles.th}>QTY</th><th style={styles.th}>TOTAL</th><th style={styles.th}></th></tr></thead><tbody>{checkout.length === 0 ? (<tr><td colSpan="4" style={styles.emptyState}>No items added</td></tr>) : (checkout.map((c, idx) => (<tr key={idx} style={idx === highlightedCheckoutIndex ? styles.highlightedRow : {}}><td style={styles.td}>{c.itemName}</td><td style={styles.td}>{c.quantity}</td><td style={styles.td}>Rs. {(c.price * c.quantity).toFixed(2)}</td><td style={styles.td}><button onClick={() => removeCheckoutItem(idx)} style={styles.removeButton}>✕</button></td></tr>)))}</tbody></table>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>ITEM</th>
+                      <th style={styles.th}>QTY</th>
+                      <th style={styles.th}>TOTAL</th>
+                      <th style={styles.th}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {checkout.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" style={styles.emptyState}>No items added</td>
+                      </tr>
+                    ) : (
+                      checkout.map((c, idx) => (
+                        <tr key={idx} style={idx === highlightedCheckoutIndex ? styles.highlightedRow : {}}>
+                          <td style={styles.td}>{c.itemName}</td>
+                          <td style={styles.td}>{c.quantity}</td>
+                          <td style={styles.td}>Rs. {(c.price * c.quantity).toFixed(2)}</td>
+                          <td style={styles.td}>
+                            <button onClick={() => removeCheckoutItem(idx)} style={styles.removeButton}>✕</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
             </div>
+            
             <div style={styles.totalsSection}>
-                <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div>
+                <div style={styles.totalRow}>
+                  <span>Subtotal</span>
+                  <span>Rs. {subtotal.toFixed(2)}</span>
+                </div>
                 {settings?.offerDelivery && (
                     <div style={styles.totalRow}>
                         <label htmlFor="deliveryCharge" style={{cursor: 'pointer'}}>Delivery (F5)</label>
@@ -650,29 +1008,58 @@ const Invoice = ({ internalUser }) => {
                             type="number"
                             value={deliveryCharge}
                             onChange={e => setDeliveryCharge(e.target.value)}
-                            style={{...styles.input, ...styles.deliveryInput, ...(deliveryChargeMode ? styles.activeInput : {})}}
+                            style={{
+                              ...styles.input, 
+                              ...styles.deliveryInput, 
+                              ...(deliveryChargeMode ? styles.activeInput : {})
+                            }}
                             placeholder="0.00"
                         />
                     </div>
                 )}
-                <div style={styles.grandTotalRow}><span>TOTAL</span><span>Rs. {total.toFixed(2)}</span></div>
+                <div style={styles.grandTotalRow}>
+                  <span>TOTAL</span>
+                  <span>Rs. {total.toFixed(2)}</span>
+                </div>
             </div>
             
             <div style={styles.paymentSection}>
                 <label style={styles.label}>AMOUNT RECEIVED (F2)</label>
-                <input ref={receivedAmountRef} type="number" value={selectedCustomer?.isCreditCustomer ? '' : receivedAmount} onChange={e => setReceivedAmount(e.target.value)} placeholder={selectedCustomer?.isCreditCustomer ? 'CREDIT SALE' : '0.00'} style={{...styles.input, ...styles.amountInput, ...(amountReceivedMode ? styles.activeInput : {})}} disabled={selectedCustomer?.isCreditCustomer} />
+                <input 
+                  ref={receivedAmountRef} 
+                  type="number" 
+                  value={selectedCustomer?.isCreditCustomer ? '' : receivedAmount} 
+                  onChange={e => setReceivedAmount(e.target.value)} 
+                  placeholder={selectedCustomer?.isCreditCustomer ? 'CREDIT SALE' : '0.00'} 
+                  style={{
+                    ...styles.input, 
+                    ...styles.amountInput, 
+                    ...(amountReceivedMode ? styles.activeInput : {})
+                  }} 
+                  disabled={selectedCustomer?.isCreditCustomer} 
+                />
             </div>
+            
             <div style={styles.balanceRow}>
               <span>BALANCE</span>
               <span style={{color: displayBalance >= 0 ? '#10b981' : '#ef4444'}}>
                 Rs. {displayBalance.toFixed(2)}
               </span>
             </div>
-            <button onClick={handleSaveAttempt} disabled={isSaveDisabled || isSaving} style={{...styles.saveButton, ...((isSaveDisabled || isSaving) ? styles.saveButtonDisabled : {})}}>
+            
+            <button 
+              onClick={handleSaveAttempt} 
+              disabled={isSaveDisabled || isSaving} 
+              style={{
+                ...styles.saveButton, 
+                ...((isSaveDisabled || isSaving) ? styles.saveButtonDisabled : {})
+              }}
+            >
               {isSaving ? 'SAVING...' : 'SAVE INVOICE (ALT+S)'}
             </button>
         </div>
       </div>
+      
       {showPaymentConfirm && (
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmPopup}>
@@ -744,28 +1131,71 @@ const styles = {
     shortcutItem: { marginBottom: '4px' },
     savingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 3000, color: '#1f2937', fontSize: '18px', fontWeight: '600' },
     savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
-    // Styles for the new QZ Tray Modal
     qzStatus: { padding: '15px', margin: '15px 0', backgroundColor: '#f3f4f6', borderRadius: '6px', textAlign: 'left' },
     qzControls: { textAlign: 'left', marginTop: '10px' },
     closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }
 };
+
+// --- THIS IS THE NEW printStyles OBJECT (with more spacing) ---
 const printStyles = {
-    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace", fontSize: '12px', width: '80mm' },
+    // Use '3mm' padding for the whole box
+    invoiceBox: { padding: '3mm', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace'"}, 
+    
     logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px', display: 'block', marginLeft: 'auto', marginRight: 'auto' },
-    companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold', textAlign: 'center' },
-    headerText: { margin: '2px 0', fontSize: '0.9em', textAlign: 'center' },
-    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '15px' },
-    th: { borderBottom: '1px solid #000', padding: '5px', textAlign: 'right' },
+    
+    companyNameText: { 
+        fontSize: '1.4em', 
+        margin: '5px 0 5px 0', 
+        fontWeight: 'bold', 
+        textAlign: 'center',
+        lineHeight: '1.5' // <-- Increased line height
+    },
+    headerText: { 
+        margin: '4px 0', // <-- Increased margin
+        fontSize: '0.9em', 
+        textAlign: 'center',
+        lineHeight: '1.5' // <-- Increased line height
+    },
+    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+    th: { 
+        borderBottom: '1px solid #000', 
+        padding: '8px 6px', // <-- Increased padding
+        textAlign: 'right', 
+        background: '#f0f0f0' 
+    },
     thItem: { textAlign: 'left' },
-    td: { padding: '5px', borderBottom: '1px dotted #ccc' },
+    td: { 
+        padding: '8px 6px', // <-- Increased padding
+        borderBottom: '1px dotted #ccc',
+        lineHeight: '1.5' // <-- Increased line height
+    },
     tdCenter: { textAlign: 'center' },
     tdRight: { textAlign: 'right' },
     totalsContainer: { width: '100%' },
     totals: { paddingTop: '10px' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: '1em' },
-    hr: { border: 'none', borderTop: '1px dashed #000' },
-    footer: { textAlign: 'center', marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
-    creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
+    totalRow: { 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        padding: '6px 0', // <-- Increased padding
+        fontSize: '1em',
+        lineHeight: '1.6' // <-- Increased line height
+    },
+    hr: { border: 'none', borderTop: '1px dashed #000', margin: '8px 0' }, // <-- Increased margin
+    footer: { 
+        textAlign: 'center', 
+        marginTop: '25px', // <-- Increased margin
+        paddingTop: '10px', 
+        borderTop: '1px solid #000', 
+        fontSize: '0.8em',
+        lineHeight: '1.5' // <-- Increased line height
+    },
+    creditFooter: { 
+        textAlign: 'center', 
+        marginTop: '10px', 
+        fontSize: '0.7em', 
+        color: '#777',
+        lineHeight: '1.5' // <-- Increased line height
+    },
 };
 
 export default Invoice;

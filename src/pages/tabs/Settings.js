@@ -53,6 +53,7 @@ const Settings = () => {
   // ✅ **1. New state for the new toggles**
   const [offerDelivery, setOfferDelivery] = useState(false);
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
+  const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
 
 
   useEffect(() => {
@@ -91,6 +92,7 @@ const Settings = () => {
           // ✅ **2. Load new settings from database**
           setOfferDelivery(data.offerDelivery || false);
           setMaintainCreditCustomers(data.maintainCreditCustomers || false);
+          setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
           const userInfoSnap = await getDoc(userInfoRef);
@@ -127,6 +129,7 @@ const Settings = () => {
             // ✅ **3. Add new settings to the default object**
             offerDelivery: false,
             maintainCreditCustomers: false,
+            openCashDrawerWithPrint: false,
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -151,6 +154,7 @@ const Settings = () => {
           // ✅ **2. Load new settings from default object**
           setOfferDelivery(defaultSettings.offerDelivery);
           setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
+          setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
         }
 
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -282,6 +286,11 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { maintainCreditCustomers: value });
   };
 
+  const handleOpenCashDrawerChange = async (value) => {
+    setOpenCashDrawerWithPrint(value);
+    await updateDoc(getSettingsDocRef(), { openCashDrawerWithPrint: value });
+  };
+
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -364,6 +373,15 @@ const Settings = () => {
                 <button onClick={() => handleMaintainCreditCustomersChange(false)} style={!maintainCreditCustomers ? styles.toggleButtonActive : styles.toggleButton}>No</button>
             </div>
             <p style={styles.helpText}>Enable this to manage credit sales and track customer balances.</p>
+        </div>
+
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Open cashdrawer with print</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleOpenCashDrawerChange(true)} style={openCashDrawerWithPrint ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleOpenCashDrawerChange(false)} style={!openCashDrawerWithPrint ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>If set to 'Yes', a command to open the cash drawer will be sent with the print job.</p>
         </div>
 
       </div>
