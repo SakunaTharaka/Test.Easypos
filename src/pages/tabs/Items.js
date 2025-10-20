@@ -15,6 +15,7 @@ import {
   limit,
   startAfter,
   where,
+  writeBatch, // ✅ Import writeBatch for migration
 } from "firebase/firestore";
 import {
   AiOutlinePlus,
@@ -33,7 +34,6 @@ const Items = ({ internalUser }) => {
   const [search, setSearch] = useState("");
   const [inventoryType, setInventoryType] = useState(null); 
   
-  // ✅ **1. New state for buffering/loading on save**
   const [isSaving, setIsSaving] = useState(false);
 
   // State for server-side pagination
@@ -67,9 +67,14 @@ const Items = ({ internalUser }) => {
         const itemsColRef = collection(db, uid, "items", "item_list");
         let q = query(itemsColRef, orderBy("createdAt", "desc"));
 
-        const searchTerm = search.trim();
+        // ✅ **MODIFIED FOR CASE-INSENSITIVE SEARCH**
+        const searchTerm = search.trim().toLowerCase(); // Convert search to lowercase
         if (searchTerm) {
-          q = query(q, where("name", ">=", searchTerm), where("name", "<=", searchTerm + '\uf8ff'));
+          // Query the new 'name_lowercase' field
+          q = query(q, 
+            where("name_lowercase", ">=", searchTerm), 
+            where("name_lowercase", "<=", searchTerm + '\uf8ff')
+          );
         }
 
         const cursor = pageCursors[currentPage];
@@ -92,6 +97,8 @@ const Items = ({ internalUser }) => {
         }
 
       } catch (error) {
+        // Log the full error to see the index link
+        console.error("Firestore Query Error:", error); 
         alert("Error fetching items: " + error.message + "\n\nNOTE: Searching may require a new database index. Check the browser console (F12) for a link to create it.");
       } finally {
         setLoading(false);
@@ -160,12 +167,11 @@ const Items = ({ internalUser }) => {
   };
 
   const handleSave = async () => {
-    // ✅ **2. Brand is now optional. Validation updated.**
     if (!form.name?.trim() || !form.type) {
       return alert("Item Name and Type are required.");
     }
     
-    setIsSaving(true); // Set loading state
+    setIsSaving(true);
     const uid = auth.currentUser?.uid;
     if (!uid) {
       setIsSaving(false);
@@ -202,7 +208,8 @@ const Items = ({ internalUser }) => {
 
     try {
       const username = getCurrentInternal()?.username || "Admin";
-      // If brand is empty, it won't add an extra space before the name
+      
+      // ✅ **MODIFIED FOR CASE-INSENSITIVE SEARCH**
       const finalName = (form.type !== "ourProduct" && form.brand.trim()) 
         ? `${form.brand.trim()} ${form.name.trim()}` 
         : form.name.trim();
@@ -210,6 +217,7 @@ const Items = ({ internalUser }) => {
       const itemsColRef = collection(db, uid, "items", "item_list");
       const dataToSave = {
           name: finalName,
+          name_lowercase: finalName.toLowerCase(), // Add lowercase version
           brand: form.brand.trim(),
           sku: form.sku || "",
           type: form.type,
@@ -222,7 +230,6 @@ const Items = ({ internalUser }) => {
       if (editingItem) {
         const itemDocRef = doc(itemsColRef, editingItem.id);
         await updateDoc(itemDocRef, dataToSave);
-        // ✅ **3. Instantly update the UI for edits**
         setItems(prevItems => prevItems.map(item => 
           item.id === editingItem.id ? { ...item, ...dataToSave } : item
         ));
@@ -234,7 +241,6 @@ const Items = ({ internalUser }) => {
         }
         const newData = { ...dataToSave, addedBy: username, createdAt: serverTimestamp(), pid };
         const docRef = await addDoc(itemsColRef, newData);
-        // ✅ **3. Instantly update the UI for new items**
         setItems(prevItems => [{ id: docRef.id, ...newData, createdAt: new Date() }, ...prevItems]);
       }
 
@@ -244,7 +250,7 @@ const Items = ({ internalUser }) => {
     } catch (error) {
       alert("Error saving item: " + error.message);
     } finally {
-      setIsSaving(false); // Reset loading state
+      setIsSaving(false);
     }
   };
 
@@ -253,7 +259,6 @@ const Items = ({ internalUser }) => {
     const uid = auth.currentUser.uid;
     try {
       await deleteDoc(doc(db, uid, "items", "item_list", id));
-      // ✅ **3. Instantly update UI on delete**
       setItems(prevItems => prevItems.filter(item => item.id !== id));
     } catch (error) {
       alert("Error deleting item: " + error.message);
@@ -299,12 +304,21 @@ const Items = ({ internalUser }) => {
     <div style={{ padding: "24px", fontFamily: "'Segoe UI', sans-serif" }}>
       <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333" }}>Items Management</h2>
 
+      {/* ✅ ONE-TIME MIGRATION BUTTON
+        Temporarily uncomment this button to update your old data. 
+        Click it once, then remove it.
+      */}
+      {/* <button onClick={migrateItemNames} style={{backgroundColor: 'orange', color: 'white', padding: 10, margin: 10, border: 'none', borderRadius: 5}}>
+        RUN ONE-TIME DATA MIGRATION
+      </button> 
+      */}
+
       <div style={{ margin: "20px 0", display: "flex", gap: "12px", alignItems: "center" }}>
         <div style={{ flex: 1, position: "relative" }}>
           <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
           <input
             type="text"
-            placeholder="Search by item name..."
+            placeholder="Search by item name (case-insensitive)..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ flex: 1, width: "100%", padding: "8px 8px 8px 34px", border: "1px solid #ddd", borderRadius: "6px" }}
@@ -397,7 +411,6 @@ const Items = ({ internalUser }) => {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: '24px' }}>
               <button onClick={() => { setShowModal(false); setEditingItem(null); }} style={{ padding: "10px 16px", background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
-              {/* ✅ **4. Button is now disabled and shows "Saving..." during the save operation** */}
               <button 
                 onClick={handleSave} 
                 disabled={isSaving}
@@ -420,5 +433,52 @@ const Items = ({ internalUser }) => {
     </div>
   );
 };
+
+/**
+ * ✅ **ONE-TIME MIGRATION FUNCTION**
+ * Run this function once to update all your existing items with the
+ * new 'name_lowercase' field. You can temporarily add a button
+ * in your component to call this function.
+ * * Make sure 'db' and 'auth' are imported correctly in this file.
+ */
+const migrateItemNames = async () => {
+  if (!window.confirm("This will update all items in the database to add a lowercase name field for searching. This is a one-time operation. Continue?")) return;
+
+  const uid = auth.currentUser?.uid;
+  if (!uid) return alert("You must be logged in to run the migration.");
+
+  console.log("Starting migration...");
+  let updatedCount = 0;
+  
+  try {
+    const itemsColRef = collection(db, uid, "items", "item_list");
+    const querySnapshot = await getDocs(itemsColRef);
+    
+    // Use a batch to update docs efficiently
+    const batch = writeBatch(db);
+
+    querySnapshot.docs.forEach(document => {
+      const data = document.data();
+      // Only update if the item has a name but NO name_lowercase field
+      if (data.name && data.name_lowercase === undefined) {
+        const itemRef = doc(db, uid, "items", "item_list", document.id);
+        batch.update(itemRef, { name_lowercase: data.name.toLowerCase() });
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      await batch.commit();
+      alert(`Migration complete! ${updatedCount} items were successfully updated.`);
+    } else {
+      alert("Migration check complete. No items needed updating.");
+    }
+
+  } catch (error) {
+    console.error("Migration Failed:", error);
+    alert("An error occurred during migration: " + error.message);
+  }
+};
+
 
 export default Items;

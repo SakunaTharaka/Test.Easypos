@@ -186,7 +186,13 @@ const Settings = () => {
       const data = await res.json();
       if (data.secure_url) {
         await updateDoc(getSettingsDocRef(), { companyLogo: data.secure_url });
+        
+        // This line is already here
         setUserInfo((prev) => ({ ...prev, companyLogo: data.secure_url }));
+        
+        // ✅ ADD THIS LINE to keep the form state in sync
+        setFormInput((prev) => ({ ...prev, companyLogo: data.secure_url })); 
+        
         alert("Logo uploaded successfully!");
       }
     } catch (error) { alert("Logo upload failed: " + error.message); }
