@@ -1,33 +1,36 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, lazy, Suspense } from "react";
 import { auth, db } from "../firebase";
-import { doc, getDoc, updateDoc, collection, getDocs, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, getDocs, setDoc } from "firebase/firestore"; // Removed onSnapshot
 import { useNavigate, Navigate } from "react-router-dom";
 import { FaExclamationCircle } from 'react-icons/fa';
 
 import { CashBookProvider } from "../context/CashBookContext";
-import Admin from "./tabs/Admin";
-import Settings from "./tabs/Settings";
-import Inventory from "./tabs/Inventory";
-import PurchasingOrder from "./tabs/PurchasingOrder";
-import StockOut from "./tabs/StockOut";
-import StockBalance from "./tabs/StockBalance";
-import Items from "./tabs/Items";
-import Customers from "./tabs/Customers";
-import PriceCat from "./tabs/PriceCat";
-import AddProduction from "./tabs/AddProduction";
-import ProductionBalance from "./tabs/ProductionBalance";
-import SalesIncome from "./fintabs/SalesIncome";
-import StockPayment from "./fintabs/StockPayment";
-import DaySaleBal from "./fintabs/Reconcile";
-import Expenses from "./fintabs/Expenses";
-import Summary from "./fintabs/Summary";
-import CashBook from "./fintabs/CashBook"; 
-import CreditCust from "./fintabs/CreditCust";
-import DashboardView from "./DashboardView";
-import Invoice from "./Invoice";
-import SalesReport from "./SalesReport";
-import Help from "./Help";
-import StockOutBal from "./tabs/StockOutBal";
+
+// Lazy-loaded components (no change here)
+const Admin = lazy(() => import("./tabs/Admin"));
+const Settings = lazy(() => import("./tabs/Settings"));
+const Inventory = lazy(() => import("./tabs/Inventory"));
+const PurchasingOrder = lazy(() => import("./tabs/PurchasingOrder"));
+const StockOut = lazy(() => import("./tabs/StockOut"));
+const StockBalance = lazy(() => import("./tabs/StockBalance"));
+const Items = lazy(() => import("./tabs/Items"));
+const Customers = lazy(() => import("./tabs/Customers"));
+const PriceCat = lazy(() => import("./tabs/PriceCat"));
+const AddProduction = lazy(() => import("./tabs/AddProduction"));
+const ProductionBalance = lazy(() => import("./tabs/ProductionBalance"));
+const SalesIncome = lazy(() => import("./fintabs/SalesIncome"));
+const StockPayment = lazy(() => import("./fintabs/StockPayment"));
+const DaySaleBal = lazy(() => import("./fintabs/Reconcile"));
+const Expenses = lazy(() => import("./fintabs/Expenses"));
+const Summary = lazy(() => import("./fintabs/Summary"));
+const CashBook = lazy(() => import("./fintabs/CashBook"));
+const CreditCust = lazy(() => import("./fintabs/CreditCust"));
+const DashboardView = lazy(() => import("./DashboardView"));
+const Invoice = lazy(() => import("./Invoice"));
+const SalesReport = lazy(() => import("./SalesReport"));
+const Help = lazy(() => import("./Help"));
+const StockOutBal = lazy(() => import("./tabs/StockOutBal"));
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -35,7 +38,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showPopup, setShowPopup] = useState(false);
   const [activeTab, setActiveTab] = useState("Dashboard");
-  const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order"); // Default to new first tab
+  const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order"); 
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
   const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [internalUsers, setInternalUsers] = useState([]);
@@ -51,18 +54,28 @@ const Dashboard = () => {
     isActive: false,
   });
 
+  // --- MODIFIED useEffect: Replaced onSnapshot with getDoc ---
   useEffect(() => {
-    const maintRef = doc(db, 'global_settings', 'maintenance');
-    const unsubscribe = onSnapshot(maintRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setMaintenanceStatus({ loading: false, isActive: docSnap.data().isActive });
-      } else {
-        setMaintenanceStatus({ loading: false, isActive: false });
+    const fetchMaintenanceStatus = async () => {
+      const maintRef = doc(db, 'global_settings', 'maintenance');
+      try {
+        const docSnap = await getDoc(maintRef);
+        if (docSnap.exists()) {
+          setMaintenanceStatus({ loading: false, isActive: docSnap.data().isActive });
+        } else {
+          setMaintenanceStatus({ loading: false, isActive: false });
+        }
+      } catch (error) {
+        console.error("Error fetching maintenance status:", error);
+        setMaintenanceStatus({ loading: false, isActive: false }); // Fail safe
       }
-    });
-    return () => unsubscribe();
+    };
+    
+    fetchMaintenanceStatus();
+    // No unsubscribe function is needed
   }, []);
 
+  // --- MODIFIED useEffect: Replaced onSnapshot with getDoc ---
   useEffect(() => {
     if (maintenanceStatus.loading || maintenanceStatus.isActive) {
       setLoading(false);
@@ -70,23 +83,26 @@ const Dashboard = () => {
     }
 
     setLoading(true);
-    let settingsListenerUnsubscribe = null;
-    let announcementListenerUnsubscribe = null;
+    // Removed listener unsubscribe variables
 
     const authUnsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (!currentUser) {
-        if (settingsListenerUnsubscribe) settingsListenerUnsubscribe();
-        if (announcementListenerUnsubscribe) announcementListenerUnsubscribe();
+        // Removed listener unsubscribe calls
         navigate("/");
         return;
       }
       
       const uid = currentUser.uid;
       
+      // --- MODIFICATION: Fetch announcement once with getDoc ---
       const announcementRef = doc(db, 'global_settings', 'announcement');
-      announcementListenerUnsubscribe = onSnapshot(announcementRef, (docSnap) => {
-        setIsAnnouncementActive(docSnap.exists() && docSnap.data().isEnabled);
-      });
+      try {
+        const annocementSnap = await getDoc(announcementRef);
+        setIsAnnouncementActive(annocementSnap.exists() && annocementSnap.data().isEnabled);
+      } catch (error) {
+        console.error("Error fetching announcement:", error);
+        setIsAnnouncementActive(false);
+      }
       
       const userInfoRefOnboarding = doc(db, "Userinfo", uid);
       const userDocSnap = await getDoc(userInfoRefOnboarding);
@@ -113,10 +129,12 @@ const Dashboard = () => {
       if (savedInternalUser) setInternalLoggedInUser(savedInternalUser);
 
       try {
+        // --- MODIFICATION: Fetch settings once with getDoc ---
         const settingsRef = doc(db, uid, "settings");
-        settingsListenerUnsubscribe = onSnapshot(settingsRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const settingsData = docSnap.data();
+        try {
+          const settingsSnap = await getDoc(settingsRef);
+          if (settingsSnap.exists()) {
+            const settingsData = settingsSnap.data();
             setUserInfo(settingsData);
             
             const inventoryType = settingsData.inventoryType || "Buy and Sell only";
@@ -126,7 +144,10 @@ const Dashboard = () => {
           } else {
             setUserInfo({ companyName: "My Business" });
           }
-        });
+        } catch (error) {
+           console.error("Error fetching user settings:", error);
+           setUserInfo({ companyName: "My Business" });
+        }
 
         const userInfoDocRef = doc(db, uid, "Userinfo");
         const userInfoSnap = await getDoc(userInfoDocRef);
@@ -135,8 +156,10 @@ const Dashboard = () => {
            await updateDoc(userInfoDocRef, { firstLoginShown: true });
         }
         
+        // --- MODIFICATION: Fetch internal users once with getDocs ---
         const internalUsersColRef = collection(db, uid, "admin", "admin_details");
-        const internalUsersSnap = await getDocs(internalUsersColRef);
+        const internalUsersSnap = await getDocs(internalUsersColRef); // Using getDocs
+        
         if (internalUsersSnap.empty) {
             const masterUser = { username: "admin", password: "123", isAdmin: true, isMaster: true };
             await setDoc(doc(internalUsersColRef, "admin"), masterUser);
@@ -172,11 +195,10 @@ const Dashboard = () => {
 
     return () => {
       authUnsubscribe();
-      if (settingsListenerUnsubscribe) settingsListenerUnsubscribe();
-      if (announcementListenerUnsubscribe) announcementListenerUnsubscribe();
+      // Removed listener unsubscribes
       window.removeEventListener("storage", syncInternalState);
     };
-  }, [navigate, maintenanceStatus]);
+  }, [navigate, maintenanceStatus]); // Dependencies remain the same
 
   const handleInternalLogin = () => {
     const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === loginInput.password);
@@ -206,6 +228,10 @@ const Dashboard = () => {
   const allTabs = ["Dashboard", "Invoicing", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
   const visibleTabs = allTabs.filter(tab => !((tab === "Finance" || tab === "Admin" || tab === "Settings") && !internalLoggedInUser?.isAdmin));
 
+  // The rendering logic for tabs remains the same.
+  // The lazy loading and Suspense will handle loading the components.
+  // When a tab component (e.g., Inventory) loads, its *own* useEffect will run.
+  // You must ensure *that* useEffect also uses getDocs() instead of onSnapshot().
   const renderTabContent = () => {
     if (!auth.currentUser && !loading) { return <p style={styles.accessDenied}>Please log in to continue.</p>; }
     if ((activeTab === "Finance" || activeTab === "Admin") && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
@@ -214,13 +240,12 @@ const Dashboard = () => {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
       case "Inventory":
-        // ✅ **FIX: Reordered and renamed the sub-tabs**
         let inventorySubTabs = [
           "Purchasing Order",
           "Stock-In",
           "Stock-Out",
-          "Stores Balance",     // Renamed
-          "Buy&Sell Balance",   // Renamed
+          "Stores Balance",
+          "Buy&Sell Balance",
         ];
 
         if (showProductionTabs) {
@@ -237,11 +262,11 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Stock-Out" && <StockOut internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />} {/* Renamed */}
+            {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />}
             {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}
             {activeInventoryTab === "Purchasing Order" && <PurchasingOrder internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Stores Balance" && <StockBalance />} {/* Renamed */}
+            {activeInventoryTab === "Stores Balance" && <StockBalance />}
           </div>
         </div>
       );
@@ -290,6 +315,13 @@ const Dashboard = () => {
     }
   };
 
+  const loadingFallback = (
+    <div style={{...styles.loadingContainer, height: '50vh', color: '#7f8c8d'}}>
+      <div style={styles.loadingSpinner}></div>
+      <p style={styles.loadingText}>Loading...</p>
+    </div>
+  );
+
   return (
     <div style={styles.container}>
       <div style={styles.stickyHeader}>
@@ -315,9 +347,11 @@ const Dashboard = () => {
       </div>
       
       <div style={styles.content}>
-        <CashBookProvider>
-          {renderTabContent()}
-        </CashBookProvider>
+        <Suspense fallback={loadingFallback}>
+          <CashBookProvider>
+            {renderTabContent()}
+          </CashBookProvider>
+        </Suspense>
       </div>
       
       {showPopup && (
@@ -339,11 +373,12 @@ const Dashboard = () => {
             </div>
         </div>
       )}
-      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
+      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.targe.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
     </div>
   );
 };
 
+// Styles remain unchanged
 const styles = {
     stickyHeader: { position: 'sticky', top: 0, zIndex: 1000, backgroundColor: '#fff' },
     wayneSystems: { fontSize: '12px', color: '#bdc3c7', margin: '2px 0 0 0', fontStyle: 'italic' },

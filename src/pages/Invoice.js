@@ -6,7 +6,7 @@ import {
   doc,
   getDoc,
   getDocs,
-  addDoc,
+  // addDoc has been removed as we now use transaction.set
   query,
   where,
   serverTimestamp,
@@ -15,7 +15,7 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
-// PrintableLayout component for generating invoice HTML
+// PrintableLayout component (No changes)
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     if (!invoice || !Array.isArray(invoice.items)) return null;
     const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -100,7 +100,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     );
 };
 
-// Browser Print Component (Optimized for 80mm thermal paper)
+// BrowserPrintComponent (No changes)
 const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
     const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
@@ -240,7 +240,7 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     );
 };
 
-// QZ Tray Print Modal
+// QZ Tray Print Modal (No changes)
 const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const [status, setStatus] = useState('Initializing...');
     const [isConnecting, setIsConnecting] = useState(true);
@@ -428,7 +428,7 @@ const Invoice = ({ internalUser }) => {
   const [qtyInput, setQtyInput] = useState(1);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [receivedAmount, setReceivedAmount] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState(""); // This is now the PROVISIONAL number
   const [showDropdown, setShowDropdown] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [amountReceivedMode, setAmountReceivedMode] = useState(false);
@@ -458,6 +458,7 @@ const Invoice = ({ internalUser }) => {
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
   
+  // QZ Tray script loading (No change)
   useEffect(() => {
     const loadScript = (src, id) => {
       return new Promise((resolve, reject) => {
@@ -485,6 +486,7 @@ const Invoice = ({ internalUser }) => {
       });
   }, []);
 
+  // Fullscreen logic (No change)
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen().catch(err => alert(`Error: ${err.message}`));
@@ -499,38 +501,41 @@ const Invoice = ({ internalUser }) => {
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  const generateInvoiceNumber = async () => {
+  // --- *** FIXED LOGIC *** ---
+  // New function to FETCH the next number for display, without writing.
+  const fetchProvisionalInvoiceNumber = async () => {
     const user = auth.currentUser;
-    if (!user) return "";
+    if (!user) {
+        setInvoiceNumber("INV-ERROR");
+        return;
+    }
     const today = new Date();
     const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
     const counterRef = doc(db, user.uid, "counters");
     try {
-        const newSeq = await runTransaction(db, async (transaction) => {
-            const counterDoc = await transaction.get(counterRef);
-            const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
-            const nextSeq = dailyCounter + 1;
-            transaction.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
-            return nextSeq;
-        });
-        return `INV-${datePrefix}-${String(newSeq).padStart(4, "0")}`;
+        // Just READ the doc, don't use a transaction
+        const counterDoc = await getDoc(counterRef); 
+        const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+        const nextSeq = dailyCounter + 1; // This is the provisional next number
+        const provisionalInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
+        setInvoiceNumber(provisionalInvNum); // Set for display
     } catch (err) {
-        console.error("Error generating invoice number:", err);
-        return `INV-${datePrefix}-ERR`;
+        console.error("Error fetching provisional invoice number:", err);
+        setInvoiceNumber(`INV-${datePrefix}-ERR`);
     }
   };
 
+  // Old `generateInvoiceNumber` function is REMOVED.
+  
+  // useEffect on load
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
     const initialize = async () => {
-      let currentInvNum = sessionStorage.getItem('currentInvoiceNumber');
-      if (!currentInvNum) {
-        currentInvNum = await generateInvoiceNumber();
-        sessionStorage.setItem('currentInvoiceNumber', currentInvNum);
-      }
-      setInvoiceNumber(currentInvNum);
+      // --- *** FIXED LOGIC *** ---
+      // Fetch the provisional number for display
+      await fetchProvisionalInvoiceNumber(); 
       
       const customersColRef = collection(db, uid, "customers", "customer_list");
       const customerSnap = await getDocs(query(customersColRef));
@@ -559,6 +564,7 @@ const Invoice = ({ internalUser }) => {
     initialize();
   }, []);
   
+  // Other hooks (no changes)
   useEffect(() => {
     if (selectedShift) {
         localStorage.setItem('savedSelectedShift', selectedShift);
@@ -673,6 +679,7 @@ const Invoice = ({ internalUser }) => {
     return () => window.removeEventListener('keydown', handleCheckoutNav);
   }, [checkoutFocusMode, checkout, highlightedCheckoutIndex]);
   
+  // Item/Qty handling functions (No changes)
   const handleItemKeyDown = (e) => {
     if (e.key === "ArrowDown") { 
       e.preventDefault(); 
@@ -728,16 +735,18 @@ const Invoice = ({ internalUser }) => {
   
   const removeCheckoutItem = (index) => setCheckout(prev => prev.filter((_, i) => i !== index));
 
+  // --- *** FIXED LOGIC *** ---
+  // resetForm now calls the new read-only function
   const resetForm = async () => {
-    const newInvNum = await generateInvoiceNumber();
-    sessionStorage.setItem('currentInvoiceNumber', newInvNum);
-    setInvoiceNumber(newInvNum);
+    await fetchProvisionalInvoiceNumber(); // Get next provisional number
     setCheckout([]);
     setReceivedAmount("");
     setDeliveryCharge(""); 
     itemInputRef.current?.focus();
   };
   
+  // --- *** FIXED LOGIC *** ---
+  // executeSaveInvoice is now a single atomic transaction
   const executeSaveInvoice = async (finalPaymentMethod) => {
     const user = auth.currentUser;
     if (!user) return alert("You are not logged in.");
@@ -746,27 +755,52 @@ const Invoice = ({ internalUser }) => {
     setShowPaymentConfirm(false);
 
     try {
+      // --- This is the new transactional logic ---
+      const counterRef = doc(db, user.uid, "counters");
       const invoicesColRef = collection(db, user.uid, "invoices", "invoice_list");
-      const invoiceDataForDb = {
-        customerId: selectedCustomer.value, 
-        customerName: selectedCustomer.label,
-        items: checkout, 
-        total: total, 
-        deliveryCharge: Number(deliveryCharge) || 0,
-        received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
-        balance: selectedCustomer.isCreditCustomer ? total : balance,
-        createdAt: serverTimestamp(), 
-        invoiceNumber: invoiceNumber,
-        issuedBy: internalUser?.username || "Admin", 
-        shift: selectedShift || "",
-        paymentMethod: finalPaymentMethod,
-      };
-
-      await addDoc(invoicesColRef, invoiceDataForDb);
+      const newInvoiceRef = doc(invoicesColRef); // Create a ref for the new invoice
       
+      const finalInvoiceData = await runTransaction(db, async (transaction) => {
+        const today = new Date();
+        const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+
+        // 1. Read the counter
+        const counterDoc = await transaction.get(counterRef);
+        const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+        const nextSeq = dailyCounter + 1;
+        const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
+
+        // 2. Write the new counter
+        transaction.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
+
+        // 3. Prepare and write the new invoice
+        const invoiceDataForDb = {
+          customerId: selectedCustomer.value, 
+          customerName: selectedCustomer.label,
+          items: checkout, 
+          total: total, 
+          deliveryCharge: Number(deliveryCharge) || 0,
+          received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
+          balance: selectedCustomer.isCreditCustomer ? total : balance,
+          createdAt: serverTimestamp(), // Use server timestamp for DB
+          invoiceNumber: newInvNum, // <-- Use the new, guaranteed-unique number
+          issuedBy: internalUser?.username || "Admin", 
+          shift: selectedShift || "",
+          paymentMethod: finalPaymentMethod,
+        };
+        transaction.set(newInvoiceRef, invoiceDataForDb);
+        
+        // Return the data needed for printing
+        return {
+           ...invoiceDataForDb,
+           createdAt: new Date(), // Use client date for immediate printing
+           invoiceNumber: newInvNum 
+        };
+      });
+      // --- End of transaction ---
+
       if (settings?.autoPrintInvoice === true) {
-        const invoiceDataForPrint = { ...invoiceDataForDb, createdAt: new Date() };
-        setInvoiceToPrint(invoiceDataForPrint);
+        setInvoiceToPrint(finalInvoiceData); // Use the data returned from the transaction
 
         if (settings?.openCashDrawerWithPrint === true) {
             setShowQZPrintModal(true);
@@ -779,11 +813,13 @@ const Invoice = ({ internalUser }) => {
       }
     } catch (error) {
       alert("Failed to save invoice: " + error.message);
+      // Don't reset the form, so user can retry saving
     } finally {
       setIsSaving(false); 
     }
   };
   
+  // handleSaveAttempt (no change)
   const handleSaveAttempt = () => {
     if (!selectedCustomer || checkout.length === 0) { 
       return alert("Please select a customer and add items."); 
@@ -800,6 +836,7 @@ const Invoice = ({ internalUser }) => {
     }
   };
 
+  // Payment confirm keydown (no change)
   useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
@@ -821,7 +858,7 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handlePaymentConfirmKeyDown);
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
-  }, [showPaymentConfirm, confirmPaymentMethod]);
+  }, [showPaymentConfirm, confirmPaymentMethod, executeSaveInvoice]); // Added executeSaveInvoice to dependency array
 
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + (Number(deliveryCharge) || 0);
@@ -830,6 +867,7 @@ const Invoice = ({ internalUser }) => {
   const displayBalance = received === 0 ? 0 : balance;
   const isSaveDisabled = !selectedCustomer || checkout.length === 0 || (balance < 0 && received > 0);
 
+  // --- RETURN JSX (No changes in structure) ---
   return (
     <div ref={containerRef} style={styles.container}>
       {isSaving && !showQZPrintModal && !isPrintingBrowser && (
@@ -847,7 +885,7 @@ const Invoice = ({ internalUser }) => {
             onClose={() => {
                 setShowQZPrintModal(false);
                 setInvoiceToPrint(null);
-                resetForm();
+                resetForm(); // Call async function
             }}
         />
       )}
@@ -859,7 +897,7 @@ const Invoice = ({ internalUser }) => {
             onPrintFinished={async () => {
                 setIsPrintingBrowser(false);
                 setInvoiceToPrint(null);
-                await resetForm();
+                await resetForm(); // Call async function
             }}
         />
       )}
@@ -1083,6 +1121,7 @@ const Invoice = ({ internalUser }) => {
   );
 };
 
+// Styles (No changes)
 const styles = {
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
@@ -1136,66 +1175,24 @@ const styles = {
     closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }
 };
 
-// --- THIS IS THE NEW printStyles OBJECT (with more spacing) ---
+// printStyles (No changes)
 const printStyles = {
-    // Use '3mm' padding for the whole box
     invoiceBox: { padding: '3mm', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace'"}, 
-    
     logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px', display: 'block', marginLeft: 'auto', marginRight: 'auto' },
-    
-    companyNameText: { 
-        fontSize: '1.4em', 
-        margin: '5px 0 5px 0', 
-        fontWeight: 'bold', 
-        textAlign: 'center',
-        lineHeight: '1.5' // <-- Increased line height
-    },
-    headerText: { 
-        margin: '4px 0', // <-- Increased margin
-        fontSize: '0.9em', 
-        textAlign: 'center',
-        lineHeight: '1.5' // <-- Increased line height
-    },
+    companyNameText: { fontSize: '1.4em', margin: '5px 0 5px 0', fontWeight: 'bold', textAlign: 'center', lineHeight: '1.5' },
+    headerText: { margin: '4px 0', fontSize: '0.9em', textAlign: 'center', lineHeight: '1.5' },
     itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
-    th: { 
-        borderBottom: '1px solid #000', 
-        padding: '8px 6px', // <-- Increased padding
-        textAlign: 'right', 
-        background: '#f0f0f0' 
-    },
+    th: { borderBottom: '1px solid #000', padding: '8px 6px', textAlign: 'right', background: '#f0f0f0' },
     thItem: { textAlign: 'left' },
-    td: { 
-        padding: '8px 6px', // <-- Increased padding
-        borderBottom: '1px dotted #ccc',
-        lineHeight: '1.5' // <-- Increased line height
-    },
+    td: { padding: '8px 6px', borderBottom: '1px dotted #ccc', lineHeight: '1.5' },
     tdCenter: { textAlign: 'center' },
     tdRight: { textAlign: 'right' },
     totalsContainer: { width: '100%' },
     totals: { paddingTop: '10px' },
-    totalRow: { 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        padding: '6px 0', // <-- Increased padding
-        fontSize: '1em',
-        lineHeight: '1.6' // <-- Increased line height
-    },
-    hr: { border: 'none', borderTop: '1px dashed #000', margin: '8px 0' }, // <-- Increased margin
-    footer: { 
-        textAlign: 'center', 
-        marginTop: '25px', // <-- Increased margin
-        paddingTop: '10px', 
-        borderTop: '1px solid #000', 
-        fontSize: '0.8em',
-        lineHeight: '1.5' // <-- Increased line height
-    },
-    creditFooter: { 
-        textAlign: 'center', 
-        marginTop: '10px', 
-        fontSize: '0.7em', 
-        color: '#777',
-        lineHeight: '1.5' // <-- Increased line height
-    },
+    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '1em', lineHeight: '1.6' },
+    hr: { border: 'none', borderTop: '1px dashed #000', margin: '8px 0' },
+    footer: { textAlign: 'center', marginTop: '25px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em', lineHeight: '1.5' },
+    creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777', lineHeight: '1.5' },
 };
 
 export default Invoice;

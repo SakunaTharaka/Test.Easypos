@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, onSnapshot } from "firebase/firestore";
-// 💡 Added FaRegTimesCircle for the dismiss button
+// 庁 Removed onSnapshot, it's no longer used
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from "firebase/firestore";
 import { FaDollarSign, FaUserPlus, FaFileInvoice, FaExclamationTriangle, FaUserClock, FaRegTimesCircle } from "react-icons/fa";
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { calculateStockBalances } from "../utils/inventoryUtils"; // 💡 Import the utility function
+import { calculateStockBalances } from "../utils/inventoryUtils";
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler
@@ -16,11 +16,8 @@ ChartJS.register(
 
 const DashboardView = ({ internalUser }) => {
   const [stats, setStats] = useState({ totalSales: 0, newCustomers: 0, invoicesToday: 0 });
-  
-  // ✅ States are already here, we will now use them!
   const [lowStockItems, setLowStockItems] = useState([]);
   const [showLowStockAlert, setShowLowStockAlert] = useState(false);
-  
   const [loading, setLoading] = useState(true);
   const [globalAnnouncement, setGlobalAnnouncement] = useState(null);
   const [salesChartData, setSalesChartData] = useState({ labels: [], datasets: [] });
@@ -45,10 +42,14 @@ const DashboardView = ({ internalUser }) => {
         const todayCustomersQuery = query(collection(db, uid, "customers", "customer_list"), where("createdAt", ">=", Timestamp.fromDate(todayStart)), where("createdAt", "<=", Timestamp.fromDate(todayEnd)));
         const settingsRef = doc(db, uid, "settings");
         
-        const [invoicesSnap, customersSnap, settingsSnap] = await Promise.all([
+        // 庁 FIX: Replaced onSnapshot with getDoc for announcement
+        const announcementRef = doc(db, 'global_settings', 'announcement');
+
+        const [invoicesSnap, customersSnap, settingsSnap, announcementSnap] = await Promise.all([
             getDocs(todayInvoicesQuery),
             getDocs(todayCustomersQuery),
-            getDoc(settingsRef)
+            getDoc(settingsRef),
+            getDoc(announcementRef) // 庁 Fetch announcement once
         ]);
         
         // ... (KPI calculation logic remains the same) ...
@@ -63,7 +64,14 @@ const DashboardView = ({ internalUser }) => {
         });
         setStats({ totalSales, invoicesToday: actualInvoiceCount, newCustomers: customersSnap.size });
 
-        // 💡 FIX: Fetch and process low stock items
+        // 庁 FIX: Set announcement state from getDoc result
+        if (announcementSnap.exists() && announcementSnap.data().isEnabled) {
+            setGlobalAnnouncement(announcementSnap.data());
+        } else {
+            setGlobalAnnouncement(null);
+        }
+
+        // ... (Low stock item logic remains the same) ...
         if (settingsSnap.exists()) {
             const threshold = settingsSnap.data().stockReminder;
             const stockReminderThreshold = threshold === "Do not remind" ? null : parseInt(threshold);
@@ -78,7 +86,6 @@ const DashboardView = ({ internalUser }) => {
 
                 if (lowItems.length > 0) {
                     setLowStockItems(lowItems);
-                    // Check sessionStorage to see if the user already dismissed the alert
                     const isAlertDismissed = sessionStorage.getItem('lowStockAlertDismissed') === 'true';
                     if (!isAlertDismissed) {
                         setShowLowStockAlert(true);
@@ -87,7 +94,7 @@ const DashboardView = ({ internalUser }) => {
             }
         }
         
-        // ... (Sales Chart and Overdue Customers logic remains the same) ...
+        // ... (Sales Chart logic remains the same) ...
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 6);
         weekAgo.setHours(0, 0, 0, 0);
@@ -134,9 +141,24 @@ const DashboardView = ({ internalUser }) => {
             }]
         });
 
+        // ... (Overdue Customers logic) ...
         const creditCustomers = creditCustomersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (creditCustomers.length > 0) {
-            const creditInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("customerId", "in", creditCustomers.map(c=>c.id)), where("paymentMethod", "==", "Credit"));
+        if (creditCustomers.length > 0 && creditCustomers.map(c=>c.id).length > 0) {
+            
+            // 庁 FIX: Added date filter to optimize the invoice query
+            const lookbackDate = new Date();
+            lookbackDate.setDate(lookbackDate.getDate() - 180); // Look back 180 days
+            lookbackDate.setHours(0, 0, 0, 0);
+
+            const creditInvoicesQuery = query(
+                collection(db, uid, "invoices", "invoice_list"), 
+                where("customerId", "in", creditCustomers.map(c=>c.id)), 
+                where("paymentMethod", "==", "Credit"),
+                where("createdAt", ">=", Timestamp.fromDate(lookbackDate)) // 庁 This filter reduces reads
+            );
+            
+            // This query still fetches all payments, which is necessary for accurate balance
+            // unless the data model is changed to store `balance` on the invoice.
             const creditPaymentsQuery = query(collection(db, uid, "credit_payments", "payments"));
 
             const [creditInvoicesSnap, creditPaymentsSnap] = await Promise.all([
@@ -176,7 +198,6 @@ const DashboardView = ({ internalUser }) => {
             setOverdueCustomers(Object.entries(overdue).map(([name, amount]) => ({ name, amount })));
         }
 
-
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
       } finally {
@@ -186,27 +207,15 @@ const DashboardView = ({ internalUser }) => {
 
     fetchData();
 
-    const announcementRef = doc(db, 'global_settings', 'announcement');
-    const unsubscribe = onSnapshot(announcementRef, (docSnap) => {
-        if (docSnap.exists() && docSnap.data().isEnabled) {
-            setGlobalAnnouncement(docSnap.data());
-        } else {
-            setGlobalAnnouncement(null);
-        }
-    });
+    // 庁 FIX: Removed the onSnapshot listener and the unsubscribe return
+  }, []); // Empty dependency array means this runs once on mount
 
-    return () => unsubscribe();
-  }, []);
-
-  // 💡 FIX: Handler to dismiss the low stock alert
   const handleDismissLowStockAlert = () => {
     setShowLowStockAlert(false);
     sessionStorage.setItem('lowStockAlertDismissed', 'true');
   };
 
-
   if (loading) return (
-    // ... (loading JSX remains the same) ...
     <div style={styles.loadingContainer}>
       <div style={styles.loadingSpinner}></div>
       <p>Loading Dashboard...</p>
@@ -215,7 +224,6 @@ const DashboardView = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
-      {/* ... (global announcement JSX remains the same) ... */}
       {globalAnnouncement && (
         <div style={styles.criticalAlert}>
             <div style={styles.criticalAlertHeader}>
@@ -226,7 +234,6 @@ const DashboardView = ({ internalUser }) => {
         </div>
       )}
 
-      {/* 💡 FIX: Low Stock Alert Notification */}
       {showLowStockAlert && lowStockItems.length > 0 && (
         <div style={styles.lowStockAlert}>
             <div style={styles.lowStockAlertHeader}>
@@ -243,12 +250,10 @@ const DashboardView = ({ internalUser }) => {
       )}
 
       <div style={styles.header}>
-        {/* ... (header JSX remains the same) ... */}
         <h1 style={styles.title}>Hi, {internalUser?.username || "Admin"}!</h1>
         <p style={styles.subtitle}>Welcome back, here's a look at your business today.</p>
       </div>
       
-      {/* ... (rest of the JSX for cards, charts, etc. remains the same) ... */}
       <div style={styles.cardsContainer}>
         <div style={styles.card}>
           <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #68d391, #2f855a)'}}>
@@ -300,8 +305,8 @@ const DashboardView = ({ internalUser }) => {
   );
 };
 
+// ... (Styles remain unchanged)
 const styles = {
-  // ... (all existing styles) ...
   container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
   loadingContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px', flexDirection: 'column', gap: '20px' },
   loadingSpinner: { border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '50px', height: '50px', animation: 'spin 1s linear infinite' },
@@ -309,8 +314,6 @@ const styles = {
   criticalAlertHeader: { display: 'flex', alignItems: 'center', gap: '12px' },
   criticalAlertTitle: { margin: 0, fontSize: '18px', fontWeight: '600' },
   criticalAlertText: { margin: '8px 0 0 0', fontSize: '15px', lineHeight: '1.5' },
-  
-  // 💡 FIX: Added styles for the new low stock alert
   lowStockAlert: {
     position: 'relative',
     backgroundColor: '#fffbe6',
@@ -335,7 +338,6 @@ const styles = {
     fontSize: '20px',
     opacity: 0.7,
   },
-  
   header: { marginBottom: '24px' },
   title: { fontSize: '32px', fontWeight: 'bold', color: '#111827', margin: 0 },
   subtitle: { fontSize: '16px', color: '#6b7280', marginTop: '4px' },
@@ -355,7 +357,6 @@ const styles = {
   overdueAmount: { fontWeight: 'bold', color: '#e74c3c' },
 };
 
-// ... (styleSheet append logic remains the same) ...
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
