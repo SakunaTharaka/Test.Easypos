@@ -6,7 +6,7 @@ import { FaExclamationCircle } from 'react-icons/fa';
 
 import { CashBookProvider } from "../context/CashBookContext";
 
-// IMPORTED YOUR LOGO (MOVED TO TOP)
+// IMPORTED YOUR LOGO
 import companyLogo from '../logo.jpeg';
 
 // Lazy-loaded components
@@ -437,7 +437,7 @@ const Dashboard = () => {
             </div>
         </div>
       )}
-      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
+      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.g.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
     </div>
   );
 };
@@ -632,11 +632,12 @@ const styles = {
       fontSize: '14px',
     },
 
-    // ADDED LOGO STYLE
+    // UPDATED LOGO STYLE
     headerLogo: {
-      height: '40px',
-      width: 'auto',
-      borderRadius: '8px',
+      height: '52px',
+      width: '52px',
+      objectFit: 'cover', // Added object-fit
+      borderRadius: '8px', // Matched 8px radius from placeholder's inner image
       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
     },
     
