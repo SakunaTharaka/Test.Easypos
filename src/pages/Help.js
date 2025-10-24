@@ -2,7 +2,7 @@ import React from 'react';
 import { FaPhoneAlt, FaEnvelope, FaWhatsapp } from 'react-icons/fa';
 
 const Help = () => {
-  const contactNumber = '078 722 3407';
+  const contactNumber = '0787223407';
 
   return (
     <div style={styles.container}>
@@ -25,10 +25,10 @@ const Help = () => {
             <span style={styles.contactTitle}>WhatsApp</span>
             <span style={styles.contactDetail}>Chat with us</span>
           </a>
-          <a href="mailto:support@waynesoftware.com" style={styles.contactCard}>
+          <a href="mailto:sakuna.wayne.easyerp@gmail.com" style={styles.contactCard}>
             <FaEnvelope size={24} style={styles.icon} />
             <span style={styles.contactTitle}>Email Support</span>
-            <span style={styles.contactDetail}>support@waynesoftware.com</span>
+            <span style={styles.contactDetail}>sakuna.wayne.easyerp@gmail.com</span>
           </a>
         </div>
       </div>

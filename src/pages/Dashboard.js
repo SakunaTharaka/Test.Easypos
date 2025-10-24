@@ -52,6 +52,9 @@ const Dashboard = () => {
   const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // --- ADDED STATE FOR HOVER ---
+  const [hoveredTab, setHoveredTab] = useState(null);
 
   const [maintenanceStatus, setMaintenanceStatus] = useState({
     loading: true,
@@ -326,7 +329,11 @@ const Dashboard = () => {
           ...styles.sidebar,
           ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed),
         }}
-        onMouseLeave={() => setIsSidebarOpen(false)}
+        // --- UPDATED onMouseLeave ---
+        onMouseLeave={() => {
+          setIsSidebarOpen(false);
+          setHoveredTab(null);
+        }}
       >
         {/* === SIDEBAR HEADER REMOVED === */}
 
@@ -334,11 +341,18 @@ const Dashboard = () => {
           {visibleTabs.map((tab) => (
             <div
               key={tab}
+              // --- UPDATED STYLE LOGIC ---
               style={{
                 ...styles.sidebarTab,
+                // Apply hover style if hovered, but only if it's NOT the active tab
+                ...(hoveredTab === tab && activeTab !== tab ? styles.sidebarTabHover : {}),
+                // Apply active style (will override hover style if tab is active)
                 ...(activeTab === tab ? styles.sidebarActiveTab : {}),
               }}
               onClick={() => setActiveTab(tab)}
+              // --- ADDED MOUSE EVENTS ---
+              onMouseEnter={() => setHoveredTab(tab)}
+              onMouseLeave={() => setHoveredTab(null)}
             >
               {tab}
             </div>
@@ -437,7 +451,7 @@ const Dashboard = () => {
             </div>
         </div>
       )}
-      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.g.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
+      {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
     </div>
   );
 };
@@ -546,6 +560,11 @@ const styles = {
       borderLeft: '4px solid transparent',
       transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
       whiteSpace: 'nowrap',
+    },
+    // --- NEW HOVER STYLE ---
+    sidebarTabHover: {
+      color: '#fff', // Solid white text
+      background: 'rgba(255, 255, 255, 0.15)', // Same glass background as active
     },
     sidebarActiveTab: {
       color: '#fff',

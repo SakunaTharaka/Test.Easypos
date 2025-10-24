@@ -42,51 +42,55 @@ const Summary = () => {
     try {
       const startOfDay = new Date(from); startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(to); endOfDay.setHours(23, 59, 59, 999);
+      const startTimestamp = Timestamp.fromDate(startOfDay);
+      const endTimestamp = Timestamp.fromDate(endOfDay);
 
       const customersRef = collection(db, uid, "customers", "customer_list");
       const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
 
-      const invoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(startOfDay)), where("createdAt", "<=", Timestamp.fromDate(endOfDay)));
-      const expensesQuery = query(collection(db, uid, "user_data", "expenses"), where("createdAt", ">=", startOfDay), where("createdAt", "<=", endOfDay));
+      const invoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", startTimestamp), where("createdAt", "<=", endTimestamp));
+      const expensesQuery = query(collection(db, uid, "user_data", "expenses"), where("createdAt", ">=", startTimestamp), where("createdAt", "<=", endTimestamp));
+      const stockPaymentsQuery = query(collection(db, uid, "stock_payments", "payments"), where("paidAt", ">=", startTimestamp), where("paidAt", "<=", endTimestamp));
       const itemsQuery = query(collection(db, uid, "items", "item_list"));
       
-      const [creditCustomersSnap, invoicesSnap, expensesSnap, itemsSnap] = await Promise.all([
+      const [creditCustomersSnap, invoicesSnap, expensesSnap, stockPaymentsSnap, itemsSnap] = await Promise.all([
         getDocs(creditCustomersQuery),
         getDocs(invoicesQuery),
         getDocs(expensesQuery),
+        getDocs(stockPaymentsQuery),
         getDocs(itemsQuery),
       ]);
 
       const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
       
-      // ✅ **FIX: Filter invoices to exclude credit sales but include credit repayments**
       const validInvoices = invoicesSnap.docs
         .map(d => d.data())
         .filter(inv => {
             const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
             const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
-            // This is the key: include income if it's a repayment OR if the sale is not from a credit customer
             return isCreditRepayment || !isFromCreditCustomer;
         });
 
       const allExpenses = expensesSnap.docs.map(d => d.data());
+      const allStockPayments = stockPaymentsSnap.docs.map(d => d.data());
+
       const itemCostMap = new Map();
       itemsSnap.docs.forEach(d => {
         const itemData = d.data();
         if (itemData.pid) {
-            // Using PID as a robust unique key for items
             itemCostMap.set(itemData.pid, itemData.costPrice || 0);
         }
       });
       
       const totalRevenue = validInvoices.reduce((sum, inv) => sum + inv.total, 0);
-      const totalExpenses = allExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      
+      const actualExpensesTotal = allExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const totalStockPayments = allStockPayments.reduce((sum, sp) => sum + sp.amount, 0);
+      const totalExpenses = actualExpensesTotal + totalStockPayments; 
       
       const totalCOGS = validInvoices.reduce((sum, inv) => {
         if (inv.paymentMethod === 'Credit-Repayment') return sum;
-        
         const invoiceCOGS = inv.items.reduce((itemSum, item) => {
-          // The itemId in the invoice should correspond to the PID of the item
           const cost = itemCostMap.get(item.itemId) || 0;
           return itemSum + (cost * item.quantity);
         }, 0);
@@ -97,6 +101,7 @@ const Summary = () => {
       const netIncome = grossProfit - totalExpenses;
       setKpiData({ totalRevenue, grossProfit, totalExpenses, netIncome });
 
+      // --- Sales Chart (Unchanged) ---
       const dailySales = {};
       validInvoices.forEach(inv => {
         const date = inv.createdAt.toDate().toISOString().split('T')[0];
@@ -115,18 +120,28 @@ const Summary = () => {
         datasets: [{ label: 'Daily Sales', data: salesDataPoints, borderColor: '#3498db', backgroundColor: 'rgba(52, 152, 219, 0.1)', fill: true, tension: 0.1 }]
       });
 
-      const expenseCategories = {};
+      // --- Expense & Stock Payment Chart (UPDATED) ---
+      const combinedExpensesForChart = {};
+      
+      // Aggregate regular expenses
       allExpenses.forEach(exp => {
-        const category = exp.category || 'Uncategorized';
-        if (!expenseCategories[category]) expenseCategories[category] = 0;
-        expenseCategories[category] += exp.amount;
+        const category = exp.category || 'Uncategorized Expense'; // Ensure unique name from stock payments
+        if (!combinedExpensesForChart[category]) combinedExpensesForChart[category] = 0;
+        combinedExpensesForChart[category] += exp.amount;
       });
+
+      // Aggregate stock payments under a single category
+      if (totalStockPayments > 0) {
+        combinedExpensesForChart['Stock Payments'] = totalStockPayments;
+      }
+
       setExpenseChartData({
-        labels: Object.keys(expenseCategories),
+        labels: Object.keys(combinedExpensesForChart),
         datasets: [{
-          label: 'Expenses by Category',
-          data: Object.values(expenseCategories),
-          backgroundColor: ['#e74c3c', '#f1c40f', '#9b59b6', '#34495e', '#1abc9c', '#e67e22'],
+          label: 'Expenses & Stock Payments',
+          data: Object.values(combinedExpensesForChart),
+          // You might want to add more colors if you expect many categories + stock payments
+          backgroundColor: ['#e74c3c', '#f1c40f', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#3498db' /* Added blue for stock */],
           hoverOffset: 4
         }]
       });
@@ -152,7 +167,7 @@ const Summary = () => {
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>📑 Finance Summary</h2>
-      <p style={styles.subHeader}>A financial overview of cash/card sales and credit repayments.</p>
+      <p style={styles.subHeader}>A financial overview including sales (cash/card/online), credit repayments, cost of goods, expenses, and stock payments.</p>
 
       <div style={styles.section}>
         <div style={styles.controlsContainer}>
@@ -169,9 +184,9 @@ const Summary = () => {
       
       <div style={styles.kpiContainer}>
         <KpiCard title="Total Revenue" value={kpiData.totalRevenue} isLoading={loading} />
-        <KpiCard title="Gross Profit" value={kpiData.grossProfit} isLoading={loading} />
-        <KpiCard title="Total Expenses" value={kpiData.totalExpenses} isLoading={loading} />
-        <KpiCard title="Net Income" value={kpiData.netIncome} isLoading={loading} />
+        <KpiCard title="Gross Profit (Revenue - COGS)" value={kpiData.grossProfit} isLoading={loading} />
+        <KpiCard title="Total Expenses (Inc. Stock Payments)" value={kpiData.totalExpenses} isLoading={loading} />
+        <KpiCard title="Net Income (Gross Profit - Total Exp.)" value={kpiData.netIncome} isLoading={loading} />
       </div>
 
       <div style={styles.graphsContainer}>
@@ -181,7 +196,8 @@ const Summary = () => {
                 <div style={styles.chartWrapper}><Line options={{ responsive: true, plugins: { legend: { display: false }}}} data={salesChartData} /></div>}
         </div>
         <div style={styles.section}>
-            <h3 style={styles.chartTitle}>Expense Breakdown</h3>
+             {/* --- UPDATED CHART TITLE --- */}
+            <h3 style={styles.chartTitle}>Expense & Stock Payment Breakdown</h3>
             {loading ? <p style={styles.loadingText}>Loading chart...</p> : 
                 <div style={styles.chartWrapper}><Doughnut options={{ responsive: true, maintainAspectRatio: false }} data={expenseChartData} /></div>}
         </div>
@@ -202,6 +218,7 @@ const Summary = () => {
   );
 };
 
+// --- STYLES (Unchanged) ---
 const styles = {
   container: { padding: "24px", fontFamily: "'Inter', sans-serif" },
   title: { fontSize: "22px", marginBottom: "5px", color: "#2c3e50", fontWeight: "600" },

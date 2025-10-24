@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
+// ✅ Import icons for modals
+import { 
+  FaTimes, FaStore, FaUsers, FaBoxOpen, FaCog, FaPrint, 
+  FaEnvelope, FaPhone, FaCheckCircle, FaStar 
+} from 'react-icons/fa';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -12,6 +17,10 @@ const Home = () => {
   const [keySequence, setKeySequence] = useState('');
   const [isAdminButtonVisible, setIsAdminButtonVisible] = useState(false);
   const SECRET_CODE = 'admin';
+
+  // ✅ State for modals
+  const [activeModal, setActiveModal] = useState(null); // 'features', 'pricing', 'contact'
+  const [isModalVisible, setIsModalVisible] = useState(false);
 
   useEffect(() => {
     // Trigger animations after component mounts
@@ -27,6 +36,9 @@ const Home = () => {
     
     // Keydown listener for the secret shortcut
     const handleKeyDown = (e) => {
+      // Don't track keys if a modal is open
+      if (activeModal) return;
+
       const newSequence = keySequence + e.key;
       // Keep the sequence from getting too long and check if it ends with the code
       const trimmedSequence = newSequence.slice(-SECRET_CODE.length);
@@ -44,7 +56,8 @@ const Home = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [keySequence]);
+  // ✅ Added activeModal to dependencies
+  }, [keySequence, activeModal]);
 
   const openLogin = () => {
     if (auth.currentUser) {
@@ -64,6 +77,139 @@ const Home = () => {
 
   const openMasterAdmin = () => {
     navigate("/master-admin");
+  };
+
+  // ✅ Functions to control modals
+  const openModal = (modalName) => {
+    setActiveModal(modalName);
+    setTimeout(() => setIsModalVisible(true), 10); // Start animation
+  };
+
+  const closeModal = () => {
+    setIsModalVisible(false);
+    setTimeout(() => setActiveModal(null), 300); // Wait for animation to finish
+  };
+
+  // ✅ Function to render modal content
+  const renderModalContent = () => {
+    switch (activeModal) {
+      case 'features':
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Features</h2>
+            <div style={styles.featuresGrid}>
+              
+              <div style={styles.featureGroup}>
+                <h3 style={styles.featureGroupTitle}><FaStore style={{ marginRight: 8 }} /> Inventory Management</h3>
+                <ul>
+                  <li style={styles.featureItem}>Add, edit, and delete items</li>
+                  <li style={styles.featureItem}>Assign unique SKUs and Categories</li>
+                  <li style={styles.featureItem}>Manage item types: Buy/Sell, Raw Materials, and Finished Products</li>
+                  <li style={styles.featureItem}>Auto-generate unique Product IDs (PID)</li>
+                  <li style={styles.featureItem}>Fast, case-insensitive item search</li>
+                  <li style={styles.featureItem}>Pagination for large item lists</li>
+                </ul>
+              </div>
+
+              <div style={styles.featureGroup}>
+                <h3 style={styles.featureGroupTitle}><FaUsers style={{ marginRight: 8 }} /> Customer Management</h3>
+                <ul>
+                  <li style={styles.featureItem}>Full customer database (Add/Edit/Delete)</li>
+                  <li style={styles.featureItem}>Assign customers to custom Price Categories</li>
+                  <li style={styles.featureItem}>Manage Credit Customers with overdue day limits</li>
+                  <li style={styles.featureItem}>Track edits and user history</li>
+                </ul>
+              </div>
+              
+              <div style={styles.featureGroup}>
+                <h3 style={styles.featureGroupTitle}><FaCog style={{ marginRight: 8 }} /> System & Admin</h3>
+                <ul>
+                  <li style={styles.featureItem}>Role-based permissions (Admin vs. User)</li>
+                  <li style={styles.featureItem}>Secure Master Admin Panel with secret shortcut</li>
+                  <li style={styles.featureItem}>Internal user tracking for all actions</li>
+                </ul>
+              </div>
+
+              <div style={styles.featureGroup}>
+                <h3 style={styles.featureGroupTitle}><FaPrint style={{ marginRight: 8 }} /> Printing & Integration</h3>
+                <ul>
+                  <li style={styles.featureItem}>Support for direct receipt and label printing via QZ Tray</li>
+                </ul>
+              </div>
+
+            </div>
+          </>
+        );
+      case 'pricing':
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Choose Your Plan</h2>
+            <div style={styles.pricingGrid}>
+              <div style={styles.pricingCard}>
+                <h3 style={styles.pricingCardTitle}>Monthly</h3>
+                <div style={styles.pricingCardPrice}>
+                  <span style={styles.pricingCardCurrency}>LKR</span>
+                  1,800
+                  <span style={styles.pricingCardTerm}>/ month</span>
+                </div>
+                <p style={styles.pricingCardDesc}>Perfect for getting started. Pay as you go.</p>
+                <button 
+                  style={{...styles.button, ...styles.loginButton, width: '100%'}}
+                  onClick={() => openModal('contact')}
+                >
+                  Contact Us
+                </button>
+              </div>
+
+              <div style={{...styles.pricingCard, ...styles.pricingCardFeatured}}>
+                <div style={styles.featuredBadge}><FaStar style={{ marginRight: 5 }} /> Best Value</div>
+                <h3 style={styles.pricingCardTitle}>Yearly</h3>
+                <div style={styles.pricingCardPrice}>
+                  <span style={styles.pricingCardCurrency}>LKR</span>
+                  19,000
+                  <span style={styles.pricingCardTerm}>/ year</span>
+                </div>
+                <p style={styles.pricingCardDesc}>Save over 10% with our annual plan.</p>
+                <button 
+                  style={{...styles.button, ...styles.signupButton, width: '100%'}}
+                  onClick={() => openModal('contact')}
+                >
+                  Contact Us
+                </button>
+              </div>
+            </div>
+          </>
+        );
+      case 'contact':
+        return (
+          <>
+            <h2 style={styles.modalTitle}>Get in Touch</h2>
+            <p style={styles.contactSubtitle}>We'd love to hear from you! Reach out with any questions.</p>
+            <div style={styles.contactGroup}>
+              <div style={styles.contactItem}>
+                <FaEnvelope style={{ ...styles.contactIcon, color: '#6366f1' }} />
+                <div>
+                  <h4 style={styles.contactItemTitle}>Email</h4>
+                  <a href="mailto:sakuna.wayne.easyerp@gmail.com" style={styles.contactItemLink}>
+                    sakuna.wayne.easyerp@gmail.com
+                  </a>
+                </div>
+              </div>
+              <div style={styles.contactItem}>
+                <FaPhone style={{ ...styles.contactIcon, color: '#10b981' }} />
+                <div>
+                  <h4 style={styles.contactItemTitle}>Phone</h4>
+                  <a href="tel:0787223407" style={styles.contactItemLink}>
+                    078 722 3407
+                  </a>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
@@ -99,10 +245,10 @@ const Home = () => {
           </div>
           <div style={styles.headerRight}>
             <nav style={styles.nav}>
-              <a href="#features" style={styles.navLink}>Features</a>
-              <a href="#pricing" style={styles.navLink}>Pricing</a>
-              <a href="#contact" style={styles.navLink}>Contact</a>
-              {/* --- UPDATED QZ TRAY DOWNLOAD LINK --- */}
+              {/* --- UPDATED NAV LINKS --- */}
+              <span onClick={() => openModal('features')} style={styles.navLink}>Features</span>
+              <span onClick={() => openModal('pricing')} style={styles.navLink}>Pricing</span>
+              <span onClick={() => openModal('contact')} style={styles.navLink}>Contact</span>
               <a 
                 href="https://qz.io/download/" 
                 target="_blank" 
@@ -263,15 +409,39 @@ const Home = () => {
                 Master Admin Panel
               </button>
             )}
-            <p>Contact: <a href="mailto:support@easypos.lk" style={styles.footerLink}>support@easypos.lk</a></p>
+            <p>Contact: <a href="mailto:sakuna.wayne.easyerp@gmail.com" style={styles.footerLink}>sakuna.wayne.easyerp@gmail.com</a></p>
           </div>
         </div>
       </footer>
+
+      {/* ✅ MODAL CONTAINER */}
+      {activeModal && (
+        <div 
+          style={{...styles.modalOverlay, opacity: isModalVisible ? 1 : 0}} 
+          onClick={closeModal}
+        >
+          <div 
+            style={{
+              ...styles.modalContent, 
+              opacity: isModalVisible ? 1 : 0, 
+              transform: isModalVisible ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(20px)'
+            }}
+            onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
+          >
+            <button style={styles.closeButton} onClick={closeModal}>
+              <FaTimes />
+            </button>
+            {renderModalContent()}
+          </div>
+        </div>
+      )}
     </>
   );
 };
 
 const styles = {
+  // ... (All previous styles are unchanged)
+  
   // Background Animation
   backgroundAnimation: {
     position: 'fixed',
@@ -392,6 +562,7 @@ const styles = {
     fontSize: '16px',
     textDecoration: 'none',
     transition: 'color 0.3s ease',
+    cursor: 'pointer', // ✅ Added cursor pointer
   },
 
   // Main Container
@@ -661,6 +832,217 @@ const styles = {
     textDecoration: 'none',
     transition: 'color 0.3s ease',
   },
+
+  // ✅ --- NEW MODAL STYLES ---
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(8px)',
+    zIndex: 2000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px',
+    transition: 'opacity 0.3s ease',
+  },
+
+  modalContent: {
+    background: '#ffffff',
+    borderRadius: '16px',
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)',
+    padding: '40px',
+    width: '100%',
+    maxWidth: '800px', // Wider for features
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    position: 'relative',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+
+  closeButton: {
+    position: 'absolute',
+    top: '20px',
+    right: '20px',
+    background: '#f3f4f6',
+    border: 'none',
+    borderRadius: '50%',
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    color: '#6b7280',
+    fontSize: '16px',
+    transition: 'all 0.2s ease',
+  },
+
+  modalTitle: {
+    fontSize: '2rem',
+    fontWeight: '700',
+    color: '#111827',
+    margin: '0 0 30px 0',
+    textAlign: 'center',
+  },
+
+  // Features Modal Styles
+  featuresGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px',
+  },
+  
+  featureGroup: {
+    background: '#f9fafb',
+    borderRadius: '12px',
+    padding: '24px',
+    border: '1px solid #f3f4f6',
+  },
+
+  featureGroupTitle: {
+    fontSize: '1.25rem',
+    fontWeight: '600',
+    color: '#374151',
+    margin: '0 0 16px 0',
+    display: 'flex',
+    alignItems: 'center',
+  },
+
+  featureItem: {
+    color: '#6b7280',
+    fontSize: '1rem',
+    lineHeight: '1.6',
+    marginBottom: '10px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+  },
+
+  // Pricing Modal Styles
+  pricingGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: '30px',
+    marginTop: '20px',
+    alignItems: 'center',
+  },
+
+  pricingCard: {
+    background: '#ffffff',
+    borderRadius: '16px',
+    padding: '32px',
+    border: '1px solid #e5e7eb',
+    textAlign: 'center',
+    transition: 'all 0.3s ease',
+    position: 'relative',
+  },
+
+  pricingCardFeatured: {
+    border: '2px solid #6366f1',
+    transform: 'scale(1.05)',
+  },
+
+  featuredBadge: {
+    position: 'absolute',
+    top: '-15px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    color: '#fff',
+    padding: '6px 16px',
+    borderRadius: '20px',
+    fontSize: '14px',
+    fontWeight: '600',
+  },
+
+  pricingCardTitle: {
+    fontSize: '1.5rem',
+    fontWeight: '600',
+    color: '#374151',
+    margin: '0 0 16px 0',
+  },
+
+  pricingCardPrice: {
+    fontSize: '2.5rem',
+    fontWeight: '800',
+    color: '#111827',
+    margin: '0 0 16px 0',
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+  },
+
+  pricingCardCurrency: {
+    fontSize: '1.25rem',
+    fontWeight: '600',
+    color: '#6b7280',
+    marginRight: '8px',
+  },
+
+  pricingCardTerm: {
+    fontSize: '1rem',
+    fontWeight: '500',
+    color: '#6b7280',
+    marginLeft: '8px',
+  },
+
+  pricingCardDesc: {
+    fontSize: '1rem',
+    color: '#6b7280',
+    margin: '0 0 24px 0',
+  },
+
+  // Contact Modal Styles
+  contactSubtitle: {
+    textAlign: 'center',
+    color: '#6b7280',
+    fontSize: '1.1rem',
+    margin: '-20px 0 30px 0',
+  },
+  
+  contactGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px',
+  },
+
+  contactItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+    background: '#f9fafb',
+    padding: '24px',
+    borderRadius: '12px',
+    border: '1px solid #f3f4f6',
+  },
+
+  contactIcon: {
+    fontSize: '24px',
+    width: '48px',
+    height: '48px',
+    padding: '12px',
+    borderRadius: '50%',
+    background: 'rgba(99, 102, 241, 0.1)',
+    flexShrink: 0,
+  },
+  
+  contactItemTitle: {
+    margin: '0 0 4px 0',
+    color: '#374151',
+    fontSize: '1.1rem',
+    fontWeight: '600',
+  },
+
+  contactItemLink: {
+    color: '#6366f1',
+    fontSize: '1.1rem',
+    fontWeight: '500',
+    textDecoration: 'none',
+  },
 };
 
 const styleSheet = document.createElement("style");
@@ -696,8 +1078,19 @@ styleSheet.innerText = `
     0% { width: 0; }
     100% { width: 100px; }
   }
+
+  /* ✅ Custom scrollbar for modal */
+  .modalContent::-webkit-scrollbar {
+    width: 6px;
+  }
+  .modalContent::-webkit-scrollbar-thumb {
+    background-color: #d1d5db;
+    border-radius: 3px;
+  }
+  .modalContent::-webkit-scrollbar-track {
+    background-color: #f9fafb;
+  }
 `;
 document.head.appendChild(styleSheet);
 
 export default Home;
-

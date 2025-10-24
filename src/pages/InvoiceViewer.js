@@ -236,12 +236,21 @@ const InvoiceViewer = () => {
   );
 };
 
+// --- STYLES UPDATED HERE ---
+
+const themeColors = {
+  primary: '#00A1FF',
+  secondary: '#F089D7',
+};
+
 // Styles object
 const styles = {
   navbar: { 
     width: "100%", 
     padding: "16px 24px", 
-    background: "linear-gradient(135deg, #2c3e50 0%, #1a2530 100%)", 
+    background: "linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)",
+    backdropFilter: 'blur(10px)',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
     color: "#fff", 
     display: "flex", 
     justifyContent: "space-between", 
@@ -250,14 +259,60 @@ const styles = {
     fontFamily: "'Inter', sans-serif"
   },
   logoContainer: { display: "flex", alignItems: "center" },
-  logoPlaceholder: { width: "52px", height: "52px", borderRadius: "12px", background: "linear-gradient(135deg, #3498db, #2c3e50)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "22px", fontWeight: "bold", marginRight: "16px" },
+  logoPlaceholder: { 
+    width: "52px", 
+    height: "52px", 
+    borderRadius: "12px", 
+    background: `linear-gradient(135deg, ${themeColors.primary}, ${themeColors.secondary})`, 
+    display: "flex", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    color: "white", 
+    fontSize: "22px", 
+    fontWeight: "bold", 
+    marginRight: "16px",
+    boxShadow: '0 4px 12px rgba(0, 161, 255, 0.3)',
+  },
   topInfo: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
-  companyName: { margin: "0", fontSize: "22px", fontWeight: "700" },
-  wayneSystems: { fontSize: '12px', color: '#bdc3c7', margin: '2px 0 0 0', fontStyle: 'italic' },
+  companyName: { 
+    margin: "0", 
+    fontSize: "22px", 
+    fontWeight: "700",
+    color: '#fff',
+  },
+  wayneSystems: { 
+    fontSize: '12px', 
+    color: 'rgba(255, 255, 255, 0.7)', 
+    margin: '2px 0 0 0', 
+    fontStyle: 'italic' 
+  },
   printButtonsContainer: { display: 'flex', gap: '10px' },
-  headerPrintBtn: { padding: "10px 18px", border: "none", borderRadius: "8px", background: "linear-gradient(135deg, #3498db 0%, #2980b9 100%)", color: "#fff", cursor: "pointer", fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" },
-  headerPrintBtnDisabled: { padding: "10px 18px", border: "none", borderRadius: "8px", background: "#7f8c8d", color: "#fff", cursor: "not-allowed", fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" },
+  headerPrintBtn: { 
+    padding: "10px 18px", 
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    borderRadius: "8px", 
+    background: "rgba(255, 255, 255, 0.2)",
+    color: "#fff", 
+    cursor: "pointer", 
+    fontWeight: "600", 
+    fontSize: "14px", 
+    fontFamily: "'Inter', sans-serif",
+    backdropFilter: 'blur(10px)',
+    transition: 'all 0.3s ease',
+  },
+  headerPrintBtnDisabled: { 
+    padding: "10px 18px", 
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    borderRadius: "8px", 
+    background: "rgba(255, 255, 255, 0.1)",
+    color: "rgba(255, 255, 255, 0.5)",
+    cursor: "not-allowed", 
+    fontWeight: "600", 
+    fontSize: "14px", 
+    fontFamily: "'Inter', sans-serif" 
+  },
 
+  // Printable Area Styles
   invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
   logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
   companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
