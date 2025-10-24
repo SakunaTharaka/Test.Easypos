@@ -16,6 +16,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
 // PrintableLayout component (No changes)
+// PrintableLayout component - Unified for both print modes
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
     if (!invoice || !Array.isArray(invoice.items)) return null;
     const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -25,74 +26,98 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
   
     return (
       <div style={printStyles.invoiceBox}>
-        <div className="invoice-header-section">
-          <div className="company-details">
-            {companyInfo?.companyLogo && (
-              <img src={companyInfo.companyLogo} style={printStyles.logo} alt="Company Logo" onLoad={onImageLoad} onError={onImageLoad} />
-            )}
-            <h1 style={printStyles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
-            <p style={printStyles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
-            {companyInfo?.phone && <p style={printStyles.headerText}>{companyInfo.phone}</p>}
+        {/* Company Logo - centered */}
+        {companyInfo?.companyLogo && (
+          <div style={printStyles.logoContainer}>
+            <img 
+              src={companyInfo.companyLogo} 
+              style={printStyles.logo} 
+              alt="Company Logo" 
+              onLoad={onImageLoad} 
+              onError={onImageLoad} 
+            />
           </div>
-          <div className="invoice-meta-details">
-            <p><strong>Invoice #:</strong> {invoice.invoiceNumber}</p>
-            <p><strong>Date:</strong> {createdAtDate?.toLocaleDateString()}</p>
-            <p><strong>Customer:</strong> {invoice.customerName}</p>
-            <p><strong>Issued By:</strong> {invoice.issuedBy}</p>
-          </div>
+        )}
+        
+        {/* Company Name */}
+        <h1 style={printStyles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
+        
+        {/* Company Address */}
+        <p style={printStyles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
+        
+        {/* Phone */}
+        {companyInfo?.phone && <p style={printStyles.headerText}>{companyInfo.phone}</p>}
+        
+        {/* Invoice Meta Info */}
+        <div style={printStyles.metaSection}>
+          <p style={printStyles.metaText}><strong>Invoice #:</strong> {invoice.invoiceNumber}</p>
+          <p style={printStyles.metaText}><strong>Date:</strong> {createdAtDate?.toLocaleDateString()}</p>
+          <p style={printStyles.metaText}><strong>Customer:</strong> {invoice.customerName}</p>
+          <p style={printStyles.metaText}><strong>Issued By:</strong> {invoice.issuedBy}</p>
         </div>
+        
+        {/* Items Table */}
         <table style={printStyles.itemsTable}>
           <thead>
             <tr>
               <th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th>
-              <th style={printStyles.th}>Qty</th>
-              <th style={printStyles.th}>Rate</th>
-              <th style={printStyles.th}>Total</th>
+              <th style={{ ...printStyles.th, ...printStyles.thQty }}>Qty</th>
+              <th style={{ ...printStyles.th, ...printStyles.thRate }}>Rate</th>
+              <th style={{ ...printStyles.th, ...printStyles.thTotal }}>Total</th>
             </tr>
           </thead>
           <tbody>
             {invoice.items.map((item, index) => (
               <tr key={index}>
-                <td style={printStyles.td}>{item.itemName}</td>
-                <td style={{ ...printStyles.td, ...printStyles.tdCenter }}>{item.quantity}</td>
-                <td style={{ ...printStyles.td, ...printStyles.tdRight }}>{item.price.toFixed(2)}</td>
-                <td style={{ ...printStyles.td, ...printStyles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+                <td style={printStyles.tdItem}>{item.itemName}</td>
+                <td style={printStyles.tdQty}>{item.quantity}</td>
+                <td style={printStyles.tdRate}>{item.price.toFixed(2)}</td>
+                <td style={printStyles.tdTotal}>{(item.quantity * item.price).toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="invoice-footer-section">
-          <div style={printStyles.totalsContainer}>
-            <div style={printStyles.totals}>
-                <div style={printStyles.totalRow}>
-                  <strong>Subtotal:</strong>
-                  <span>Rs. {subtotal.toFixed(2)}</span>
-                </div>
-                {invoice.deliveryCharge > 0 && (
-                    <div style={printStyles.totalRow}>
-                      <strong>Delivery:</strong>
-                      <span>Rs. {invoice.deliveryCharge.toFixed(2)}</span>
-                    </div>
-                )}
-                <div style={printStyles.totalRow}>
-                  <strong>Grand Total:</strong>
-                  <span>Rs. {invoice.total.toFixed(2)}</span>
-                </div>
-                <hr style={printStyles.hr} />
-                <div style={printStyles.totalRow}>
-                  <strong>Amount Received:</strong>
-                  <span>Rs. {invoice.received.toFixed(2)}</span>
-                </div>
-                <div style={{ ...printStyles.totalRow, fontSize: '1.1em', fontWeight: 'bold' }}>
-                  <strong>Balance:</strong>
-                  <span>Rs. {balanceToDisplay.toFixed(2)}</span>
-                </div>
+        
+        {/* Totals Section */}
+        <div style={printStyles.totalsSection}>
+          <div style={printStyles.totalRow}>
+            <span>Subtotal:</span>
+            <span>Rs. {subtotal.toFixed(2)}</span>
+          </div>
+          
+          {invoice.deliveryCharge > 0 && (
+            <div style={printStyles.totalRow}>
+              <span>Delivery:</span>
+              <span>Rs. {invoice.deliveryCharge.toFixed(2)}</span>
             </div>
+          )}
+          
+          <div style={printStyles.grandTotalRow}>
+            <span>Grand Total:</span>
+            <span>Rs. {invoice.total.toFixed(2)}</span>
+          </div>
+          
+          <div style={printStyles.dashedLine}></div>
+          
+          <div style={printStyles.totalRow}>
+            <span>Amount Received:</span>
+            <span>Rs. {invoice.received.toFixed(2)}</span>
+          </div>
+          
+          <div style={printStyles.balanceRow}>
+            <span>Balance:</span>
+            <span>Rs. {balanceToDisplay.toFixed(2)}</span>
           </div>
         </div>
+        
+        <div style={printStyles.dashedLine}></div>
+        
+        {/* Footer */}
         <div style={printStyles.footer}>
           <p>Thank you for your business!</p>
         </div>
+        
+        {/* Credit Footer */}
         <div style={printStyles.creditFooter}>
           <p>Wayne Software Solutions | 078 722 3407</p>
         </div>
