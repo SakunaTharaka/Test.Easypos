@@ -19,7 +19,6 @@ const StockBalance = lazy(() => import("./tabs/StockBalance"));
 const Items = lazy(() => import("./tabs/Items"));
 const Customers = lazy(() => import("./tabs/Customers"));
 const PriceCat = lazy(() => import("./tabs/PriceCat"));
-// --- ADDED QUOTATIONS IMPORT ---
 const Quotations = lazy(() => import("./tabs/Quotations"));
 const AddProduction = lazy(() => import("./tabs/AddProduction"));
 const ProductionBalance = lazy(() => import("./tabs/ProductionBalance"));
@@ -36,6 +35,14 @@ const SalesReport = lazy(() => import("./SalesReport"));
 const Help = lazy(() => import("./Help"));
 const StockOutBal = lazy(() => import("./tabs/StockOutBal"));
 
+// --- REMOVED old ServiceOrder import ---
+// const ServiceOrder = lazy(() => import("./tabs/ServiceOrder"));
+
+// --- ADDED NEW Service & Order Sub-tab IMPORTS ---
+const Services = lazy(() => import("./tabs/Services"));
+const Orders = lazy(() => import("./tabs/Orders"));
+const Timeline = lazy(() => import("./tabs/Timeline"));
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -45,6 +52,8 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("Dashboard");
   const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order");
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
+  // --- ADDED NEW STATE for Service/Order Sub-tabs ---
+  const [activeServiceTab, setActiveServiceTab] = useState("Services"); 
   const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [internalUsers, setInternalUsers] = useState([]);
   const [internalLoggedInUser, setInternalLoggedInUser] = useState(null);
@@ -207,8 +216,8 @@ const Dashboard = () => {
   }
   if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p style={styles.loadingText}>Loading dashboard...</p></div> );
 
-  const allTabs = ["Dashboard", "Invoicing", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
-  const visibleTabs = allTabs.filter(tab => !((tab === "Finance" || tab === "Admin" || tab === "Settings") && !internalLoggedInUser?.isAdmin));
+  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
+  const visibleTabs = allTabs.filter(tab => !((tab === "Finance" || "Admin" || "Settings") && !internalLoggedInUser?.isAdmin));
 
   // Render sticky sub-tabs
   const renderSubTabs = () => {
@@ -232,11 +241,17 @@ const Dashboard = () => {
       activeSubTab = activeFinanceTab;
       setActiveSubTab = setActiveFinanceTab;
     } else if (activeTab === "Items & Customers") {
-      // --- ADDED "Quotations" HERE ---
       subTabs = ["Items", "Customers", "Price Categories", "Quotations"];
       activeSubTab = activeItemsCustomersTab;
       setActiveSubTab = setActiveItemsCustomersTab;
-    } else {
+    } 
+    // --- ADDED LOGIC for Service and Orders sub-tabs ---
+    else if (activeTab === "Service and Orders") {
+      subTabs = ["Services", "Orders", "Timeline"];
+      activeSubTab = activeServiceTab;
+      setActiveSubTab = setActiveServiceTab;
+    }
+    else {
       return null;
     }
 
@@ -269,6 +284,17 @@ const Dashboard = () => {
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
+      
+      // --- UPDATED "Service and Orders" CASE ---
+      case "Service and Orders": 
+        return (
+          <div style={styles.inventoryContent}>
+            {activeServiceTab === "Services" && <Services internalUser={internalLoggedInUser} />}
+            {activeServiceTab === "Orders" && <Orders internalUser={internalLoggedInUser} />}
+            {activeServiceTab === "Timeline" && <Timeline internalUser={internalLoggedInUser} />}
+          </div>
+        );
+
       case "Inventory":
         return (
           <div style={styles.inventoryContent}>
@@ -301,7 +327,6 @@ const Dashboard = () => {
           {activeItemsCustomersTab === "Items" && <Items internalUser={internalLoggedInUser} />}
           {activeItemsCustomersTab === "Customers" && <Customers internalUser={internalLoggedInUser} maintainCreditCustomers={maintainCreditCustomers} />}
           {activeItemsCustomersTab === "Price Categories" && <PriceCat internalUser={internalLoggedInUser} />}
-          {/* --- ADDED QUOTATIONS RENDER --- */}
           {activeItemsCustomersTab === "Quotations" && <Quotations internalUser={internalLoggedInUser} />}
         </div>
       );
@@ -405,7 +430,7 @@ const Dashboard = () => {
   );
 };
 
-// Styles (No changes from previous)
+// Styles (No changes)
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa', headerGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', success: '#10b981', danger: '#ef4444', };
 const styles = {
     container: { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", background: themeColors.light, minHeight: "100vh", display: 'flex', flexDirection: 'row', },

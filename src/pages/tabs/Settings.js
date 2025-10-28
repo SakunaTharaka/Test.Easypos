@@ -55,6 +55,10 @@ const Settings = () => {
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
 
+  // --- NEW STATE FOR SERVICE & ORDERS ---
+  const [priceCategories, setPriceCategories] = useState([]);
+  const [servicePriceCategory, setServicePriceCategory] = useState("");
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -89,10 +93,12 @@ const Settings = () => {
           setProductionShifts(data.productionShifts || []);
           setExpenseCategories(data.expenseCategories || []);
           setAutoPrintInvoice(data.autoPrintInvoice || false);
-          // ✅ **2. Load new settings from database**
           setOfferDelivery(data.offerDelivery || false);
           setMaintainCreditCustomers(data.maintainCreditCustomers || false);
           setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
+          // --- LOAD SERVICE PRICE CATEGORY ---
+          setServicePriceCategory(data.serviceJobPriceCategory || "");
+
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
           const userInfoSnap = await getDoc(userInfoRef);
@@ -126,10 +132,11 @@ const Settings = () => {
             productionShifts: [],
             expenseCategories: [],
             autoPrintInvoice: false,
-            // ✅ **3. Add new settings to the default object**
             offerDelivery: false,
             maintainCreditCustomers: false,
             openCashDrawerWithPrint: false,
+            // --- ADD TO DEFAULT SETTINGS ---
+            serviceJobPriceCategory: "",
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -151,15 +158,23 @@ const Settings = () => {
           setProductionShifts(defaultSettings.productionShifts);
           setExpenseCategories(defaultSettings.expenseCategories);
           setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
-          // ✅ **2. Load new settings from default object**
           setOfferDelivery(defaultSettings.offerDelivery);
           setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
           setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
+          // --- LOAD FROM DEFAULT SETTINGS ---
+          setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
         }
 
+        // --- FETCH CUSTOMERS ---
         const customersColRef = collection(db, uid, "customers", "customer_list");
         const customersSnap = await getDocs(customersColRef);
         setCustomers(customersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+        // --- FETCH PRICE CATEGORIES ---
+        const catColRef = collection(db, uid, "price_categories", "categories");
+        const catSnap = await getDocs(query(catColRef));
+        const catData = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setPriceCategories(catData);
 
       } catch (error) {
         alert("Error fetching settings: " + error.message);
@@ -187,10 +202,7 @@ const Settings = () => {
       if (data.secure_url) {
         await updateDoc(getSettingsDocRef(), { companyLogo: data.secure_url });
         
-        // This line is already here
         setUserInfo((prev) => ({ ...prev, companyLogo: data.secure_url }));
-        
-        // ✅ ADD THIS LINE to keep the form state in sync
         setFormInput((prev) => ({ ...prev, companyLogo: data.secure_url })); 
         
         alert("Logo uploaded successfully!");
@@ -297,6 +309,12 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { openCashDrawerWithPrint: value });
   };
 
+  // --- NEW HANDLER FOR SERVICE PRICE CATEGORY ---
+  const handleServicePriceCategoryChange = async (value) => {
+    setServicePriceCategory(value);
+    await updateDoc(getSettingsDocRef(), { serviceJobPriceCategory: value });
+  };
+
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -389,7 +407,21 @@ const Settings = () => {
             </div>
             <p style={styles.helpText}>If set to 'Yes', a command to open the cash drawer will be sent with the print job.</p>
         </div>
+      </div>
 
+      {/* --- NEW SERVICE AND ORDERS SECTION --- */}
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Service and Orders</h3>
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Select Price Category for Service Jobs</label>
+            <select value={servicePriceCategory} onChange={(e) => handleServicePriceCategoryChange(e.target.value)} style={styles.select}>
+                <option value="">Select a Price Category</option>
+                {priceCategories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+            </select>
+            <p style={styles.helpText}>This price category will be used to price items in service jobs.</p>
+        </div>
       </div>
 
       <div style={styles.logoutContainer}><button onClick={handleLogout} style={styles.logoutButton}><AiOutlineLogout size={18} /> Logout</button></div>
