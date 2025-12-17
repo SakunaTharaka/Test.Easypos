@@ -29,7 +29,7 @@ const PurchasingOrder = ({ internalUser }) => {
   // --- Pagination State ---
   const [page, setPage] = useState(1);
   const [lastVisible, setLastVisible] = useState(null);
-  const [pageHistory, setPageHistory] = useState([null]); // History of the first doc of each page
+  const [pageHistory, setPageHistory] = useState([null]); 
   const [isLastPage, setIsLastPage] = useState(false);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -49,7 +49,6 @@ const PurchasingOrder = ({ internalUser }) => {
   const [showViewModal, setShowViewModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   
-  // --- Filtering & Searching State ---
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -64,7 +63,6 @@ const PurchasingOrder = ({ internalUser }) => {
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
-  // --- Core Data Fetching Function ---
   const fetchOrders = async (direction = 'initial') => {
     setLoading(true);
     const user = auth.currentUser;
@@ -77,7 +75,6 @@ const PurchasingOrder = ({ internalUser }) => {
 
     let q = query(poColRef, orderBy("createdAt", "desc"));
 
-    // Apply date filters to the server query
     if (dateFrom) {
         q = query(q, where("createdAt", ">=", new Date(dateFrom + "T00:00:00")));
     }
@@ -92,7 +89,7 @@ const PurchasingOrder = ({ internalUser }) => {
         } else if (direction === 'prev' && page > 1) {
             const prevPageStart = pageHistory[page - 2];
             q = query(q, limit(ITEMS_PER_PAGE), startAfter(prevPageStart));
-        } else { // Initial or filter apply
+        } else { 
             q = query(q, limit(ITEMS_PER_PAGE));
         }
         
@@ -113,17 +110,14 @@ const PurchasingOrder = ({ internalUser }) => {
 
     } catch (error) {
         console.error("Error fetching purchase orders:", error);
-        alert("Could not fetch purchase orders.");
     } finally {
         setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Initial fetch
     fetchOrders('initial');
 
-    // Fetch dropdown items and company info once
     const user = auth.currentUser;
     if (!user) return;
     const uid = user.uid;
@@ -164,7 +158,7 @@ const PurchasingOrder = ({ internalUser }) => {
   const handlePrevPage = () => {
     if (page > 1) {
         const newPageHistory = [...pageHistory];
-        newPageHistory.pop(); // Remove current page's start
+        newPageHistory.pop();
         setPageHistory(newPageHistory);
         setPage(prev => prev - 1);
         fetchOrders('prev');
@@ -184,7 +178,6 @@ const PurchasingOrder = ({ internalUser }) => {
       return `PO-${String(newId).padStart(6, "0")}`;
     } catch (err) {
       console.error("Error generating PO Number:", err.message);
-      alert("Could not generate a PO Number.");
       return null;
     }
   };
@@ -243,15 +236,8 @@ const PurchasingOrder = ({ internalUser }) => {
     if (!form.supplierName || form.lineItems.some(item => !item.itemId || !item.quantity)) {
         return alert("Please fill in Supplier Name and ensure all line items are complete.");
     }
-    if (form.supplierContact) {
-        const phoneRegex = /^0\d{9}$/;
-        if (!phoneRegex.test(form.supplierContact)) {
-            return alert("Please enter a valid 10-digit phone number starting with 0 for the supplier contact.");
-        }
-    }
-
     const user = auth.currentUser;
-    if (!user) return alert("You are not logged in.");
+    if (!user) return;
     const uid = user.uid;
 
     const poNumber = await getNextPONumber(uid);
@@ -261,11 +247,8 @@ const PurchasingOrder = ({ internalUser }) => {
         const addedBy = getCurrentInternal()?.username || "Admin";
         const poColRef = collection(db, uid, "purchase_orders", "po_list");
         const newOrderData = { ...form, poNumber, addedBy, createdAt: serverTimestamp() };
-
-        const docRef = await addDoc(poColRef, newOrderData);
-        // Refetch the first page to show the new item
+        await addDoc(poColRef, newOrderData);
         handleApplyFilters();
-
         setShowCreateModal(false);
         setForm({ poNumber: "", poDate: new Date().toISOString().split('T')[0], supplierName: "", supplierAddress: "", supplierContact: "", lineItems: [{ itemId: "", name: "", quantity: 1, price: 0, total: 0 }], subtotal: 0, tax: 0, shipping: 0, total: 0 });
     } catch(error) {
@@ -274,31 +257,24 @@ const PurchasingOrder = ({ internalUser }) => {
   };
 
   const handleDeleteOrder = async (orderId) => {
-    if (!window.confirm("Are you sure you want to permanently delete this Purchase Order?")) return;
+    if (!window.confirm("Are you sure you want to delete this PO?")) return;
     const user = auth.currentUser;
-    if (!user) return alert("You are not logged in.");
-
+    if (!user) return;
     try {
         const orderDocRef = doc(db, user.uid, "purchase_orders", "po_list", orderId);
         await deleteDoc(orderDocRef);
-        // After deleting, refetch the current page
-        fetchOrders(page > 1 ? 'prev' : 'initial');
-        alert("Purchase Order deleted successfully.");
+        fetchOrders('initial');
     } catch(error) {
-        alert("Error deleting Purchase Order: " + error.message);
+        alert("Error deleting PO: " + error.message);
     }
   };
 
-  // Client-side search on the currently displayed page of orders
   const searchedOrders = orders.filter(order =>
     search ?
     order.poNumber.toLowerCase().includes(search.toLowerCase()) ||
-    order.supplierName.toLowerCase().includes(search.toLowerCase()) ||
-    order.lineItems.some(item => item.name.toLowerCase().includes(search.toLowerCase())) :
+    order.supplierName.toLowerCase().includes(search.toLowerCase()) :
     true
   );
-  
-  if (loading && page === 1 && orders.length === 0) return <p>Loading Purchase Orders...</p>;
 
   return (
     <div style={styles.container}>
@@ -312,7 +288,7 @@ const PurchasingOrder = ({ internalUser }) => {
         <div style={styles.controlsContainer}>
             <div style={styles.searchInputContainer}>
                 <AiOutlineSearch style={styles.searchIcon} />
-                <input type="text" placeholder="Search current page..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
+                <input type="text" placeholder="Search POs..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
             </div>
             <div style={styles.dateFilters}>
                 <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={styles.dateInput} />
@@ -322,27 +298,23 @@ const PurchasingOrder = ({ internalUser }) => {
             </div>
         </div>
         <div style={styles.tableContainer}>
-            {loading && <div style={styles.loadingOverlay}><span>Loading...</span></div>}
             <table style={styles.table}>
-            <thead><tr><th style={styles.th}>PO #</th><th style={styles.th}>Date</th><th style={styles.th}>Supplier</th><th style={styles.th}>Total Amount</th><th style={styles.th}>Actions</th></tr></thead>
+            <thead><tr><th style={styles.th}>PO #</th><th style={styles.th}>Date</th><th style={styles.th}>Supplier</th><th style={styles.th}>Total</th><th style={styles.th}>Actions</th></tr></thead>
             <tbody>
                 {searchedOrders.map(order => (
                 <tr key={order.id}>
                     <td style={styles.td}>{order.poNumber}</td>
-                    <td style={styles.td}>{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString() : new Date(order.poDate).toLocaleDateString()}</td>
+                    <td style={styles.td}>{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString() : order.poDate}</td>
                     <td style={styles.td}>{order.supplierName}</td>
                     <td style={styles.td}>Rs. {Number(order.total).toFixed(2)}</td>
                     <td style={styles.td}>
                         <div style={{display: 'flex', gap: '10px'}}>
-                            <button onClick={() => { setSelectedOrder(order); setShowViewModal(true); }} style={styles.actionButton} title="View/Print PO"><AiOutlineEye /></button>
-                            {isAdmin && (
-                                <button onClick={() => handleDeleteOrder(order.id)} style={{...styles.actionButton, color: '#e74c3c'}} title="Delete PO"><AiOutlineDelete /></button>
-                            )}
+                            <button onClick={() => { setSelectedOrder(order); setShowViewModal(true); }} style={styles.actionButton}><AiOutlineEye /></button>
+                            {isAdmin && <button onClick={() => handleDeleteOrder(order.id)} style={{...styles.actionButton, color: '#e74c3c'}}><AiOutlineDelete /></button>}
                         </div>
                     </td>
                 </tr>
                 ))}
-                {searchedOrders.length === 0 && !loading && <tr><td colSpan="5" style={styles.noData}>No purchase orders found.</td></tr>}
             </tbody>
             </table>
         </div>
@@ -360,31 +332,25 @@ const PurchasingOrder = ({ internalUser }) => {
                 <div style={styles.formGrid}>
                     <div style={styles.formGroup}><label>PO Date</label><input type="date" name="poDate" value={form.poDate} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroup}><label>Supplier Name *</label><input name="supplierName" value={form.supplierName} onChange={handleFormChange} style={styles.input}/></div>
-                    <div style={styles.formGroup}><label>Supplier Address</label><input name="supplierAddress" value={form.supplierAddress} onChange={handleFormChange} style={styles.input}/></div>
-                    <div style={styles.formGroup}><label>Supplier Contact</label><input name="supplierContact" type="tel" placeholder="E.g., 0712345678" value={form.supplierContact} onChange={handleFormChange} style={styles.input}/></div>
+                    <div style={styles.formGroup}><label>Address</label><input name="supplierAddress" value={form.supplierAddress} onChange={handleFormChange} style={styles.input}/></div>
+                    <div style={styles.formGroup}><label>Contact</label><input name="supplierContact" value={form.supplierContact} onChange={handleFormChange} style={styles.input}/></div>
                     <div style={styles.formGroupFull}>
-                        <h4>Line Items</h4>
+                        <h4>Items</h4>
                         {form.lineItems.map((item, index) => (
                             <div key={index} style={styles.lineItem}>
-                                <Select options={itemsForDropdown} onChange={opt => handleItemSelect(index, opt)} placeholder="Select an item..." styles={{container: base => ({...base, flex: 3})}} />
+                                <Select options={itemsForDropdown} onChange={opt => handleItemSelect(index, opt)} placeholder="Select Item" styles={{container: base => ({...base, flex: 3})}} />
                                 <input type="number" placeholder="Qty" value={item.quantity} onChange={e => handleLineItemChange(index, 'quantity', e.target.value)} style={{...styles.input, flex: 1}}/>
                                 <input type="number" placeholder="Price" value={item.price} onChange={e => handleLineItemChange(index, 'price', e.target.value)} style={{...styles.input, flex: 1}}/>
-                                <input type="text" placeholder="Total" value={Number(item.total).toFixed(2)} style={{...styles.input, flex: 1, backgroundColor: '#f4f4f4'}} readOnly/>
                                 <button onClick={() => removeLineItem(index)} style={styles.deleteBtn}><AiOutlineDelete /></button>
                             </div>
                         ))}
-                        <button onClick={addLineItem} style={styles.addLineBtn}>+ Add Another Item</button>
-                    </div>
-                    <div style={{...styles.formGroupFull, display: 'flex', justifyContent: 'flex-end'}}>
-                        <div style={{width: '300px'}}>
-                            <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {form.subtotal.toFixed(2)}</span></div>
-                            <div style={styles.totalRow}><label>Tax</label><input type="number" value={form.tax} onChange={e => setForm({...form, tax: e.target.value})} style={{...styles.input, width: '100px'}}/></div>
-                            <div style={styles.totalRow}><label>Shipping</label><input type="number" value={form.shipping} onChange={e => setForm({...form, shipping: e.target.value})} style={{...styles.input, width: '100px'}}/></div>
-                            <div style={{...styles.totalRow, fontWeight: 'bold', borderTop: '2px solid black', paddingTop: '10px'}}><span>TOTAL</span><span>Rs. {form.total.toFixed(2)}</span></div>
-                        </div>
+                        <button onClick={addLineItem} style={styles.addLineBtn}>+ Add Item</button>
                     </div>
                 </div>
-                <div style={styles.modalButtons}><button style={styles.cancelButton} onClick={() => setShowCreateModal(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Purchase Order</button></div>
+                <div style={styles.modalButtons}>
+                    <button style={styles.cancelButton} onClick={() => setShowCreateModal(false)}>Cancel</button>
+                    <button style={styles.saveButton} onClick={handleSave}>Save PO</button>
+                </div>
             </div>
         </div>
       )}
@@ -396,7 +362,8 @@ const PurchasingOrder = ({ internalUser }) => {
                     <h3>Purchase Order Details</h3>
                     <button style={styles.closeButton} onClick={() => setShowViewModal(false)}>&times;</button>
                 </div>
-                <div ref={printComponentRef} style={styles.printView}>
+
+                <div ref={printComponentRef} style={{...styles.printView, overflowY: 'auto'}}>
                     <div style={styles.printHeader}>
                         {companyInfo?.companyLogo && <img src={companyInfo.companyLogo} alt="Logo" style={styles.printLogo} />}
                         <div>
@@ -405,11 +372,14 @@ const PurchasingOrder = ({ internalUser }) => {
                             <p style={{margin: 0}}>{companyInfo?.phone}</p>
                         </div>
                     </div>
-                    <h2 style={{textAlign: 'center', textDecoration: 'underline'}}>Purchase Order</h2>
+                    
+                    <h2 style={{textAlign: 'center', textDecoration: 'underline', margin: '20px 0'}}>PURCHASE ORDER</h2>
+                    
                     <div style={styles.poHeader}>
                         <div><strong>PO #:</strong> {selectedOrder.poNumber}</div>
-                        <div><strong>Date:</strong> {selectedOrder.createdAt?.toDate ? selectedOrder.createdAt.toDate().toLocaleDateString() : new Date(selectedOrder.poDate).toLocaleDateString()}</div>
+                        <div><strong>Date:</strong> {selectedOrder.createdAt?.toDate ? selectedOrder.createdAt.toDate().toLocaleDateString() : selectedOrder.poDate}</div>
                     </div>
+
                     <div style={styles.poDetails}>
                         <div>
                             <strong>Supplier Details:</strong><br/>
@@ -418,25 +388,36 @@ const PurchasingOrder = ({ internalUser }) => {
                             {selectedOrder.supplierContact}
                         </div>
                     </div>
-                    <table style={{...styles.table, marginTop: '20px'}}>
-                        <thead><tr><th style={styles.th}>Item</th><th style={styles.th}>Quantity</th><th style={styles.th}>Unit Price</th><th style={styles.th}>Total</th></tr></thead>
+
+                    <table style={{...styles.table, marginTop: '20px', width: '100%'}}>
+                        <thead><tr><th style={styles.th}>Item</th><th style={styles.th}>Qty</th><th style={styles.th}>Price</th><th style={styles.th}>Total</th></tr></thead>
                         <tbody>
                             {selectedOrder.lineItems.map((item, i) => (
-                                <tr key={i}><td style={styles.td}>{item.name}</td><td style={styles.td}>{item.quantity}</td><td style={styles.td}>Rs. {Number(item.price).toFixed(2)}</td><td style={styles.td}>Rs. {Number(item.total).toFixed(2)}</td></tr>
+                                <tr key={i}>
+                                    <td style={styles.td}>{item.name}</td>
+                                    <td style={styles.td}>{item.quantity}</td>
+                                    <td style={styles.td}>Rs. {Number(item.price).toFixed(2)}</td>
+                                    <td style={styles.td}>Rs. {Number(item.total).toFixed(2)}</td>
+                                </tr>
                             ))}
                         </tbody>
                     </table>
+
                     <div style={{display: 'flex', justifyContent: 'flex-end', marginTop: '20px'}}>
-                        <div style={{width: '250px'}}>
+                        <div style={{width: '100%', maxWidth: '200px'}}>
                             <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {Number(selectedOrder.subtotal).toFixed(2)}</span></div>
                             <div style={styles.totalRow}><span>Tax</span><span>Rs. {Number(selectedOrder.tax).toFixed(2)}</span></div>
                             <div style={styles.totalRow}><span>Shipping</span><span>Rs. {Number(selectedOrder.shipping).toFixed(2)}</span></div>
-                            <div style={{...styles.totalRow, fontWeight: 'bold', fontSize: '1.2em'}}><span>TOTAL</span><span>Rs. {Number(selectedOrder.total).toFixed(2)}</span></div>
+                            <div style={{...styles.totalRow, fontWeight: 'bold', borderTop: '2px solid black', marginTop: '5px'}}>
+                                <span>TOTAL</span><span>Rs. {Number(selectedOrder.total).toFixed(2)}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
+                
                 <div className="non-printable" style={styles.modalButtons}>
-                    <button onClick={() => window.print()} style={styles.saveButton}>Print PO</button>
+                    <button style={styles.cancelButton} onClick={() => setShowViewModal(false)}>Close</button>
+                    <button onClick={() => window.print()} style={{...styles.saveButton, backgroundColor: '#3498db'}}>Print PO</button>
                 </div>
             </div>
          </div>
@@ -449,74 +430,79 @@ const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
     headerContainer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
     header: { fontSize: '28px', fontWeight: '700', color: '#2c3e50' },
-    addButton: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
-    controlsContainer: { display: 'flex', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
+    addButton: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+    controlsContainer: { display: 'flex', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: '#fff', borderRadius: '8px' },
     searchInputContainer: { flex: 1, position: 'relative' },
     searchIcon: { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6c757d' },
-    searchInput: { width: '100%', padding: '10px 10px 10px 40px', borderRadius: '6px', border: '1px solid #ddd', boxSizing: 'border-box' },
+    searchInput: { width: '100%', padding: '10px 10px 10px 40px', borderRadius: '6px', border: '1px solid #ddd' },
     dateFilters: { display: 'flex', alignItems: 'center', gap: '8px' },
     dateInput: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd' },
-    filterButton: { display: 'flex', alignItems: 'center', gap: '5px', padding: '10px 15px', border: 'none', backgroundColor: '#34495e', color: 'white', borderRadius: '6px', cursor: 'pointer' },
-    tableContainer: { position: 'relative', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', overflowX: 'auto', minHeight: '300px' },
-    loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(255, 255, 255, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '8px' },
+    filterButton: { display: 'flex', alignItems: 'center', gap: '5px', padding: '10px 15px', backgroundColor: '#34495e', color: 'white', border: 'none', borderRadius: '6px' },
+    tableContainer: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', overflowX: 'auto' },
     table: { width: '100%', borderCollapse: 'collapse' },
-    th: { padding: '12px', textAlign: 'left', backgroundColor: '#f8f9fa', fontWeight: '600', color: '#495057' },
+    th: { padding: '12px', textAlign: 'left', backgroundColor: '#f8f9fa', color: '#495057', borderBottom: '2px solid #dee2e6' },
     td: { padding: '12px', borderBottom: '1px solid #eaeaea' },
-    noData: { padding: '40px', textAlign: 'center', color: '#6c757d' },
     actionButton: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#3498db' },
-    paginationControls: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', marginTop: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
-    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '40px' },
-    modal: { backgroundColor: 'white', borderRadius: '12px', width: '100%', maxHeight: '90vh', overflowY: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' },
-    modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #eaeaea', flexShrink: 0 },
-    closeButton: { background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#6c757d' },
-    formGrid: { padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', overflowY: 'auto' },
-    formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+    paginationControls: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginTop: '20px' },
+    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' },
+    modal: { backgroundColor: 'white', borderRadius: '12px', width: '100%', maxHeight: '95vh', display: 'flex', flexDirection: 'column' },
+    modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 24px', borderBottom: '1px solid #eaeaea' },
+    closeButton: { background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer' },
+    formGrid: { padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', overflowY: 'auto' },
+    formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
     formGroupFull: { gridColumn: 'span 2' },
-    input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px' },
-    lineItem: { display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' },
-    deleteBtn: { backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '6px', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    addLineBtn: { padding: '8px 12px', background: 'transparent', border: '1px dashed #3498db', color: '#3498db', borderRadius: '6px', cursor: 'pointer', width: 'fit-content' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', alignItems: 'center' },
-    modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },
-    saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
-    cancelButton: { padding: '12px 24px', backgroundColor: '#ecf0f1', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px' },
-    printView: { padding: '40px', fontFamily: 'serif' },
-    printHeader: { display: 'flex', alignItems: 'center', gap: '20px', borderBottom: '2px solid #000', paddingBottom: '20px', marginBottom: '30px' },
-    printLogo: { maxHeight: '80px', maxWidth: '150px' },
-    poHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
-    poDetails: { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' },
+    input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd' },
+    lineItem: { display: 'flex', gap: '10px', marginBottom: '10px' },
+    deleteBtn: { backgroundColor: '#e74c3c', color: 'white', border: 'none', borderRadius: '6px', padding: '10px' },
+    addLineBtn: { padding: '8px 12px', background: 'white', border: '1px dashed #3498db', color: '#3498db', borderRadius: '6px', cursor: 'pointer' },
+    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '5px 0' },
+    modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '15px 24px', borderTop: '1px solid #eaeaea' },
+    saveButton: { padding: '10px 20px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+    cancelButton: { padding: '10px 20px', backgroundColor: '#ecf0f1', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+    printView: { padding: '30px', fontFamily: 'serif' },
+    printHeader: { display: 'flex', alignItems: 'center', gap: '20px', borderBottom: '2px solid #000', paddingBottom: '15px' },
+    printLogo: { maxHeight: '60px' },
+    poHeader: { display: 'flex', justifyContent: 'space-between', margin: '20px 0' },
+    poDetails: { marginBottom: '20px' },
 };
 
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @media print {
-    body {
-        background-color: #fff !important;
+    @page {
+      size: A5;
+      margin: 10mm;
+    }
+    body * {
+      visibility: hidden;
+    }
+    .print-overlay, .print-overlay * {
+      visibility: visible;
+    }
+    .print-overlay {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      background: white !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    .printable-content {
+      width: 100% !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      border: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
     }
     .non-printable {
       display: none !important;
     }
-    .print-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: white;
-      z-index: 9999;
-      overflow: visible;
-      padding: 0;
+    /* Fixed right-side cutoff by shrinking container padding on A5 */
+    div[style*="padding: 30px"] {
+        padding: 5px !important;
     }
-    .printable-content {
-      box-shadow: none !important;
-      border: none !important;
-      max-width: 100% !important;
-      max-height: 100% !important;
-    }
-  }
-  @page {
-    size: A5;
-    margin: 15mm;
   }
 `;
 document.head.appendChild(styleSheet);
