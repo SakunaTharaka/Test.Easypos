@@ -1,7 +1,6 @@
 /* global qz */
-import React, { useEffect, useState, useRef, useCallback } from "react";
-// --- Corrected import path ---
-import { auth, db } from "../../firebase"; // Adjust path if needed
+import React, { useEffect, useState, useRef } from "react";
+import { auth, db } from "../../firebase"; 
 import {
   collection,
   doc,
@@ -10,1445 +9,620 @@ import {
   query,
   where,
   serverTimestamp,
-  runTransaction,
-  orderBy, // Import orderBy
-  onSnapshot // Import onSnapshot for real-time updates
+  addDoc,
+  orderBy,
+  updateDoc,
+  deleteDoc
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
-import { AiOutlineSearch, AiOutlineEye, AiOutlinePrinter, AiOutlineDelete } from 'react-icons/ai'; // Added icons
+import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaMoneyBillWave, FaEye } from 'react-icons/fa';
 
-// PrintableLayout component - Modified for Orders with Advance Amount
-const PrintableLayout = ({ order, companyInfo, onImageLoad }) => {
-    if (!order || !Array.isArray(order.items)) return null;
-    const subtotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const total = order.total || subtotal; // Use saved total if available
-    const advance = order.advanceAmount || 0;
-    const balance = total - advance;
-    const createdAtDate = order.createdAt instanceof Date ? order.createdAt : order.createdAt?.toDate();
-    const deliveryDateTime = order.deliveryDateTime ? new Date(order.deliveryDateTime) : null;
-  
-    return (
-      <div style={printStyles.invoiceBox}>
-        {/* Company Logo - centered */}
-        {companyInfo?.companyLogo && (
-          <div style={printStyles.logoContainer}>
-            <img 
-              src={companyInfo.companyLogo} 
-              style={printStyles.logo} 
-              alt="Company Logo" 
-              onLoad={onImageLoad} 
-              onError={onImageLoad} 
-            />
-          </div>
-        )}
-        
-        {/* Company Name */}
-        <h1 style={printStyles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
-        
-        {/* Company Address */}
-        <p style={printStyles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
-        
-        {/* Phone */}
-        {companyInfo?.phone && <p style={printStyles.headerText}>{companyInfo.phone}</p>}
-        
-        {/* Order Meta Info */}
-        <div style={printStyles.metaSection}>
-          <p style={printStyles.metaText}><strong>Order #:</strong> {order.orderNumber}</p>
-          <p style={printStyles.metaText}><strong>Date Placed:</strong> {createdAtDate?.toLocaleDateString()}</p>
-           {/* Delivery Date/Time */}
-           {deliveryDateTime && (
-             <p style={printStyles.metaText}><strong>Delivery Date:</strong> {deliveryDateTime.toLocaleString()}</p>
-           )}
-          <p style={printStyles.metaText}><strong>Customer:</strong> {order.customerName}</p>
-          {/* Customer Telephone */}
-          {order.customerTelephone && (
-             <p style={printStyles.metaText}><strong>Telephone:</strong> {order.customerTelephone}</p>
-          )}
-          <p style={printStyles.metaText}><strong>Placed By:</strong> {order.placedBy}</p>
-        </div>
-
-        {/* Remarks */}
-        {order.remarks && (
-          <div style={printStyles.remarksSection}>
-             <p style={printStyles.remarksText}><strong>Remarks:</strong> {order.remarks}</p>
-          </div>
-        )}
-        
-        {/* Items Table */}
-        <table style={printStyles.itemsTable}>
-          <thead>
-            <tr>
-              <th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th>
-              <th style={{ ...printStyles.th, ...printStyles.thQty }}>Qty</th>
-              <th style={{ ...printStyles.th, ...printStyles.thRate }}>Rate</th>
-              <th style={{ ...printStyles.th, ...printStyles.thTotal }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.items.map((item, index) => (
-              <tr key={index}>
-                <td style={printStyles.tdItem}>{item.itemName}</td>
-                <td style={printStyles.tdQty}>{item.quantity}</td>
-                <td style={printStyles.tdRate}>{item.price.toFixed(2)}</td>
-                <td style={printStyles.tdTotal}>{(item.quantity * item.price).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        {/* Totals Section with Advance */}
-        <div style={printStyles.totalsSection}>
-          <div style={printStyles.totalRow}>
-            <span>Subtotal:</span>
-            <span>Rs. {subtotal.toFixed(2)}</span>
-          </div>
-          
-          <div style={printStyles.grandTotalRow}>
-            <span>Grand Total:</span>
-            <span>Rs. {total.toFixed(2)}</span>
-          </div>
-
-           <div style={printStyles.dashedLine}></div>
-
-           <div style={printStyles.totalRow}>
-            <span>Advance Paid:</span>
-            <span>Rs. {advance.toFixed(2)}</span>
-           </div>
-
-           <div style={printStyles.balanceRow}> {/* Use balanceRow style */}
-            <span>Balance Due:</span>
-            <span>Rs. {balance.toFixed(2)}</span>
-           </div>
-        </div>
-        
-        <div style={printStyles.dashedLine}></div>
-        
-        {/* Footer */}
-        <div style={printStyles.footer}>
-          <p>Thank you for your order!</p>
-        </div>
-        
-        {/* Credit Footer */}
-        <div style={printStyles.creditFooter}>
-          <p>Wayne Software Solutions | 078 722 3407</p>
-        </div>
-      </div>
-    );
-};
-
-// BrowserPrintComponent (Adapts based on layout passed) - No change needed
-const BrowserPrintComponent = ({ order, companyInfo, onPrintFinished }) => {
-    // ... (Keep internal logic, but pass `order` to `PrintableLayout`) ...
-    const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
-    const isPrintReady = order && (isImageLoaded || !companyInfo?.companyLogo);
-
-    useEffect(() => {
-        document.body.classList.add('print-modal-active');
-        return () => {
-            document.body.classList.remove('print-modal-active');
-        };
-    }, []);
-
-    useEffect(() => {
-        const printStylesCSS = `
-            @page { margin: 0; size: 80mm auto; }
-            * { margin: 0 !important; padding: 0 !important; }
-            @media print {
-                body { background-color: #fff !important; margin: 0 !important; padding: 0 !important; }
-                html { margin: 0 !important; padding: 0 !important; }
-                body.print-modal-active > * { visibility: hidden !important; }
-                body.print-modal-active .print-preview-overlay,
-                body.print-modal-active .print-preview-overlay * { visibility: visible !important; }
-                body.print-modal-active .print-preview-overlay {
-                    position: fixed !important; left: 0 !important; top: 0 !important;
-                    width: 100% !important; height: 100% !important; display: block !important;
-                    margin: 0 !important; padding: 0 !important;
-                }
-                .print-area-container {
-                    box-shadow: none !important; margin: 0 !important; padding: 0 !important;
-                    width: 100% !important; transform: none !important;
-                }
-                .print-area { margin: 0 !important; padding: 0 !important; }
-                .no-print { display: none !important; }
-            }
-        `;
-        
-        const styleElement = document.createElement('style');
-        styleElement.id = 'browser-print-styles';
-        styleElement.innerHTML = printStylesCSS;
-        document.head.appendChild(styleElement);
-
-        return () => {
-            const style = document.getElementById('browser-print-styles');
-            if (style && style.parentNode) {
-                style.parentNode.removeChild(style);
-            }
-        };
-    }, []);
-    
-    useEffect(() => {
-        if (isPrintReady) {
-            const timer = setTimeout(() => window.print(), 250);
-            return () => clearTimeout(timer);
-        }
-    }, [isPrintReady]);
-
-    useEffect(() => {
-        const handleAfterPrint = () => onPrintFinished();
-        const handleKeyDown = (e) => {
-             if (e.key === 'Escape') {
-                e.preventDefault();
-                onPrintFinished();
-            }
-        };
-
-        window.addEventListener('afterprint', handleAfterPrint);
-        window.addEventListener('keydown', handleKeyDown);
-        return () => {
-            window.removeEventListener('afterprint', handleAfterPrint);
-            window.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [onPrintFinished]);
-
-    return (
-        <div className="print-preview-overlay" style={styles.confirmOverlay}>
-            <div className="print-area-container" style={{ width: '80mm', background: 'white', padding: '0', margin: '0' }}>
-                <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#eee', marginBottom: '10px', borderRadius: '4px' }}>
-                    {isPrintReady ? 'Printing... (Press ESC to cancel)' : 'Loading preview...'}
-                </div>
-                <div className="print-area">
-                    {order ? 
-                        <PrintableLayout 
-                            order={order} // Pass order here
-                            companyInfo={companyInfo} 
-                            onImageLoad={() => setIsImageLoaded(true)} 
-                        /> 
-                        : <p>Loading...</p>
-                    }
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// QZ Tray Print Modal (Adapts based on layout passed) - No change needed
-const QZPrintModal = ({ order, companyInfo, onClose, isQzReady }) => {
-    // ... (Keep internal logic, but pass `order` to `PrintableLayout`) ...
-    const [status, setStatus] = useState('Initializing...');
-    const [isConnecting, setIsConnecting] = useState(true);
-    const [printers, setPrinters] = useState([]);
-    const [selectedPrinter, setSelectedPrinter] = useState('');
-    const [isPrinting, setIsPrinting] = useState(false);
-    const [autoPrintingStatus, setAutoPrintingStatus] = useState('');
-    const printableRef = useRef(null);
-
-    const handlePrint = useCallback(async () => {
-        if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) {
-            alert('QZ Tray is not connected.');
-            return;
-        }
-        if (!selectedPrinter) {
-            alert('Please select a printer.');
-            return;
-        }
-
-        setIsPrinting(true);
-
-        try {
-            qz.security.setSignaturePromise(async (toSign) => {
-                try {
-                    console.log("Requesting signature for:", toSign);
-                    const functions = getFunctions();
-                    const getQzSignature = httpsCallable(functions, 'getQzSignature');
-                    const result = await getQzSignature({ requestToSign: toSign });
-                    console.log("Signature received from server.");
-                    return result.data.signature;
-                } catch (error) {
-                    console.error("Signature promise error:", error);
-                    alert("Failed to get print signature from the server.");
-                    return null;
-                }
-            });
-
-            const config = qz.configs.create(selectedPrinter, { units: 'mm', width: 80 });
-            const printData = [{ type: 'html', format: 'plain', data: printableRef.current.innerHTML }];
-            
-            await qz.print(config, printData);
-            alert('Print successful!'); 
-            onClose();
-
-        } catch (err) {
-            console.error(err);
-            alert('Printing failed: ' + err.toString());
-            setAutoPrintingStatus('');
-        } finally {
-            setIsPrinting(false);
-        }
-    }, [selectedPrinter, onClose]);
-
-    useEffect(() => {
-        if (!isQzReady) {
-            setStatus('Waiting for QZ Tray library...');
-            return;
-        }
-
-        const findPrintersAndPrint = () => {
-            qz.printers.find().then(foundPrinters => {
-                setPrinters(foundPrinters);
-                const savedPrinter = localStorage.getItem('selectedPrinter');
-
-                if (savedPrinter && foundPrinters.includes(savedPrinter)) {
-                    setAutoPrintingStatus(`Found saved printer: "${savedPrinter}". Printing automatically...`);
-                    setSelectedPrinter(savedPrinter);
-                } else {
-                    setIsConnecting(false);
-                    if (foundPrinters.length > 0) {
-                        const defaultPrinter = foundPrinters.find(p => p.toLowerCase().includes('tm-t') || p.toLowerCase().includes('80mm')) || foundPrinters[0];
-                        setSelectedPrinter(defaultPrinter);
-                    }
-                }
-            }).catch(err => {
-                console.error(err);
-                setStatus('Error finding printers.');
-                setIsConnecting(false);
-            });
-        };
-        
-        setStatus('Connecting to QZ Tray...');
-        if (!qz.websocket.isActive()) {
-            qz.websocket.connect().then(() => {
-                setStatus('Connected to QZ Tray.');
-                findPrintersAndPrint();
-            }).catch(err => {
-                console.error(err);
-                setStatus('Connection Failed. Is QZ Tray running?');
-                setIsConnecting(false);
-            });
-        } else {
-            setStatus('Connected to QZ Tray.');
-            findPrintersAndPrint();
-        }
-
-        qz.websocket.onClosed = () => setStatus('Connection Closed. Please ensure QZ Tray is running.');
-        qz.websocket.onError = () => setStatus('Connection Error. Is QZ Tray running?');
-        
-        return () => {
-             if (qz && qz.websocket) {
-                qz.websocket.onClosed = null;
-                qz.websocket.onError = null;
-            }
-        }
-    }, [isQzReady]);
-
-    useEffect(() => {
-        if (autoPrintingStatus && selectedPrinter) {
-            const timer = setTimeout(() => {
-                handlePrint();
-            }, 500); 
-            return () => clearTimeout(timer);
-        }
-    }, [autoPrintingStatus, selectedPrinter, handlePrint]);
-
-    useEffect(() => {
-        if (selectedPrinter) {
-            localStorage.setItem('selectedPrinter', selectedPrinter);
-        }
-    }, [selectedPrinter]);
-
-    const showControls = !isConnecting && !autoPrintingStatus;
-
-    return (
-        <div style={styles.confirmOverlay}>
-            <div style={{...styles.confirmPopup, minWidth: '450px'}}>
-                <h4>Direct Print with QZ Tray</h4>
-                <div style={styles.qzStatus}>
-                    <strong>Status:</strong>
-                    <span style={{ color: (isQzReady && qz.websocket && qz.websocket.isActive()) ? '#10b981' : '#ef4444', marginLeft: '8px' }}>
-                         {autoPrintingStatus || status}
-                    </span>
-                </div>
-
-                {showControls && (
-                    <div style={styles.qzControls}>
-                        <label style={styles.label} htmlFor="printer-select">Select a printer to save for next time</label>
-                        <select
-                            id="printer-select"
-                            value={selectedPrinter}
-                            onChange={e => setSelectedPrinter(e.target.value)}
-                            style={{ ...styles.input, width: '100%', marginBottom: '20px' }}
-                            disabled={printers.length === 0}
-                        >
-                            {printers.length === 0 ? <option>No printers found</option> : printers.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                        
-                        <button 
-                            onClick={handlePrint} 
-                            disabled={isPrinting || !selectedPrinter}
-                            style={{...styles.saveButton, ...(isPrinting || !selectedPrinter ? styles.saveButtonDisabled : {})}}
-                        >
-                           {isPrinting ? 'Printing...' : 'Print Order'} 
-                        </button>
-                    </div>
-                )}
-                
-                {autoPrintingStatus && (
-                     <div style={styles.savingSpinner}></div>
-                )}
-
-                <button onClick={onClose} style={styles.closeButton}>Cancel</button>
-                
-                {/* Ensure PrintableLayout uses `order` prop */}
-                <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }} ref={printableRef}>
-                   {order && <PrintableLayout order={order} companyInfo={companyInfo} />} 
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// Main Orders Component - Restructured
 const Orders = ({ internalUser }) => {
-  const [customers, setCustomers] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  // Data State
+  const [priceCategories, setPriceCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null); 
+  const [items, setItems] = useState([]); 
   const [checkout, setCheckout] = useState([]);
-  const [items, setItems] = useState([]);
-  const [filteredItems, setFilteredItems] = useState([]);
+  const [settings, setSettings] = useState(null);
+  const [invoiceNumber, setInvoiceNumber] = useState("Loading...");
+
+  // Order List State
+  const [savedOrders, setSavedOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [showCompletedOrders, setShowCompletedOrders] = useState(false);
+
+  // Payment & Modal State
+  const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
+  const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
+  const [pendingAction, setPendingAction] = useState(null); 
+  const paymentOptions = ['Cash', 'Card', 'Online'];
+
+  // View Modal State
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  // Order Details
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [remarks, setRemarks] = useState(""); 
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [deliveryCharge, setDeliveryCharge] = useState(""); 
+
+  // Processing State
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Inputs
   const [itemInput, setItemInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [orderNumber, setOrderNumber] = useState(""); 
+  const [filteredItems, setFilteredItems] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  // Removed isFullscreen state
-  const [checkoutFocusMode, setCheckoutFocusMode] = useState(false);
-  const [highlightedCheckoutIndex, setHighlightedCheckoutIndex] = useState(-1);
-  const [settings, setSettings] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [shiftProductionEnabled, setShiftProductionEnabled] = useState(false);
-  const [availableShifts, setAvailableShifts] = useState([]);
-  const [selectedShift, setSelectedShift] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [tempSelectedItem, setTempSelectedItem] = useState(null);
   
-  const [showQZPrintModal, setShowQZPrintModal] = useState(false);
-  const [orderToPrint, setOrderToPrint] = useState(null); 
-  const [isQzReady, setIsQzReady] = useState(false);
-  
-  const [isPrintingBrowser, setIsPrintingBrowser] = useState(false);
-
-  // --- Order details states ---
-  const [deliveryDateTime, setDeliveryDateTime] = useState('');
-  const [customerTelephone, setCustomerTelephone] = useState('');
-  const [remarks, setRemarks] = useState('');
-  const [advanceAmount, setAdvanceAmount] = useState(''); // New state for advance
-  const [customerNameInput, setCustomerNameInput] = useState(''); // New state for manual customer name
-
-  // --- Saved Orders state ---
-  const [savedOrders, setSavedOrders] = useState([]);
-  const [filteredSavedOrders, setFilteredSavedOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [orderSearchTerm, setOrderSearchTerm] = useState('');
-  const [viewOrderModalOpen, setViewOrderModalOpen] = useState(false);
-  const [orderToView, setOrderToView] = useState(null);
-
-  // Refs
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
-  const deliveryDateTimeRef = useRef(null); 
-  const telephoneRef = useRef(null); 
-  const remarksRef = useRef(null); 
-  const advanceAmountRef = useRef(null); // Ref for advance amount
-  const customerNameInputRef = useRef(null); // Ref for manual customer name
-  
-  // QZ Tray script loading (No change)
-  useEffect(() => {
-    const loadScript = (src, id) => {
-      return new Promise((resolve, reject) => {
-        if (document.getElementById(id)) {
-          resolve();
-          return;
-        }
-        const script = document.createElement('script');
-        script.src = src;
-        script.id = id;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Script load error for ${src}`));
-        document.head.appendChild(script);
-      });
-    };
 
-    loadScript('https://cdn.jsdelivr.net/npm/qz-tray@2.2.3/qz-tray.js', 'qz-tray-lib')
-      .then(() => {
-        console.log('QZ Tray library loaded successfully.');
-        setIsQzReady(true);
-      })
-      .catch(error => {
-        console.error('Failed to load QZ Tray library:', error);
-        setIsQzReady(false);
-      });
-  }, []);
+  const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-  // Fetch Provisional Order Number (No change)
-  const fetchProvisionalOrderNumber = async () => {
-    const user = auth.currentUser;
-    if (!user) {
-        setOrderNumber("ORD-ERROR"); 
-        return;
-    }
-    const today = new Date();
-    const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const counterRef = doc(db, user.uid, "counters"); 
-    try {
-        const counterDoc = await getDoc(counterRef); 
-        const dailyCounter = counterDoc.exists() ? counterDoc.data().orderCounters?.[datePrefix] || 0 : 0; 
-        const nextSeq = dailyCounter + 1; 
-        const provisionalOrdNum = `ORD-${datePrefix}-${String(nextSeq).padStart(4, "0")}`; 
-        setOrderNumber(provisionalOrdNum); 
-    } catch (err) {
-        console.error("Error fetching provisional order number:", err);
-        setOrderNumber(`ORD-${datePrefix}-ERR`);
-    }
-  };
-  
-  // useEffect on load (No change)
+  // 1. Initial Load & Fetch Saved Orders
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-    const uid = user.uid;
+    if(!uid) return;
     const initialize = async () => {
-      await fetchProvisionalOrderNumber(); 
-      
-      const customersColRef = collection(db, uid, "customers", "customer_list");
-      const customerSnap = await getDocs(query(customersColRef));
-      const customerOptions = customerSnap.docs.map(d => ({ value: d.id, label: d.data().name, ...d.data() }));
-      setCustomers(customerOptions);
-      
+      fetchProvisionalInvoiceNumber();
       const settingsSnap = await getDoc(doc(db, uid, "settings"));
       if (settingsSnap.exists()) {
-        const settingsData = settingsSnap.data();
-        setSettings(settingsData); 
-        // Auto-select default customer removed for manual entry option
-        // if (settingsData.defaultCustomerId) {
-        //   const defaultCustomer = customerOptions.find(c => c.value === settingsData.defaultCustomerId);
-        //   if (defaultCustomer) setSelectedCustomer(defaultCustomer);
-        // }
-        if (settingsData.useShiftProduction === true) {
-          setShiftProductionEnabled(true);
-          const shifts = settingsData.productionShifts || [];
-          setAvailableShifts(shifts);
-          const savedShift = localStorage.getItem('savedSelectedShift');
-          if (savedShift && shifts.includes(savedShift)) {
-            setSelectedShift(savedShift);
-          }
-        }
+        const data = settingsSnap.data();
+        setSettings(data);
       }
+      const catCol = collection(db, uid, "price_categories", "categories");
+      const snap = await getDocs(catCol);
+      setPriceCategories(snap.docs.map(d => ({ value: d.id, label: d.data().name })));
     };
     initialize();
-  }, []);
+    fetchSavedOrders();
+  }, [uid]);
 
-   // Update Telephone when customer changes (No change)
-   useEffect(() => {
-     if (selectedCustomer && selectedCustomer.phone) {
-       setCustomerTelephone(selectedCustomer.phone);
-       setCustomerNameInput(selectedCustomer.label); // Also fill manual name input
-     } else {
-       // Don't clear telephone if manually entered
-       // setCustomerTelephone(''); 
-       // Don't clear name input if manually entered
-       // setCustomerNameInput('');
-     }
-   }, [selectedCustomer]);
-  
-  // Other hooks (shift, item fetching, dropdown logic - No change)
+  const fetchSavedOrders = async () => {
+      setLoadingOrders(true);
+      const q = query(collection(db, uid, "data", "orders"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      setSavedOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoadingOrders(false);
+  };
+
+  // 2. Fetch Items
   useEffect(() => {
-    if (selectedShift) {
-        localStorage.setItem('savedSelectedShift', selectedShift);
-    }
-  }, [selectedShift]);
-
-  useEffect(() => {
-    const fetchItemsForCustomer = async () => {
-      const user = auth.currentUser;
-      // Fetch items even if no customer is selected (using a default category or all items)
-      if (!user) { 
-        setItems([]); 
-        return; 
-      }
-      
-      let itemsQuery;
-      const pricedItemsColRef = collection(db, user.uid, "price_categories", "priced_items");
-
-      // Use selected customer's category if available, otherwise fetch all? (Needs decision)
-      // For now, let's only fetch if a customer IS selected.
-      if (selectedCustomer?.priceCategoryId) {
-          itemsQuery = query(pricedItemsColRef, where("categoryId", "==", selectedCustomer.priceCategoryId));
-          const itemsSnap = await getDocs(itemsQuery);
-          setItems(itemsSnap.docs.map(d => ({ ...d.data(), id: d.id })));
-      } else {
-          // Maybe fetch from a 'standard' price category if no customer?
-          // Or fetch *all* priced items? Be careful with performance.
-          // For now, clear items if no customer is selected.
-          setItems([]); 
-      }
+    const fetchItems = async () => {
+        setItems([]);
+        if (!selectedCategory || !uid) return;
+        const itemsRef = collection(db, uid, "price_categories", "priced_items");
+        const q = query(itemsRef, where("categoryId", "==", selectedCategory.value));
+        const snap = await getDocs(q);
+        setItems(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     };
-    fetchItemsForCustomer();
-  }, [selectedCustomer]);
+    fetchItems();
+  }, [selectedCategory, uid]);
 
+  // 3. Search Logic
   useEffect(() => {
     if (!itemInput.trim()) { 
-      setFilteredItems([]); 
-      setShowDropdown(false); 
-      return; 
+        setFilteredItems([]); 
+        setShowDropdown(false); 
+        return; 
     }
-    const filtered = items.filter(i => 
-      i.itemName.toLowerCase().includes(itemInput.toLowerCase()) || 
-      i.itemSKU?.toLowerCase().includes(itemInput.toLowerCase())
-    );
+    if (tempSelectedItem && itemInput === tempSelectedItem.itemName) { return; }
+
+    const lower = itemInput.toLowerCase();
+    const filtered = items.filter(i => i.itemName.toLowerCase().includes(lower) || (i.itemSKU && i.itemSKU.toLowerCase().includes(lower)));
     setFilteredItems(filtered);
-    setSelectedIndex(0);
     setShowDropdown(filtered.length > 0);
-  }, [itemInput, items]);
+    setSelectedIndex(0);
+  }, [itemInput, items, tempSelectedItem]);
 
-  // Fetch Saved Orders (New useEffect)
+  // 4. Keyboard Nav (Payment Modal - Invoice Style: Left/Right)
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-    const uid = user.uid;
-    const ordersColRef = collection(db, uid, "orders", "order_list");
-    const q = query(ordersColRef, orderBy("createdAt", "desc")); // Order by newest first
-
-    setOrdersLoading(true);
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const ordersData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setSavedOrders(ordersData);
-        setFilteredSavedOrders(ordersData); // Initialize filtered list
-        setOrdersLoading(false);
-    }, (error) => {
-        console.error("Error fetching saved orders:", error);
-        setOrdersLoading(false);
-        // Handle error display if needed
-    });
-
-    return () => unsubscribe(); // Cleanup listener on unmount
-  }, []);
-
-  // Filter Saved Orders (New useEffect)
-  useEffect(() => {
-      if (!orderSearchTerm) {
-          setFilteredSavedOrders(savedOrders);
-          return;
-      }
-      const lowerSearch = orderSearchTerm.toLowerCase();
-      const filtered = savedOrders.filter(order => 
-          order.customerName?.toLowerCase().includes(lowerSearch) ||
-          order.orderNumber?.toLowerCase().includes(lowerSearch) ||
-          order.customerTelephone?.includes(lowerSearch) ||
-          order.remarks?.toLowerCase().includes(lowerSearch) ||
-          order.items?.some(item => item.itemName.toLowerCase().includes(lowerSearch))
-      );
-      setFilteredSavedOrders(filtered);
-  }, [orderSearchTerm, savedOrders]);
-
-  
-  // Updated Shortcuts - Added F6 (Advance), F7 (Name)
-  useEffect(() => {
-    const handleShortcuts = (e) => {
-      if (isSaving || showQZPrintModal || isPrintingBrowser || viewOrderModalOpen) return; // Prevent during modals/saving
-      
-      if (e.altKey && e.key.toLowerCase() === "s") { 
-        e.preventDefault(); 
-        handleSaveOrder(); 
-      }
-       if (e.key === "F4") { // Delivery Date
-          e.preventDefault(); 
-          setCheckoutFocusMode(false); 
-          telephoneRef.current?.blur(); 
-          remarksRef.current?.blur();
-          advanceAmountRef.current?.blur();
-          customerNameInputRef.current?.blur();
-          deliveryDateTimeRef.current?.focus(); 
-      }
-       if (e.key === "F5") { // Telephone
-          e.preventDefault(); 
-          setCheckoutFocusMode(false); 
-          deliveryDateTimeRef.current?.blur();
-          remarksRef.current?.blur();
-          advanceAmountRef.current?.blur();
-          customerNameInputRef.current?.blur();
-          telephoneRef.current?.focus(); 
-       }
-        if (e.key === "F6") { // Advance Amount
-          e.preventDefault(); 
-          setCheckoutFocusMode(false); 
-          deliveryDateTimeRef.current?.blur();
-          telephoneRef.current?.blur(); 
-          remarksRef.current?.blur();
-          customerNameInputRef.current?.blur();
-          advanceAmountRef.current?.focus(); 
-      }
-       if (e.key === "F7") { // Manual Customer Name
-          e.preventDefault(); 
-          setCheckoutFocusMode(false); 
-          deliveryDateTimeRef.current?.blur();
-          telephoneRef.current?.blur(); 
-          remarksRef.current?.blur();
-          advanceAmountRef.current?.blur();
-          customerNameInputRef.current?.focus(); 
-      }
-      // F8 could be Remarks
-      if (e.key === "F10") { // Checkout List
-        e.preventDefault(); 
-        deliveryDateTimeRef.current?.blur();
-        telephoneRef.current?.blur();
-        remarksRef.current?.blur();
-        advanceAmountRef.current?.blur();
-        customerNameInputRef.current?.blur();
-        setCheckoutFocusMode(prev => !prev); 
-      }
-       if (e.key === 'Escape') { 
-          e.preventDefault(); 
-          // Close dropdown or exit focus mode
-          if (showDropdown) {
-              setShowDropdown(false);
-          } else if (checkoutFocusMode) {
-              setCheckoutFocusMode(false); 
-          } else {
-              // Optionally blur currently focused input
-              if(document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          }
+    const handlePaymentConfirmKeyDown = (e) => {
+        if (!showPaymentConfirm) return;
+        const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
+        
+        if (e.key === 'ArrowRight') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
         }
+        if (e.key === 'ArrowLeft') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex - 1 + paymentOptions.length) % paymentOptions.length]);
+        }
+        
+        if (e.key === 'Enter') handleProcessPayment(confirmPaymentMethod);
+        if (e.key === 'Escape') { setShowPaymentConfirm(false); setPendingAction(null); }
     };
-    window.addEventListener("keydown", handleShortcuts);
-    return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, shiftProductionEnabled, selectedShift, isSaving, showQZPrintModal, isPrintingBrowser, checkoutFocusMode, showDropdown, viewOrderModalOpen]); 
+    window.addEventListener('keydown', handlePaymentConfirmKeyDown);
+    return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
+  }, [showPaymentConfirm, confirmPaymentMethod]);
 
-  // Updated Focus Logic
-  useEffect(() => {
-    if (checkoutFocusMode) { 
-      // Blur all other inputs when checkout is focused
-      itemInputRef.current?.blur(); 
-      qtyInputRef.current?.blur(); 
-      deliveryDateTimeRef.current?.blur();
-      telephoneRef.current?.blur();
-      remarksRef.current?.blur();
-      advanceAmountRef.current?.blur();
-      customerNameInputRef.current?.blur();
-      setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); 
-    }
-    else { 
-      // Default back to item input unless a specific field was just focused
-      const focusedElement = document.activeElement;
-      const isOtherInputFocused = [
-          deliveryDateTimeRef.current, 
-          telephoneRef.current, 
-          remarksRef.current,
-          advanceAmountRef.current,
-          customerNameInputRef.current
-      ].includes(focusedElement);
+  const fetchProvisionalInvoiceNumber = async () => {
+    if(!uid) return;
+    const today = new Date();
+    const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const counterDoc = await getDoc(doc(db, uid, "counters"));
+    const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+    setInvoiceNumber(`ORD-${datePrefix}-${String(dailyCounter + 1).padStart(4, "0")}`);
+  };
 
-      if (!isOtherInputFocused) {
-         itemInputRef.current?.focus(); 
-      }
-      setHighlightedCheckoutIndex(-1); 
-    }
-  }, [checkoutFocusMode, checkout.length]);
-
-  // Checkout Navigation (No changes needed)
-  useEffect(() => {
-    const handleCheckoutNav = (e) => {
-        if (!checkoutFocusMode) return;
-        if (e.key === 'ArrowDown') { 
-          e.preventDefault(); 
-          setHighlightedCheckoutIndex(prev => Math.min(prev + 1, checkout.length - 1)); 
-        }
-        if (e.key === 'ArrowUp') { 
-          e.preventDefault(); 
-          setHighlightedCheckoutIndex(prev => Math.max(prev - 1, 0)); 
-        }
-        if (e.key === 'Delete') {
-            e.preventDefault();
-            if (highlightedCheckoutIndex > -1) {
-                removeCheckoutItem(highlightedCheckoutIndex);
-                setHighlightedCheckoutIndex(prev => Math.max(0, Math.min(prev, checkout.length - 2)));
-            }
-        }
-        // Escape is handled in the main shortcut listener now
-    };
-    window.addEventListener('keydown', handleCheckoutNav);
-    return () => window.removeEventListener('keydown', handleCheckoutNav);
-  }, [checkoutFocusMode, checkout, highlightedCheckoutIndex]);
-  
-  // Item/Qty handling functions (No changes needed)
   const handleItemKeyDown = (e) => {
-    if (e.key === "ArrowDown") { 
-      e.preventDefault(); 
-      setSelectedIndex(prev => (prev + 1) % filteredItems.length); 
-    }
-    else if (e.key === "ArrowUp") { 
-      e.preventDefault(); 
-      setSelectedIndex(prev => (prev - 1 + filteredItems.length) % filteredItems.length); 
-    }
-    else if (e.key === "Enter") { 
-      e.preventDefault(); 
-      if (filteredItems[selectedIndex]) handleItemSelect(filteredItems[selectedIndex]); 
-    }
-     // Escape is handled in the main shortcut listener
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIndex(prev => (prev < filteredItems.length - 1 ? prev + 1 : prev)); } 
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIndex(prev => (prev > 0 ? prev - 1 : 0)); } 
+    else if (e.key === 'Enter') { e.preventDefault(); if (filteredItems.length > 0 && selectedIndex >= 0) selectItemAndJumpToQty(filteredItems[selectedIndex]); }
   };
-  
-  const handleItemSelect = (item) => {
-    setItemInput(item.itemName);
-    setShowDropdown(false);
-    setTimeout(() => qtyInputRef.current?.focus(), 50);
-  };
-  
-  const handleQtyKeyDown = (e) => { 
-    if (e.key === "Enter") { 
-      e.preventDefault(); 
-      addItemToCheckout(); 
-    } 
-  };
-  
-  const handleQtyChange = (e) => {
-    const value = e.target.value;
-    if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) { 
-      setQtyInput(value); 
-    }
-  };
-  
-  const addItemToCheckout = () => {
-    // Ensure an item is actually selected or found before adding
-    let itemData = items.find(i => i.itemName.toLowerCase() === itemInput.toLowerCase());
-     if (!itemData && filteredItems[selectedIndex]) { // Fallback to selected index if direct match fails
-       itemData = filteredItems[selectedIndex];
-     }
-    if (!itemData) return alert("Item not found or ambiguous. Please select from the list.");
-    if (!qtyInput || isNaN(qtyInput) || qtyInput <= 0) return alert("Please enter a valid quantity.");
-   
-    const existingItemIndex = checkout.findIndex(item => item.itemId === itemData.itemId);
-    if (existingItemIndex > -1) {
-        const updatedCheckout = [...checkout];
-        updatedCheckout[existingItemIndex].quantity += Number(qtyInput);
-        setCheckout(updatedCheckout);
-    } else {
-        setCheckout(prev => [...prev, { ...itemData, quantity: Number(qtyInput) }]);
-    }
-    setItemInput("");
-    setQtyInput(1);
-    setShowDropdown(false);
-    setSelectedIndex(-1); // Reset index
-    itemInputRef.current?.focus();
-  };
-  
-  const removeCheckoutItem = (index) => setCheckout(prev => prev.filter((_, i) => i !== index));
+  const handleQtyKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddItem(); } };
+  const selectItemAndJumpToQty = (item) => { setItemInput(item.itemName); setTempSelectedItem(item); setShowDropdown(false); qtyInputRef.current.focus(); qtyInputRef.current.select(); };
 
-  // Reset Form - Updated for Orders
-  const resetForm = async () => {
-    await fetchProvisionalOrderNumber(); 
-    setCheckout([]);
-    setDeliveryDateTime(''); 
-    setCustomerTelephone('');
-    setRemarks('');
-    setAdvanceAmount(''); // Reset advance amount
-    setCustomerNameInput(''); // Reset manual name input
-    setSelectedCustomer(null); // Clear selected customer from dropdown
-    // Keep default customer logic removed for now
-    setItemInput(''); // Clear item input as well
-    setQtyInput(1);
-    itemInputRef.current?.focus();
+  const handleAddItem = (overrideItem = null) => {
+      const itemToAdd = overrideItem || tempSelectedItem || (filteredItems.length > 0 ? filteredItems[selectedIndex] : null);
+      if (!itemToAdd || !qtyInput || qtyInput <= 0) return;
+      const existingIdx = checkout.findIndex(i => i.itemId === itemToAdd.itemId);
+      if (existingIdx > -1) {
+          const newCheckout = [...checkout];
+          newCheckout[existingIdx].quantity += Number(qtyInput);
+          setCheckout(newCheckout);
+      } else {
+          setCheckout([...checkout, { ...itemToAdd, quantity: Number(qtyInput) }]);
+      }
+      setItemInput(""); setQtyInput(1); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
   };
+
+  const handleSaveClick = () => {
+    if (!selectedCategory || checkout.length === 0) return alert("Category and Items are required.");
+    setPendingAction({ type: 'SAVE' });
+    setConfirmPaymentMethod('Cash');
+    setShowPaymentConfirm(true);
+  };
+  const handleCompleteClick = (order) => { setPendingAction({ type: 'COMPLETE', order }); setConfirmPaymentMethod('Cash'); setShowPaymentConfirm(true); };
   
-  // Execute Save Order - Transactional save for orders
-  const executeSaveOrder = async () => {
-    const user = auth.currentUser;
-    if (!user) return alert("You are not logged in.");
-    
-    // Use selectedCustomer's name if available, otherwise use manual input
-    const finalCustomerName = selectedCustomer ? selectedCustomer.label : customerNameInput;
-    if (!finalCustomerName) return alert("Please select or enter a customer name.");
+  // View Handler
+  const handleViewOrder = (order) => {
+      setSelectedOrder(order);
+      setIsViewModalOpen(true);
+  };
 
-    setIsSaving(true); 
+  const handleProcessPayment = (method) => {
+      if (!pendingAction) return;
+      setShowPaymentConfirm(false);
+      if (pendingAction.type === 'SAVE') executeSaveOrder(method);
+      else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
+  };
 
+  // --- SAVE ORDER ---
+  const executeSaveOrder = async (paymentMethod) => {
+    setIsSaving(true);
     try {
-      const counterRef = doc(db, user.uid, "counters");
-      const ordersColRef = collection(db, user.uid, "orders", "order_list"); 
-      const newOrderRef = doc(ordersColRef); 
-      
-      const finalOrderData = await runTransaction(db, async (transaction) => {
         const today = new Date();
         const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-
-        const counterDoc = await transaction.get(counterRef);
-        const dailyCounter = counterDoc.exists() ? counterDoc.data().orderCounters?.[datePrefix] || 0 : 0; 
-        const nextSeq = dailyCounter + 1;
-        const newOrdNum = `ORD-${datePrefix}-${String(nextSeq).padStart(4, "0")}`; 
-
-        transaction.set(counterRef, { orderCounters: { [datePrefix]: nextSeq } }, { merge: true }); 
-
-        const orderDataForDb = {
-          customerId: selectedCustomer ? selectedCustomer.value : null, // Store ID only if selected from list
-          customerName: finalCustomerName, // Use the determined name
-          items: checkout, 
-          total: total, 
-          createdAt: serverTimestamp(), 
-          orderNumber: newOrdNum, 
-          placedBy: internalUser?.username || "Admin", 
-          shift: selectedShift || "",
-          deliveryDateTime: deliveryDateTime || "", 
-          customerTelephone: customerTelephone || "", 
-          remarks: remarks || "", 
-          advanceAmount: parseFloat(advanceAmount) || 0, // Save advance amount
-          status: "Pending", 
-        };
-        transaction.set(newOrderRef, orderDataForDb);
         
-        return {
-           ...orderDataForDb,
-           createdAt: new Date(), 
-           orderNumber: newOrdNum 
+        const counterRef = doc(db, uid, "counters");
+        const counterDoc = await getDoc(counterRef);
+        const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+        const newCount = currentCount + 1;
+        const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
+
+        const subtotal = checkout.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+        const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
+        const grandTotal = subtotal + dCharge;
+        const advance = Number(advanceAmount) || 0;
+
+        const invoiceData = {
+            invoiceNumber: newInvNum,
+            customerId: "WALK-IN",
+            customerName: customerName || "Walk-in Customer",
+            customerTelephone: customerPhone,
+            items: checkout,
+            total: grandTotal, 
+            deliveryCharge: dCharge, 
+            advanceAmount: 0,
+            received: 0, 
+            createdAt: serverTimestamp(),
+            issuedBy: internalUser?.username || "Admin",
+            status: "Pending", 
+            type: "ORDER",
+            remarks: remarks,
+            relatedOrderId: null,
+            paymentMethod: paymentMethod 
         };
-      });
-      // --- End of transaction ---
 
-       if (settings?.autoPrintInvoice === true) { 
-        setOrderToPrint(finalOrderData); 
+        const invRef = await addDoc(collection(db, uid, "invoices", "invoice_list"), invoiceData);
 
-        if (settings?.openCashDrawerWithPrint === true) { 
-            setShowQZPrintModal(true);
-        } else {
-            setIsPrintingBrowser(true);
-        }
-      } else {
-        alert("Order saved successfully!");
-        await resetForm();
-      }
+        const orderData = {
+            orderNumber: newInvNum,
+            customerName: customerName || "Walk-in",
+            customerPhone,
+            items: checkout,
+            totalAmount: grandTotal,
+            deliveryCharge: dCharge,
+            advanceAmount: advance,
+            balance: grandTotal - advance,
+            status: "Pending",
+            createdAt: serverTimestamp(),
+            linkedInvoiceId: invRef.id,
+            deliveryDate,
+            remarks
+        };
+        const orderRef = await addDoc(collection(db, uid, "data", "orders"), orderData);
 
-    } catch (error) {
-      alert("Failed to save order: " + error.message);
-    } finally {
-      setIsSaving(false); 
-    }
-  };
-  
-  // Save Order handler (replaces handleSaveAttempt)
-  const handleSaveOrder = () => {
-    // Check manual name input if no customer is selected
-    if (!selectedCustomer && !customerNameInput) {
-       return alert("Please select or enter a customer name.");
-    }
-     if (checkout.length === 0) { 
-      return alert("Please add items to the order."); 
-    }
-    if (shiftProductionEnabled && !selectedShift) {
-        return alert("Please select a shift before saving the order.");
-    }
-    executeSaveOrder(); 
-  };
-  
-  // Helper to format date/time
-  const formatDateTime = (timestampOrString) => {
-      if (!timestampOrString) return 'N/A';
-      let date;
-      if (timestampOrString.toDate) { // Firestore Timestamp
-          date = timestampOrString.toDate();
-      } else if (typeof timestampOrString === 'string') { // ISO String
-          date = new Date(timestampOrString);
-      } else {
-          return 'Invalid Date';
-      }
-      return date.toLocaleString('en-US', { 
-          year: 'numeric', month: 'short', day: 'numeric', 
-          hour: '2-digit', minute: '2-digit' 
-      });
+        await updateDoc(invRef, { relatedOrderId: orderRef.id });
+        await updateDoc(counterRef, { [`invoiceCounters.${datePrefix}`]: newCount });
+
+        resetForm();
+        fetchSavedOrders();
+    } catch (err) { alert("Error: " + err.message); } 
+    finally { setIsSaving(false); setPendingAction(null); }
   };
 
-   // Open View Order Modal
-   const openViewOrderModal = (order) => {
-       setOrderToView(order);
-       setViewOrderModalOpen(true);
-   };
+  const executeCompleteOrder = async (order, paymentMethod) => {
+      setIsSaving(true);
+      try {
+          await updateDoc(doc(db, uid, "data", "orders", order.id), { status: "Completed" });
+          if(order.linkedInvoiceId) {
+             await updateDoc(doc(db, uid, "invoices", "invoice_list", order.linkedInvoiceId), { status: "Paid", received: order.advanceAmount });
+          }
+          if (order.balance > 0) {
+              const balInvoiceData = {
+                  invoiceNumber: `${order.orderNumber}_BAL`,
+                  customerName: order.customerName,
+                  items: [{ itemName: "Balance Payment", quantity: 1, price: order.balance }],
+                  total: order.balance,
+                  received: order.balance,
+                  status: "Paid",
+                  type: "ORDER",
+                  relatedOrderId: order.id,
+                  createdAt: serverTimestamp(),
+                  issuedBy: internalUser?.username || "System",
+                  paymentMethod: paymentMethod 
+              };
+              await addDoc(collection(db, uid, "invoices", "invoice_list"), balInvoiceData);
+          }
+          fetchSavedOrders();
+      } catch (err) { alert("Error completing: " + err.message); }
+      finally { setIsSaving(false); setPendingAction(null); }
+  };
 
-   // Close View Order Modal
-   const closeViewOrderModal = () => {
-       setViewOrderModalOpen(false);
-       setOrderToView(null);
-   };
+  const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
+      if(!window.confirm("Delete this order and linked invoices?")) return;
+      try {
+          await deleteDoc(doc(db, uid, "data", "orders", orderId));
+          if(linkedInvoiceId) await deleteDoc(doc(db, uid, "invoices", "invoice_list", linkedInvoiceId));
+          fetchSavedOrders();
+      } catch(e) { alert("Error deleting."); }
+  };
 
+  const resetForm = () => {
+    setCheckout([]); setCustomerName(""); setCustomerPhone(""); setDeliveryDate(""); setRemarks(""); 
+    setAdvanceAmount(""); setDeliveryCharge(""); 
+    setItemInput(""); fetchProvisionalInvoiceNumber();
+  };
 
+  // Calculations & Helpers
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const total = subtotal; 
-  // Disable save if no customer (selected or manual) or no items
-  const isSaveDisabled = (!selectedCustomer && !customerNameInput) || checkout.length === 0 || isSaving; 
+  const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
+  const grandTotal = subtotal + dCharge;
+  const balance = grandTotal - (Number(advanceAmount) || 0);
 
-  // --- RETURN JSX --- (Restructured)
+  const filteredOrders = savedOrders.filter(o => showCompletedOrders || o.status !== 'Completed');
+
+  const formatDate = (date) => { 
+      if (!date) return 'N/A'; 
+      try { 
+          const d = date.toDate ? date.toDate() : new Date(date);
+          return d.toLocaleString(); 
+      } catch{ return 'Invalid'; }
+  };
+
   return (
     <div style={styles.container}>
-      {isSaving && !showQZPrintModal && !isPrintingBrowser && (
-        <div style={styles.savingOverlay}>
-            <div style={styles.savingSpinner}></div>
-            <p>Saving Order...</p> 
+      <div style={styles.card}>
+        <div style={styles.cardHeader}>
+            <div style={{flex: 1}}>
+                <h2 style={styles.cardTitle}>New Order</h2>
+                <div style={styles.invoiceBadge}>{invoiceNumber}</div>
+            </div>
+            <div style={{width: 300}}>
+                 <label style={styles.label}>Price Category *</label>
+                 <Select options={priceCategories} value={selectedCategory} onChange={setSelectedCategory} placeholder="Select Category..." styles={customSelectStyles} />
+            </div>
+        </div>
+
+        <div style={styles.formContent}>
+            <div style={styles.gridThree}>
+                <div style={styles.inputGroup}>
+                    <label style={styles.label}>Customer Name</label>
+                    <input style={styles.input} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Walk-in Customer" />
+                </div>
+                <div style={styles.inputGroup}>
+                    <label style={styles.label}>Phone Number</label>
+                    <input type="text" style={styles.input} value={customerPhone} onChange={(e) => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 10) setCustomerPhone(val); }} placeholder="07xxxxxxxx" />
+                </div>
+                <div style={styles.inputGroup}>
+                    <label style={styles.label}>Delivery Date</label>
+                    <input type="datetime-local" style={styles.input} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} />
+                </div>
+            </div>
+            <div style={{marginTop: 15}}>
+                <label style={styles.label}>Remarks / Instructions</label>
+                <input style={styles.input} value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Any special instructions..." />
+            </div>
+            <hr style={styles.divider} />
+            <div style={styles.itemEntryRow}>
+                <div style={{ flex: 3, position: 'relative' }}>
+                    <label style={styles.label}>Search Item to Add</label>
+                    <div style={styles.searchWrapper}>
+                        <FaSearch style={styles.searchIcon} />
+                        <input ref={itemInputRef} style={styles.searchInput} value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={handleItemKeyDown} placeholder="Type item name... (Arrow Keys + Enter)" />
+                    </div>
+                    {showDropdown && (
+                        <ul style={styles.dropdown}>
+                            {filteredItems.map((item, idx) => ( <li key={item.id} style={{...styles.ddItem, backgroundColor: idx === selectedIndex ? '#e0f2fe' : 'white'}} onClick={() => selectItemAndJumpToQty(item)}><span>{item.itemName}</span><span style={{fontWeight:'bold'}}>Rs. {item.price}</span></li> ))}
+                        </ul>
+                    )}
+                </div>
+                <div style={{ flex: 1 }}>
+                    <label style={styles.label}>Qty</label>
+                    <input ref={qtyInputRef} type="number" style={styles.input} value={qtyInput} onChange={e => setQtyInput(e.target.value)} onKeyDown={handleQtyKeyDown} />
+                </div>
+                <div style={{ alignSelf: 'flex-end' }}>
+                    <button style={styles.btnAdd} onClick={() => handleAddItem()}><FaPlus /> Add</button>
+                </div>
+            </div>
+            <div style={styles.tableWrapper}>
+                <table style={styles.table}>
+                    <thead><tr><th style={styles.th}>Item</th><th style={styles.th}>Qty</th><th style={styles.th}>Price</th><th style={styles.th}>Total</th><th style={styles.thAction}></th></tr></thead>
+                    <tbody>
+                        {checkout.length === 0 ? (<tr><td colSpan="5" style={styles.emptyTd}>No items added yet.</td></tr>) : (checkout.map((item, idx) => ( <tr key={idx}><td style={styles.td}>{item.itemName}</td><td style={styles.td}>{item.quantity}</td><td style={styles.td}>{item.price.toFixed(2)}</td><td style={styles.td}>{(item.price * item.quantity).toFixed(2)}</td><td style={styles.tdAction}><button style={styles.btnIconDanger} onClick={()=>setCheckout(checkout.filter((_,i)=>i!==idx))}><FaTrash /></button></td></tr> )))}
+                    </tbody>
+                </table>
+            </div>
+            <div style={styles.footerPanel}>
+                 <div style={styles.financialRow}>
+                    <div style={{display:'flex', flexDirection:'column', gap: 10}}>
+                        {settings?.offerDelivery && (
+                            <div style={{width: 200}}>
+                                <label style={styles.label}>Delivery Charge (Rs.)</label>
+                                <input type="number" style={styles.inputBig} value={deliveryCharge} onChange={e=>setDeliveryCharge(e.target.value)} placeholder="0.00" />
+                            </div>
+                        )}
+                        <div style={{width: 200}}>
+                            <label style={styles.label}>Advance Paid (Rs.)</label>
+                            <input type="number" style={styles.inputBig} value={advanceAmount} onChange={e=>setAdvanceAmount(e.target.value)} placeholder="0.00" />
+                        </div>
+                    </div>
+                    <div style={styles.totalsBlock}>
+                        <div style={styles.totalRow}><span>Subtotal:</span> <strong>Rs. {subtotal.toFixed(2)}</strong></div>
+                        {dCharge > 0 && <div style={styles.totalRow}><span>Delivery:</span> <strong>Rs. {dCharge.toFixed(2)}</strong></div>}
+                        <div style={{...styles.totalRow, fontSize: 16, color: '#000'}}><span>Grand Total:</span> <strong>Rs. {grandTotal.toFixed(2)}</strong></div>
+                        <div style={styles.balanceRow}><span>Balance Due:</span> <strong>Rs. {balance.toFixed(2)}</strong></div>
+                    </div>
+                 </div>
+                 <button onClick={handleSaveClick} disabled={isSaving || checkout.length === 0} style={isSaving ? styles.btnDisabled : styles.btnPrimary}>
+                     <FaSave style={{marginRight: 8}}/> {isSaving ? 'Saving...' : 'Save Order'}
+                 </button>
+            </div>
+        </div>
+      </div>
+
+      <div style={{...styles.card, marginTop: 20}}>
+          <div style={styles.listHeader}>
+              <h2 style={styles.cardTitle}>Order History</h2>
+              <label style={styles.checkboxLabel}><input type="checkbox" checked={showCompletedOrders} onChange={e=>setShowCompletedOrders(e.target.checked)}/> Show Completed</label>
+          </div>
+          <div style={styles.ordersGrid}>
+              {loadingOrders ? <p style={{padding: 20, color: '#666'}}>Loading orders...</p> : filteredOrders.length === 0 ? <p style={{padding: 20, color: '#666'}}>No active orders found.</p> : filteredOrders.map(order => (
+                  <div key={order.id} style={styles.orderCard}>
+                      <div style={styles.orderCardTop}>
+                          <div><span style={styles.orderName}>{order.customerName}</span><span style={styles.orderNum}>{order.orderNumber}</span></div>
+                          <span style={order.status==='Pending' ? styles.statusPending : styles.statusCompleted}>{order.status}</span>
+                      </div>
+                      <div style={styles.orderMeta}>
+                          <div style={styles.metaRow}><span>Total:</span> <strong>{order.totalAmount?.toFixed(2)}</strong></div>
+                          {order.deliveryCharge > 0 && <div style={styles.metaRow}><span>Delivery:</span> {order.deliveryCharge?.toFixed(2)}</div>}
+                          <div style={styles.metaRow}><span>Advance:</span> {order.advanceAmount?.toFixed(2)}</div>
+                          <div style={{...styles.metaRow, color: order.balance > 0 ? '#ef4444' : '#10b981'}}><span>Balance:</span> <strong>{order.balance?.toFixed(2)}</strong></div>
+                      </div>
+                      <div style={styles.orderActions}>
+                          {order.status === 'Pending' && (<button style={styles.actionBtnSuccess} onClick={() => handleCompleteClick(order)} title="Complete & Pay"><FaCheckCircle /> Pay Balance</button>)}
+                          {/* ❗ Added View Button */}
+                          <button style={styles.actionBtnPrimary} onClick={() => handleViewOrder(order)} title="View Details"><FaEye /></button>
+                          <button style={styles.actionBtnDanger} onClick={() => handleDeleteOrder(order.id, order.linkedInvoiceId)} title="Delete"><FaTrash /></button>
+                      </div>
+                  </div>
+              ))}
+          </div>
+      </div>
+
+      {/* --- PAYMENT MODAL --- */}
+      {showPaymentConfirm && (
+        <div style={styles.confirmOverlay}>
+          <div style={styles.confirmPopup}>
+            <h4>Confirm Payment</h4>
+            <p style={{margin: '0 0 20px 0', color: '#666', fontSize: '14px'}}>
+                {pendingAction?.type === 'COMPLETE' ? `Collecting Balance: Rs. ${pendingAction.order.balance.toFixed(2)}` : `Advance: Rs. ${(parseFloat(advanceAmount)||0).toFixed(2)}`}
+            </p>
+            <p style={{fontSize: '12px', color: '#888', marginBottom: '15px'}}>Use ← → arrow keys and press Enter to confirm.</p>
+            <div style={styles.confirmButtons}>
+                {paymentOptions.map(method => (
+                    <button 
+                        key={method}
+                        onClick={() => handleProcessPayment(method)} 
+                        style={confirmPaymentMethod === method ? styles.confirmButtonActive : styles.confirmButton}
+                    >
+                        {method === 'Online' ? 'Online' : method}
+                    </button>
+                ))}
+            </div>
+            <button onClick={() => setShowPaymentConfirm(false)} style={{marginTop: '20px', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: '#666', fontSize: '12px'}}>Cancel</button>
+          </div>
         </div>
       )}
-      
-      {showQZPrintModal && (
-        <QZPrintModal 
-            order={orderToPrint} 
-            companyInfo={settings}
-            isQzReady={isQzReady}
-            onClose={async () => { 
-                setShowQZPrintModal(false);
-                setOrderToPrint(null);
-                await resetForm(); 
-            }}
-        />
+
+      {/* --- VIEW MODAL --- */}
+      {isViewModalOpen && selectedOrder && (
+        <div style={styles.modalOverlay} onClick={() => setIsViewModalOpen(false)}>
+            <div style={styles.modalContentWide} onClick={e => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                    <h3 style={styles.modalTitle}>Order Details</h3>
+                    <button onClick={() => setIsViewModalOpen(false)} style={styles.closeIcon}>&times;</button>
+                </div>
+                <div style={styles.modalBody}>
+                    <div style={styles.detailGrid}>
+                        <div style={styles.detailItem}><label>Customer:</label> <span>{selectedOrder.customerName}</span></div>
+                        <div style={styles.detailItem}><label>Phone:</label> <span>{selectedOrder.customerPhone || 'N/A'}</span></div>
+                        <div style={styles.detailItem}><label>Order #:</label> <span>{selectedOrder.orderNumber}</span></div>
+                        <div style={styles.detailItem}><label>Status:</label> <span style={{fontWeight: 'bold', color: selectedOrder.status === 'Pending' ? '#f59e0b' : '#10b981'}}>{selectedOrder.status}</span></div>
+                        <div style={styles.detailItem}><label>Date:</label> <span>{formatDate(selectedOrder.createdAt)}</span></div>
+                        <div style={styles.detailItem}><label>Delivery:</label> <span>{formatDate(selectedOrder.deliveryDate)}</span></div>
+                    </div>
+
+                    <div style={styles.notesBox}>
+                        <label>Remarks:</label>
+                        <p>{selectedOrder.remarks || "No remarks."}</p>
+                    </div>
+
+                    <div style={{maxHeight: '200px', overflowY: 'auto', border: '1px solid #eee', marginBottom: '20px'}}>
+                        <table style={styles.itemsTable}>
+                            <thead>
+                                <tr>
+                                    <th style={{...styles.th, background:'#f8f9fa'}}>Item</th>
+                                    <th style={{...styles.th, background:'#f8f9fa'}}>Qty</th>
+                                    <th style={{...styles.th, background:'#f8f9fa'}}>Rate</th>
+                                    <th style={{...styles.th, background:'#f8f9fa'}}>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {selectedOrder.items && selectedOrder.items.map((item, idx) => (
+                                    <tr key={idx}>
+                                        <td style={styles.td}>{item.itemName}</td>
+                                        <td style={styles.td}>{item.quantity}</td>
+                                        <td style={styles.td}>{item.price.toFixed(2)}</td>
+                                        <td style={styles.td}>{(item.price * item.quantity).toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style={styles.financialBox}>
+                        <div>Total: <strong>Rs. {selectedOrder.totalAmount?.toFixed(2)}</strong></div>
+                        {selectedOrder.deliveryCharge > 0 && <div>Delivery: <strong>Rs. {selectedOrder.deliveryCharge?.toFixed(2)}</strong></div>}
+                        <div>Advance: <strong>Rs. {selectedOrder.advanceAmount?.toFixed(2)}</strong></div>
+                        <div style={{color: selectedOrder.balance > 0 ? '#ef4444' : '#10b981'}}>
+                            Balance: <strong>Rs. {selectedOrder.balance?.toFixed(2)}</strong>
+                        </div>
+                    </div>
+                    
+                    <div style={styles.modalActionsRow}>
+                        <button style={styles.btnSecondary} onClick={()=> window.open(`/invoice/view/${selectedOrder.linkedInvoiceId}`, '_blank')}>
+                            Print Receipt
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
       )}
-      
-      {isPrintingBrowser && orderToPrint && (
-        <BrowserPrintComponent
-            order={orderToPrint} 
-            companyInfo={settings}
-            onPrintFinished={async () => { 
-                setIsPrintingBrowser(false);
-                setOrderToPrint(null);
-                await resetForm(); 
-            }}
-        />
-      )}
-
-      {/* Removed Fullscreen Button */}
-      
-      {/* Order Creation Section */}
-      <div style={styles.formSection}>
-          <h2 style={styles.sectionTitle}>Create New Order</h2>
-          <div style={styles.header}>
-              {/* Order #, Shift, Placed By */}
-             <div style={{textAlign: 'left'}}>
-              <div style={styles.invoiceLabel}>ORDER #</div> 
-              <div style={styles.invoiceNumber}>{orderNumber}</div> 
-            </div>
-            {shiftProductionEnabled && (
-                <div style={{textAlign: 'center'}}>
-                  <label style={styles.invoiceLabel}>SHIFT</label>
-                  <select 
-                    value={selectedShift} 
-                    onChange={e => setSelectedShift(e.target.value)} 
-                    style={styles.shiftSelect}
-                  >
-                    <option value="">Select Shift</option>
-                    {availableShifts.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-            )}
-            <div style={{textAlign: 'right'}}>
-              <div style={styles.invoiceLabel}>PLACED BY</div> 
-              <div style={styles.invoiceNumber}>{internalUser?.username || 'Admin'}</div>
-            </div>
-          </div>
-
-          {/* Customer Details Grid */}
-          <div style={styles.customerGrid}>
-              {/* Select Customer */}
-              <div>
-                  <label style={styles.label}>SELECT CUSTOMER (Optional)</label>
-                  <Select 
-                    options={customers} 
-                    value={selectedCustomer} 
-                    onChange={setSelectedCustomer} 
-                    placeholder="Select existing customer..."
-                    isClearable 
-                  />
-              </div>
-               {/* Manual Customer Name */}
-               <div>
-                  <label style={styles.label}>CUSTOMER NAME* (F7)</label>
-                  <input 
-                    ref={customerNameInputRef}
-                    type="text" 
-                    value={customerNameInput} 
-                    onChange={e => setCustomerNameInput(e.target.value)} 
-                    placeholder="Enter customer name" 
-                    style={styles.input}
-                    disabled={!!selectedCustomer} // Disable if selected from dropdown
-                  />
-              </div>
-               {/* Telephone */}
-               <div>
-                  <label style={styles.label}>TELEPHONE (F5)</label>
-                  <input 
-                    ref={telephoneRef}
-                    type="tel" 
-                    value={customerTelephone} 
-                    onChange={e => setCustomerTelephone(e.target.value)} 
-                    placeholder="Customer phone..." 
-                    style={styles.input}
-                  />
-              </div>
-              {/* Delivery Date */}
-              <div>
-                 <label style={styles.label}>DELIVERY DATE/TIME (F4)</label>
-                 <input
-                     ref={deliveryDateTimeRef}
-                     type="datetime-local"
-                     value={deliveryDateTime}
-                     onChange={e => setDeliveryDateTime(e.target.value)}
-                     style={styles.input}
-                 />
-             </div>
-             {/* Advance Amount */}
-             <div>
-                <label style={styles.label}>ADVANCE AMOUNT (Rs.) (F6)</label>
-                <input 
-                    ref={advanceAmountRef}
-                    type="number"
-                    step="0.01" 
-                    value={advanceAmount} 
-                    onChange={e => setAdvanceAmount(e.target.value)} 
-                    placeholder="0.00" 
-                    style={styles.input}
-                />
-            </div>
-             {/* Remarks */}
-             <div style={{gridColumn: 'span 2'}}> {/* Span 2 columns */}
-                 <label style={styles.label}>REMARKS</label>
-                 <input
-                     ref={remarksRef}
-                     type="text"
-                     value={remarks}
-                     onChange={e => setRemarks(e.target.value)}
-                     placeholder="Any special instructions..."
-                     style={styles.input}
-                 />
-             </div>
-          </div>
-          
-          {/* Item Entry Section */}
-           <div style={styles.itemEntrySection}>
-            {/* ... (Item input, Qty, Add button) ... */}
-            <div style={{position: 'relative', flex: 1}}>
-            <label style={styles.label}>ADD ITEM</label>
-            <input 
-              ref={itemInputRef} 
-              value={itemInput} 
-              onChange={e => setItemInput(e.target.value)} 
-              onKeyDown={handleItemKeyDown} 
-              placeholder="Type item name, SKU, or scan barcode..." 
-              style={styles.input}
-            />
-            {showDropdown && filteredItems.length > 0 && (
-              <ul style={styles.dropdown}>
-                {filteredItems.map((i, idx) => (
-                  <li 
-                    key={i.id} 
-                    style={{
-                      ...styles.dropdownItem, 
-                      ...(idx === selectedIndex ? styles.dropdownItemSelected : {})
-                    }} 
-                    onClick={() => handleItemSelect(i)}
-                  >
-                    {i.itemName} 
-                    <span style={styles.dropdownPrice}>Rs. {i.price.toFixed(2)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div style={{width: '120px'}}>
-            <label style={styles.label}>QTY</label>
-            <input 
-              ref={qtyInputRef} 
-              value={qtyInput} 
-              onChange={handleQtyChange} 
-              onKeyDown={handleQtyKeyDown} 
-              onFocus={(e) => e.target.select()} 
-              type="text" 
-              inputMode="decimal" 
-              style={styles.input}
-            />
-          </div>
-          <button onClick={addItemToCheckout} style={styles.addButton}>ADD</button>
-          </div>
-
-          {/* Checkout Summary */}
-          <div style={styles.checkoutSummary}>
-              <h3 style={styles.checkoutTitle}>ORDER SUMMARY (F10)</h3>
-              <div style={styles.tableContainer}>
-                 {/* ... (Checkout Table) ... */}
-                 <table style={styles.table}>
-                   <thead>
-                    <tr>
-                      <th style={styles.th}>ITEM</th>
-                      <th style={styles.th}>QTY</th>
-                      <th style={styles.th}>TOTAL</th>
-                      <th style={styles.th}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {checkout.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" style={styles.emptyState}>No items added</td>
-                      </tr>
-                    ) : (
-                      checkout.map((c, idx) => (
-                        <tr key={idx} style={idx === highlightedCheckoutIndex ? styles.highlightedRow : {}}>
-                          <td style={styles.td}>{c.itemName}</td>
-                          <td style={styles.td}>{c.quantity}</td>
-                          <td style={styles.td}>Rs. {(c.price * c.quantity).toFixed(2)}</td>
-                          <td style={styles.td}>
-                            <button onClick={() => removeCheckoutItem(idx)} style={styles.removeButton}>✕</button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {/* Totals Section */}
-               <div style={styles.totalsSection}>
-                <div style={styles.totalRow}>
-                  <span>Subtotal</span>
-                  <span>Rs. {subtotal.toFixed(2)}</span>
-                </div>
-                <div style={styles.grandTotalRow}>
-                  <span>TOTAL</span>
-                  <span>Rs. {total.toFixed(2)}</span>
-                </div>
-              </div>
-          </div>
-
-          {/* Save Button */}
-          <button 
-              onClick={handleSaveOrder} 
-              disabled={isSaveDisabled} 
-              style={{
-                ...styles.saveButton, 
-                ...(isSaveDisabled ? styles.saveButtonDisabled : {}),
-                marginTop: '20px' // Add margin to separate from summary
-              }}
-            >
-              {isSaving ? 'SAVING ORDER...' : 'SAVE ORDER (ALT+S)'} 
-          </button>
-          
-          {/* Shortcuts Help */}
-           <div style={styles.shortcutsHelp}>
-            <h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4>
-            <div style={styles.shortcutRow}>
-                <div style={styles.shortcutItem}><b>F4:</b> Delivery Date</div>
-                <div style={styles.shortcutItem}><b>F5:</b> Telephone</div>
-                <div style={styles.shortcutItem}><b>F6:</b> Advance Amt</div>
-            </div>
-            <div style={styles.shortcutRow}>
-                <div style={styles.shortcutItem}><b>F7:</b> Customer Name</div>
-                <div style={styles.shortcutItem}><b>F10:</b> Item List Nav</div>
-                <div style={styles.shortcutItem}><b>Alt+S:</b> Save</div>
-            </div>
-             <div style={styles.shortcutRow}>
-                <div style={styles.shortcutItem}><b>Esc:</b> Exit Mode/Dropdown</div>
-            </div>
-           </div>
-      </div>
-
-      {/* Saved Orders Section */}
-      <div style={styles.savedOrdersSection}>
-          <h2 style={styles.sectionTitle}>Saved Orders</h2>
-          <div style={styles.searchContainer}>
-              <AiOutlineSearch style={styles.searchIcon} />
-              <input 
-                  type="text" 
-                  placeholder="Search by Order #, Customer Name, Phone, Item..." 
-                  value={orderSearchTerm}
-                  onChange={e => setOrderSearchTerm(e.target.value)}
-                  style={styles.searchInput} 
-              />
-          </div>
-
-          <div style={styles.ordersTableContainer}>
-              {ordersLoading ? (
-                  <p style={styles.loadingText}>Loading orders...</p>
-              ) : filteredSavedOrders.length === 0 ? (
-                  <p style={styles.emptyState}>No orders found.</p>
-              ) : (
-                  <table style={styles.ordersTable}>
-                      <thead>
-                          <tr>
-                              <th style={styles.ordersTh}>Order #</th>
-                              <th style={styles.ordersTh}>Customer</th>
-                              <th style={styles.ordersTh}>Phone</th>
-                              <th style={styles.ordersTh}>Delivery Date</th>
-                              <th style={styles.ordersTh}>Total</th>
-                              <th style={styles.ordersTh}>Advance</th>
-                              <th style={styles.ordersTh}>Balance</th>
-                              <th style={styles.ordersTh}>Status</th>
-                              <th style={styles.ordersTh}>Actions</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {filteredSavedOrders.map(order => (
-                              <tr key={order.id}>
-                                  <td style={styles.ordersTd}>{order.orderNumber}</td>
-                                  <td style={styles.ordersTd}>{order.customerName}</td>
-                                  <td style={styles.ordersTd}>{order.customerTelephone || '-'}</td>
-                                  <td style={styles.ordersTd}>{formatDateTime(order.deliveryDateTime)}</td>
-                                  <td style={styles.ordersTd}>{(order.total || 0).toFixed(2)}</td>
-                                  <td style={styles.ordersTd}>{(order.advanceAmount || 0).toFixed(2)}</td>
-                                  <td style={styles.ordersTd}>{((order.total || 0) - (order.advanceAmount || 0)).toFixed(2)}</td>
-                                  <td style={styles.ordersTd}>
-                                    <span style={{...styles.statusBadge, ...(order.status === 'Pending' ? styles.statusPending : styles.statusCompleted)}}>
-                                        {order.status}
-                                    </span>
-                                  </td>
-                                  <td style={styles.ordersTd}>
-                                      <button onClick={() => openViewOrderModal(order)} style={styles.actionButton} title="View Details"><AiOutlineEye /></button>
-                                      {/* Add Print/Delete buttons if needed */}
-                                      {/* <button style={styles.actionButton} title="Print"><AiOutlinePrinter /></button> */}
-                                      {/* <button style={{...styles.actionButton, ...styles.deleteAction}} title="Delete"><AiOutlineDelete /></button> */}
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              )}
-          </div>
-      </div>
-
-       {/* View Order Modal */}
-       {viewOrderModalOpen && orderToView && (
-           <div style={styles.confirmOverlay} onClick={closeViewOrderModal}>
-                <div style={{...styles.confirmPopup, width: '90%', maxWidth: '700px', textAlign: 'left'}} onClick={(e) => e.stopPropagation()}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
-                        <h4 style={{margin: 0}}>Order Details: {orderToView.orderNumber}</h4>
-                        <button onClick={closeViewOrderModal} style={styles.modalCloseButtonPlain}>&times;</button>
-                    </div>
-                    {/* Reuse PrintableLayout for content consistency */}
-                    <div style={{ maxHeight: '60vh', overflowY: 'auto', border: '1px solid #eee', padding: '10px', borderRadius: '4px'}}>
-                       <PrintableLayout order={orderToView} companyInfo={settings} />
-                    </div>
-                     <div style={{marginTop: '20px', textAlign: 'right'}}>
-                        <button onClick={closeViewOrderModal} style={styles.closeButton}>Close</button>
-                    </div>
-                </div>
-           </div>
-       )}
 
     </div>
   );
 };
 
-// --- STYLES --- (Updated and Restructured)
+const themeColors = { primary: '#00A1FF', secondary: '#F089D7', success: '#10b981', danger: '#ef4444', dark: '#1e293b', border: '#e2e8f0', bg: '#f8fafc' };
 const styles = {
-    // Main container and layout
-    container: { display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", padding: '20px', gap: '20px', overflow: 'hidden' }, // Added overflow hidden
-    formSection: { backgroundColor: 'white', borderRadius: '8px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflowY: 'auto', flexShrink: 0 }, // Allow form to scroll if needed, prevent shrinking initially
-    savedOrdersSection: { backgroundColor: 'white', borderRadius: '8px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden' }, // Grow to fill space, hide overflow
-    sectionTitle: { fontSize: '20px', fontWeight: '700', color: '#1f2937', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' },
+  container: { padding: '24px', maxWidth: '1200px', margin: '0 auto', fontFamily: "'Inter', sans-serif" },
+  card: { background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', border: `1px solid ${themeColors.border}`, overflow: 'hidden' },
+  cardHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  cardTitle: { margin: 0, fontSize: '18px', fontWeight: '700', color: themeColors.dark },
+  invoiceBadge: { display: 'inline-block', background: '#e0f2fe', color: themeColors.primary, padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', marginTop: 5 },
+  formContent: { padding: '24px' },
+  gridThree: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label: { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  input: { padding: '10px 12px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '14px', outline: 'none', transition: 'border 0.2s', width: '100%', boxSizing: 'border-box' },
+  inputBig: { padding: '12px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '16px', fontWeight: '600', width: '100%', boxSizing: 'border-box' },
+  divider: { margin: '24px 0', borderTop: `1px solid ${themeColors.border}` },
+  itemEntryRow: { display: 'flex', gap: '15px', alignItems: 'flex-start' },
+  searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center' },
+  searchIcon: { position: 'absolute', left: '12px', color: '#94a3b8' },
+  searchInput: { padding: '10px 12px 10px 36px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '14px', width: '100%', boxSizing: 'border-box' },
+  btnAdd: { padding: '10px 20px', background: themeColors.success, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', height: '40px' },
+  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', zIndex: 10, maxHeight: '200px', overflowY: 'auto', margin: '4px 0 0 0', padding: 0, listStyle: 'none' },
+  ddItem: { padding: '10px 16px', cursor: 'pointer', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#333' },
+  tableWrapper: { marginTop: '20px', border: `1px solid ${themeColors.border}`, borderRadius: '8px', overflow: 'hidden' },
+  table: { width: '100%', borderCollapse: 'collapse' },
+  th: { textAlign: 'left', padding: '12px 16px', background: '#f8fafc', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600', borderBottom: `1px solid ${themeColors.border}` },
+  thAction: { width: '50px', background: '#f8fafc', borderBottom: `1px solid ${themeColors.border}` },
+  td: { padding: '12px 16px', borderBottom: `1px solid ${themeColors.border}`, fontSize: '14px', color: '#333' },
+  tdAction: { padding: '12px 16px', borderBottom: `1px solid ${themeColors.border}`, textAlign: 'center' },
+  emptyTd: { padding: '20px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' },
+  btnIconDanger: { background: 'none', border: 'none', color: themeColors.danger, cursor: 'pointer', fontSize: '16px', padding: '4px' },
+  footerPanel: { marginTop: '24px', paddingTop: '24px', borderTop: `1px solid ${themeColors.border}` },
+  financialRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' },
+  totalsBlock: { textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '8px' },
+  totalRow: { fontSize: '14px', color: '#64748b', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
+  balanceRow: { fontSize: '18px', color: themeColors.danger, display: 'flex', justifyContent: 'flex-end', gap: '20px' },
+  btnPrimary: { width: '100%', padding: '14px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '16px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'background 0.2s' },
+  btnDisabled: { width: '100%', padding: '14px', background: '#cbd5e1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'not-allowed' },
+  listHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  checkboxLabel: { fontSize: '14px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
+  ordersGrid: { padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
+  orderCard: { background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' },
+  orderCardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
+  orderName: { display: 'block', fontWeight: '700', color: themeColors.dark, fontSize: '15px' },
+  orderNum: { fontSize: '12px', color: '#64748b' },
+  statusPending: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#fff7ed', color: '#c2410c' },
+  statusCompleted: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#ecfdf5', color: '#047857' },
+  orderMeta: { fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' },
+  metaRow: { display: 'flex', justifyContent: 'space-between' },
+  orderActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
+  actionBtnSuccess: { flex: 1, padding: '8px', background: '#dcfce7', color: themeColors.success, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px' },
+  
+  // ❗ ADDED: Action Btn Primary
+  actionBtnPrimary: { flex: 1, padding: '8px', background: '#e0f2fe', color: themeColors.primary, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', fontSize: '13px' },
+  
+  actionBtnDanger: { padding: '8px 12px', background: '#fee2e2', color: themeColors.danger, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  
+  confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
+  confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
+  confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },
+  confirmButton: { padding: '10px 24px', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', background: '#f8f8f8', fontWeight: '600', flex: 1 },
+  confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1, boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.4)' },
 
-    // Header within Form
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '15px', borderBottom: '1px solid #eee' },
-    invoiceLabel: { fontSize: '12px', color: '#6b7280', fontWeight: '600' },
-    invoiceNumber: { fontSize: '18px', fontWeight: '700', color: '#1f2937' },
-    shiftSelect: { border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 8px', fontSize: '14px', fontWeight: '600' },
-    
-    // Customer Grid
-    customerGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px 20px', marginBottom: '20px' },
-    label: { display: 'block', fontSize: '12px', fontWeight: '600', color: '#4b5563', marginBottom: '6px' },
-    input: { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' },
-
-    // Item Entry
-    itemEntrySection: { display: 'flex', gap: '10px', alignItems: 'flex-end', margin: '20px 0', paddingTop: '15px', borderTop: '1px solid #eee' },
-    dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: 'white', border: '1px solid #d1d5db', borderRadius: '0 0 6px 6px', maxHeight: '150px', overflowY: 'auto', zIndex: 100, listStyle: 'none', margin: '2px 0 0 0', padding: 0, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-    dropdownItem: { padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', fontSize: '13px' },
-    dropdownItemSelected: { backgroundColor: '#e0e7ff', color: '#3730a3' },
-    dropdownPrice: { color: '#6b7280', fontSize: '11px' },
-    addButton: { padding: '10px 20px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', height: '40px' }, // Match input height
-
-    // Checkout Summary within Form
-    checkoutSummary: { marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '15px' },
-    checkoutTitle: { fontSize: '16px', fontWeight: '700', marginBottom: '10px', color: '#111827' },
-    tableContainer: { maxHeight: '200px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px', marginBottom: '15px' },
-    table: { width: '100%', borderCollapse: 'collapse' },
-    th: { padding: '8px 10px', textAlign: 'left', color: '#6b7280', fontSize: '11px', fontWeight: '600', borderBottom: '1px solid #e5e7eb', background: '#f9fafb', position: 'sticky', top: 0 },
-    td: { padding: '8px 10px', borderBottom: '1px solid #e5e7eb', fontSize: '13px' },
-    highlightedRow: { backgroundColor: '#dbeafe' },
-    emptyState: { textAlign: 'center', color: '#9ca3af', padding: '15px', fontSize: '13px' },
-    removeButton: { background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px' },
-    totalsSection: { padding: '10px 0 0 0' }, // Reduced padding
-    totalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', fontSize: '13px' },
-    grandTotalRow: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '18px', color: '#16a34a', paddingTop: '6px', marginTop: '6px', borderTop: '1px solid #e5e7eb' },
-    
-    // Save Button
-    saveButton: { width: '100%', padding: '12px', backgroundColor: '#2563eb', color: 'white', border: 'none', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px' },
-    saveButtonDisabled: { backgroundColor: '#9ca3af', cursor: 'not-allowed' },
-
-    // Shortcuts Help
-    shortcutsHelp: { backgroundColor: '#f9fafb', padding: '12px', borderRadius: '6px', border: '1px solid #e5e7eb', marginTop: '20px', fontSize: '11px', color: '#4b5563' },
-    shortcutsTitle: { fontWeight: 'bold', marginBottom: '6px', color: '#111827', fontSize: '12px' },
-    shortcutRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '4px'},
-    shortcutItem: { flexBasis: '30%' }, // Distribute items
-
-    // Saved Orders Section Styles
-    searchContainer: { position: 'relative', marginBottom: '15px' },
-    searchIcon: { position: 'absolute', top: '50%', left: '12px', transform: 'translateY(-50%)', color: '#9ca3af' },
-    searchInput: { width: '100%', padding: '10px 12px 10px 36px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' },
-    ordersTableContainer: { flexGrow: 1, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '6px' }, // Allow table to scroll
-    ordersTable: { width: '100%', borderCollapse: 'collapse' },
-    ordersTh: { padding: '10px 12px', textAlign: 'left', color: '#6b7280', fontSize: '11px', fontWeight: '600', borderBottom: '1px solid #e5e7eb', background: '#f9fafb', position: 'sticky', top: 0 },
-    ordersTd: { padding: '10px 12px', borderBottom: '1px solid #e5e7eb', fontSize: '13px', whiteSpace: 'nowrap' }, // Prevent wrap
-    statusBadge: { fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '12px', textTransform: 'uppercase' },
-    statusPending: { color: '#d97706', backgroundColor: '#fef3c7' }, // Amber
-    statusCompleted: { color: '#059669', backgroundColor: '#d1fae5' }, // Green
-    actionButton: { background: 'transparent', border: 'none', cursor: 'pointer', padding: '5px', margin: '0 3px', color: '#6b7280' },
-    deleteAction: { color: '#ef4444' },
-    loadingText: { textAlign: 'center', padding: '20px', color: '#6b7280' },
-
-    // Modals (General)
-    confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
-    confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
-    modalCloseButtonPlain: { background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#9ca3af'},
-
-
-    // QZ Modal Specific
-    qzStatus: { padding: '15px', margin: '15px 0', backgroundColor: '#f3f4f6', borderRadius: '6px', textAlign: 'left' },
-    qzControls: { textAlign: 'left', marginTop: '10px' },
-    closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' },
-    savingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 3000, color: '#1f2937', fontSize: '18px', fontWeight: '600' },
-    savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
-    activeCard: { borderColor: '#3b82f6' }, // Added from invoice styles for consistency if needed
+  // ❗ ADDED: Modal Styles
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(2px)' },
+  modalContentWide: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '700px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease', overflow: 'hidden' },
+  modalHeader: { padding: '16px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { margin: 0, fontSize: '18px', fontWeight: '700', color: themeColors.dark },
+  modalBody: { padding: '24px' },
+  closeIcon: { background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' },
+  detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: '20px' },
+  detailItem: { display: 'flex', flexDirection: 'column', fontSize: '14px' },
+  notesBox: { background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', border: `1px solid ${themeColors.border}` },
+  financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '15px' },
+  modalActionsRow: { display: 'flex', justifyContent: 'flex-end', gap: '10px' },
+  btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
+  itemsTable: { width: '100%', borderCollapse: 'collapse' },
 };
 
-// printStyles (Mostly reused, added remarks and advance)
-const printStyles = {
-    invoiceBox: { padding: '3mm', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace'"}, 
-    logoContainer: { textAlign: 'center', marginBottom: '5px'},
-    logo: { maxWidth: '80px', maxHeight: '80px', display: 'inline-block' }, 
-    companyNameText: { fontSize: '1.4em', margin: '5px 0 5px 0', fontWeight: 'bold', textAlign: 'center', lineHeight: '1.5' },
-    headerText: { margin: '4px 0', fontSize: '0.9em', textAlign: 'center', lineHeight: '1.5' },
-    metaSection: { borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '10px 0', margin: '15px 0' },
-    metaText: { margin: '3px 0', fontSize: '0.9em', lineHeight: '1.4' },
-    remarksSection: { marginTop: '10px', marginBottom: '10px'},
-    remarksText: { margin: '3px 0', fontSize: '0.9em', lineHeight: '1.4' },
-    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' }, 
-    th: { borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '6px 4px', fontSize: '0.9em', textAlign: 'right'},
-    thItem: { textAlign: 'left', width: '45%' },
-    thQty: { textAlign: 'center', width: '15%' },
-    thRate: { textAlign: 'right', width: '20%' },
-    thTotal: { textAlign: 'right', width: '20%' },
-    td: { padding: '6px 4px', borderBottom: '1px dotted #ccc', fontSize: '0.9em', lineHeight: '1.4', verticalAlign: 'top' },
-    tdItem: { textAlign: 'left' },
-    tdQty: { textAlign: 'center' },
-    tdRate: { textAlign: 'right' },
-    tdTotal: { textAlign: 'right' },
-    totalsSection: { marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #000' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '0.95em', lineHeight: '1.5' },
-    grandTotalRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '1.1em', fontWeight: 'bold', borderTop: '1px dashed #000', marginTop: '5px' },
-    balanceRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1em', fontWeight: 'bold'}, // Style for balance
-    dashedLine: { borderTop: '1px dashed #000', margin: '10px 0' },
-    footer: { textAlign: 'center', marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em', lineHeight: '1.5' },
-    creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777', lineHeight: '1.5' },
+// Custom React Select Styles to match theme
+const customSelectStyles = {
+  control: (provided) => ({
+    ...provided,
+    borderColor: '#e2e8f0',
+    borderRadius: '8px',
+    padding: '2px',
+    boxShadow: 'none',
+    '&:hover': { borderColor: '#cbd5e1' }
+  }),
+  option: (provided, state) => ({
+    ...provided,
+    backgroundColor: state.isSelected ? '#00A1FF' : state.isFocused ? '#e0f2fe' : 'white',
+    color: state.isSelected ? 'white' : '#333',
+    cursor: 'pointer'
+  })
 };
-
-// Add animation keyframes
-const styleSheet = document.createElement("style");
-styleSheet.innerText = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
-document.head.appendChild(styleSheet);
-
 
 export default Orders;
-

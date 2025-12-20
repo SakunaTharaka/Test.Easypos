@@ -83,14 +83,17 @@ const Reconcile = () => {
     const { reconciledDates, refreshBalances } = useContext(CashBookContext);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [summaryData, setSummaryData] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [isReconciling, setIsReconciling] = useState(false);
     const [reconciliationHistory, setReconciliationHistory] = useState([]);
-    const [historyLoading, setHistoryLoading] = useState(true);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    
+    // Pagination state
     const [lastVisible, setLastVisible] = useState(null);
     const [firstVisible, setFirstVisible] = useState(null);
     const [historyPage, setHistoryPage] = useState(1);
     const [hasNextPage, setHasNextPage] = useState(false);
+    
     const REPORTS_PER_PAGE = 40;
     const [showReportModal, setShowReportModal] = useState(false);
     const [selectedReport, setSelectedReport] = useState(null);
@@ -126,7 +129,6 @@ const Reconcile = () => {
 
             const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
             
-            // ✅ **FIX: Apply the same filtering logic as SalesIncome and Summary**
             const validInvoices = invoicesSnap.docs
               .map(d => d.data())
               .filter(inv => {
@@ -197,14 +199,18 @@ const Reconcile = () => {
         }
     }, [lastVisible, firstVisible]);
 
+    // Use effect to trigger fetching when date changes
     useEffect(() => {
-        fetchSummaryData(selectedDate);
+        // Reset pagination state when date changes
         setHistoryPage(1);
         setLastVisible(null);
         setFirstVisible(null);
         setHasNextPage(false);
+        
+        fetchSummaryData(selectedDate);
         fetchHistory(selectedDate, 'initial');
-    }, [selectedDate, fetchSummaryData, fetchHistory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedDate]);
 
     const handlePageChange = (direction) => {
         if (direction === 'next') {
@@ -239,6 +245,7 @@ const Reconcile = () => {
             }
             await refreshBalances();
             alert("Reconciliation report saved successfully!");
+            // Re-fetch to update UI
             fetchSummaryData(selectedDate);
             fetchHistory(selectedDate, 'initial');
         } catch (error) {

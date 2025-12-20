@@ -2,7 +2,8 @@ import React, { useEffect, useState, lazy, Suspense } from "react";
 import { auth, db } from "../firebase";
 import { doc, getDoc, updateDoc, collection, getDocs, setDoc } from "firebase/firestore";
 import { useNavigate, Navigate } from "react-router-dom";
-import { FaExclamationCircle } from 'react-icons/fa';
+// Removed react-icons to prevent crash if library is missing
+// import { FaExclamationCircle } from 'react-icons/fa'; 
 
 import { CashBookProvider } from "../context/CashBookContext";
 
@@ -35,8 +36,8 @@ const SalesReport = lazy(() => import("./SalesReport"));
 const Help = lazy(() => import("./Help"));
 const StockOutBal = lazy(() => import("./tabs/StockOutBal"));
 
-// --- REMOVED old ServiceOrder import ---
-// const ServiceOrder = lazy(() => import("./tabs/ServiceOrder"));
+// --- NEW ACCOUNTS PAGE ---
+const Accounts = lazy(() => import("./fintabs/account"));
 
 // --- ADDED NEW Service & Order Sub-tab IMPORTS ---
 const Services = lazy(() => import("./tabs/Services"));
@@ -52,7 +53,6 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("Dashboard");
   const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order");
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
-  // --- ADDED NEW STATE for Service/Order Sub-tabs ---
   const [activeServiceTab, setActiveServiceTab] = useState("Services"); 
   const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [internalUsers, setInternalUsers] = useState([]);
@@ -101,59 +101,42 @@ const Dashboard = () => {
         return;
       }
       const uid = currentUser.uid;
-      const announcementRef = doc(db, 'global_settings', 'announcement');
+      
+      // Announcement
       try {
+        const announcementRef = doc(db, 'global_settings', 'announcement');
         const annocementSnap = await getDoc(announcementRef);
         setIsAnnouncementActive(annocementSnap.exists() && annocementSnap.data().isEnabled);
       } catch (error) {
-        console.error("Error fetching announcement:", error);
         setIsAnnouncementActive(false);
       }
-      const userInfoRefOnboarding = doc(db, "Userinfo", uid);
-      const userDocSnap = await getDoc(userInfoRefOnboarding);
-      if (!userDocSnap.exists() || !userDocSnap.data().status) {
-        navigate("/user-details");
-        return;
-      }
-      const userData = userDocSnap.data();
-      if (userData.status === 'trialing') {
-        const trialEndDate = userData.trialEndDate?.toDate();
-        if (trialEndDate) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          if (today > trialEndDate) {
-            navigate("/billing");
-            return;
-          }
-        }
-      }
-      const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
-      if (savedInternalUser) setInternalLoggedInUser(savedInternalUser);
+
+      // User Info
       try {
+        const userInfoRefOnboarding = doc(db, "Userinfo", uid);
+        const userDocSnap = await getDoc(userInfoRefOnboarding);
+        if (!userDocSnap.exists() || !userDocSnap.data().status) {
+            navigate("/user-details");
+            return;
+        }
+        
         const settingsRef = doc(db, uid, "settings");
-        try {
-          const settingsSnap = await getDoc(settingsRef);
-          if (settingsSnap.exists()) {
+        const settingsSnap = await getDoc(settingsRef);
+        if (settingsSnap.exists()) {
             const settingsData = settingsSnap.data();
             setUserInfo(settingsData);
             const inventoryType = settingsData.inventoryType || "Buy and Sell only";
             setShowProductionTabs(inventoryType === "Production Selling only" || inventoryType === "We doing both");
             setMaintainCreditCustomers(settingsData.maintainCreditCustomers === true);
-          } else {
+        } else {
             setUserInfo({ companyName: "My Business" });
-          }
-        } catch (error) {
-           console.error("Error fetching user settings:", error);
-           setUserInfo({ companyName: "My Business" });
         }
-        const userInfoDocRef = doc(db, uid, "Userinfo");
-        const userInfoSnap = await getDoc(userInfoDocRef);
-        if (userInfoSnap.exists() && userInfoSnap.data().firstLoginShown === false) {
-           setShowPopup(true);
-           await updateDoc(userInfoDocRef, { firstLoginShown: true });
-        }
+
+        // Internal Users
         const internalUsersColRef = collection(db, uid, "admin", "admin_details");
         const internalUsersSnap = await getDocs(internalUsersColRef);
+        const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
+
         if (internalUsersSnap.empty) {
             const masterUser = { username: "admin", password: "123", isAdmin: true, isMaster: true };
             await setDoc(doc(internalUsersColRef, "admin"), masterUser);
@@ -164,7 +147,9 @@ const Dashboard = () => {
         } else {
             const users = internalUsersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
             setInternalUsers(users);
-            if (!savedInternalUser) {
+            if (savedInternalUser) {
+                setInternalLoggedInUser(savedInternalUser);
+            } else {
                 if (users.length > 1) setShowLoginPopup(true);
                 else if (users.length === 1) {
                     setInternalLoggedInUser(users[0]);
@@ -173,10 +158,11 @@ const Dashboard = () => {
             }
         }
       } catch (error) {
-        alert("Error fetching dashboard data: " + error.message);
+        console.error("Dashboard Load Error:", error);
       }
       setLoading(false);
     });
+
     const syncInternalState = (e) => {
       if (e.key === "internalLoggedInUser") {
         const val = JSON.parse(e.newValue);
@@ -237,7 +223,8 @@ const Dashboard = () => {
       if (maintainCreditCustomers) {
         subTabs.push("Credit Customer Cash");
       }
-      subTabs.push("Reconcilation", "Expenses", "Summary", "Cash Book");
+      // Added "Accounts" to the list
+      subTabs.push("Reconcilation", "Expenses", "Summary", "Cash Book", "Accounts");
       activeSubTab = activeFinanceTab;
       setActiveSubTab = setActiveFinanceTab;
     } else if (activeTab === "Items & Customers") {
@@ -245,7 +232,6 @@ const Dashboard = () => {
       activeSubTab = activeItemsCustomersTab;
       setActiveSubTab = setActiveItemsCustomersTab;
     } 
-    // --- ADDED LOGIC for Service and Orders sub-tabs ---
     else if (activeTab === "Service and Orders") {
       subTabs = ["Services", "Orders", "Timeline"];
       activeSubTab = activeServiceTab;
@@ -285,7 +271,6 @@ const Dashboard = () => {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
       case "Invoicing": return <Invoice internalUser={internalLoggedInUser} />;
       
-      // --- UPDATED "Service and Orders" CASE ---
       case "Service and Orders": 
         return (
           <div style={styles.inventoryContent}>
@@ -318,6 +303,7 @@ const Dashboard = () => {
             {activeFinanceTab === "Expenses" && <Expenses />}
             {activeFinanceTab === "Summary" && <Summary />}
             {activeFinanceTab === "Cash Book" && <CashBook />}
+            {activeFinanceTab === "Accounts" && <Accounts />}
           </div>
         );
       case "Help": return <Help />;
@@ -398,7 +384,7 @@ const Dashboard = () => {
           </div>
           <div style={styles.headerCenter}>
             {isAnnouncementActive && (
-              <div style={styles.blinkingIndicator}><FaExclamationCircle style={{ marginRight: "8px" }} />SYSTEM ALERT</div>
+              <div style={styles.blinkingIndicator}>SYSTEM ALERT</div>
             )}
           </div>
           <div style={styles.headerRight}>
@@ -407,7 +393,7 @@ const Dashboard = () => {
             )}
             <img src={companyLogo} alt="Logo" style={styles.headerLogo} />
             {internalUsers.length > 1 && internalLoggedInUser && (
-              <button onClick={handleInternalLogout} style={styles.logoutBtn}><span style={styles.logoutText}>Logout</span><span style={styles.logoutIcon}>→</span></button>
+              <button onClick={handleInternalLogout} style={styles.logoutBtn}><span style={styles.logoutText}>Logout</span></button>
             )}
           </div>
         </div>
