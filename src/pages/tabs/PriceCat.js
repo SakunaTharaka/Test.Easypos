@@ -26,7 +26,6 @@ const PriceCat = ({ internalUser }) => {
   const [search, setSearch] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
 
-  // ✅ **1. New state for buffering/loading**
   const [isSavingCategory, setIsSavingCategory] = useState(false);
 
   const [dropdownSearch, setDropdownSearch] = useState("");
@@ -116,7 +115,6 @@ const PriceCat = ({ internalUser }) => {
   const handleSaveCategory = async () => {
     if (!newCategoryName.trim()) return alert("Enter category name");
     
-    // ✅ **2. Set loading state to true and disable button**
     setIsSavingCategory(true);
 
     const uid = auth.currentUser.uid;
@@ -144,7 +142,6 @@ const PriceCat = ({ internalUser }) => {
     } catch (err) {
       alert("Error saving category: " + err.message);
     } finally {
-      // ✅ **3. Set loading state to false to re-enable button**
       setIsSavingCategory(false);
     }
   };
@@ -255,10 +252,20 @@ const PriceCat = ({ internalUser }) => {
       );
     });
 
-  const dropdownItems = items.filter(item => 
-    item.name.toLowerCase().includes(dropdownSearch.toLowerCase()) ||
-    (item.sku && item.sku.toLowerCase().includes(dropdownSearch.toLowerCase()))
-  );
+  // ✅ NEW LOGIC: Filter out items already in the current category
+  const dropdownItems = items.filter(item => {
+    // 1. Matches Search Text
+    const matchesSearch = item.name.toLowerCase().includes(dropdownSearch.toLowerCase()) ||
+    (item.sku && item.sku.toLowerCase().includes(dropdownSearch.toLowerCase()));
+
+    // 2. Is NOT already in this specific category
+    // We create a check to see if this item ID exists in pricedItems for the selectedCategory
+    const alreadyInCat = pricedItems.some(
+        (pItem) => pItem.categoryId === selectedCategory?.id && pItem.itemId === item.id
+    );
+
+    return matchesSearch && !alreadyInCat;
+  });
   
   const handleItemSelect = (item) => {
     setSelectedItem(item);
@@ -299,7 +306,6 @@ const PriceCat = ({ internalUser }) => {
         {isAdmin && (
           <div style={{ marginBottom: 16 }}>
             <input type="text" placeholder="New category name..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8, boxSizing: 'border-box' }} />
-            {/* ✅ **4. Update button text and disabled state based on loading status** */}
             <button 
               onClick={handleSaveCategory} 
               disabled={isSavingCategory}

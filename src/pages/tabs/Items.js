@@ -15,7 +15,7 @@ import {
   limit,
   startAfter,
   where,
-  writeBatch, // ✅ Import writeBatch for migration
+  writeBatch,
 } from "firebase/firestore";
 import {
   AiOutlinePlus,
@@ -65,41 +65,60 @@ const Items = ({ internalUser }) => {
 
       try {
         const itemsColRef = collection(db, uid, "items", "item_list");
-        let q = query(itemsColRef, orderBy("createdAt", "desc"));
+        let q;
 
-        // ✅ **MODIFIED FOR CASE-INSENSITIVE SEARCH**
-        const searchTerm = search.trim().toLowerCase(); // Convert search to lowercase
+        const searchTerm = search.trim().toLowerCase();
+
+        // LOGIC CHANGE: 
+        // If searching, we fetch a larger batch and filter client-side to allow 
+        // searching by PID, Brand, SKU, etc. Firestore cannot do OR queries 
+        // across multiple fields easily with partial matching.
         if (searchTerm) {
-          // Query the new 'name_lowercase' field
-          q = query(q, 
-            where("name_lowercase", ">=", searchTerm), 
-            where("name_lowercase", "<=", searchTerm + '\uf8ff')
-          );
-        }
+            // Fetch latest 500 items for search context (adjust limit as needed for performance)
+            q = query(itemsColRef, orderBy("createdAt", "desc"), limit(500));
+            
+            const itemsSnap = await getDocs(q);
+            const allFetched = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        const cursor = pageCursors[currentPage];
-        if (cursor) {
-          q = query(q, startAfter(cursor));
-        }
-        
-        q = query(q, limit(itemsPerPage));
+            // Client-side multi-field filter
+            const filteredItems = allFetched.filter(item => {
+                return (
+                    (item.pid && item.pid.toString().includes(searchTerm)) ||
+                    (item.name && item.name.toLowerCase().includes(searchTerm)) ||
+                    (item.brand && item.brand.toLowerCase().includes(searchTerm)) ||
+                    (item.sku && item.sku.toLowerCase().includes(searchTerm)) ||
+                    (item.category && item.category.toLowerCase().includes(searchTerm))
+                );
+            });
 
-        const itemsSnap = await getDocs(q);
-        const fetchedItems = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setItems(fetchedItems);
-        
-        if (!itemsSnap.empty) {
-            const lastDoc = itemsSnap.docs[itemsSnap.docs.length - 1];
-            setLastVisible(lastDoc);
-            setHasNextPage(itemsSnap.docs.length === itemsPerPage);
+            setItems(filteredItems);
+            setHasNextPage(false); // Disable pagination during search
         } else {
-            setHasNextPage(false);
+            // Standard Pagination Logic (No Search)
+            q = query(itemsColRef, orderBy("createdAt", "desc"));
+            
+            const cursor = pageCursors[currentPage];
+            if (cursor) {
+              q = query(q, startAfter(cursor));
+            }
+            q = query(q, limit(itemsPerPage));
+
+            const itemsSnap = await getDocs(q);
+            const fetchedItems = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            setItems(fetchedItems);
+            
+            if (!itemsSnap.empty) {
+                const lastDoc = itemsSnap.docs[itemsSnap.docs.length - 1];
+                setLastVisible(lastDoc);
+                setHasNextPage(itemsSnap.docs.length === itemsPerPage);
+            } else {
+                setHasNextPage(false);
+            }
         }
 
       } catch (error) {
-        // Log the full error to see the index link
         console.error("Firestore Query Error:", error); 
-        alert("Error fetching items: " + error.message + "\n\nNOTE: Searching may require a new database index. Check the browser console (F12) for a link to create it.");
+        alert("Error fetching items: " + error.message);
       } finally {
         setLoading(false);
       }
@@ -128,9 +147,12 @@ const Items = ({ internalUser }) => {
   }, []);
 
   useEffect(() => {
-    setCurrentPage(1);
-    setPageCursors({ 1: null });
-    setLastVisible(null);
+    // Only reset pagination if we are NOT loading to prevent jitter
+    if (!loading) {
+        setCurrentPage(1);
+        setPageCursors({ 1: null });
+        setLastVisible(null);
+    }
   }, [search]);
 
   const handlePageChange = (direction) => {
@@ -209,7 +231,6 @@ const Items = ({ internalUser }) => {
     try {
       const username = getCurrentInternal()?.username || "Admin";
       
-      // ✅ **MODIFIED FOR CASE-INSENSITIVE SEARCH**
       const finalName = (form.type !== "ourProduct" && form.brand.trim()) 
         ? `${form.brand.trim()} ${form.name.trim()}` 
         : form.name.trim();
@@ -217,7 +238,7 @@ const Items = ({ internalUser }) => {
       const itemsColRef = collection(db, uid, "items", "item_list");
       const dataToSave = {
           name: finalName,
-          name_lowercase: finalName.toLowerCase(), // Add lowercase version
+          name_lowercase: finalName.toLowerCase(),
           brand: form.brand.trim(),
           sku: form.sku || "",
           type: form.type,
@@ -297,36 +318,49 @@ const Items = ({ internalUser }) => {
     setShowModal(true);
   };
 
-
-  if (loading && currentPage === 1 && !search) return <p>Loading items...</p>;
+  // REMOVED THE "EARLY RETURN" HERE to prevent search box from unmounting/losing focus
+  // if (loading && currentPage === 1 && !search) return <p>Loading items...</p>;
 
   return (
     <div style={{ padding: "24px", fontFamily: "'Segoe UI', sans-serif" }}>
       <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333" }}>Items Management</h2>
-
-      {/* ✅ ONE-TIME MIGRATION BUTTON
-        Temporarily uncomment this button to update your old data. 
-        Click it once, then remove it.
-      */}
-      {/* <button onClick={migrateItemNames} style={{backgroundColor: 'orange', color: 'white', padding: 10, margin: 10, border: 'none', borderRadius: 5}}>
-        RUN ONE-TIME DATA MIGRATION
-      </button> 
-      */}
 
       <div style={{ margin: "20px 0", display: "flex", gap: "12px", alignItems: "center" }}>
         <div style={{ flex: 1, position: "relative" }}>
           <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
           <input
             type="text"
-            placeholder="Search by item name (case-insensitive)..."
+            placeholder="Search by ID, Name, Brand, SKU or Category..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1, width: "100%", padding: "8px 8px 8px 34px", border: "1px solid #ddd", borderRadius: "6px" }}
+            // FIX: Added boxSizing to prevent overflow
+            style={{ 
+                flex: 1, 
+                width: "100%", 
+                padding: "8px 8px 8px 34px", 
+                border: "1px solid #ddd", 
+                borderRadius: "6px",
+                boxSizing: "border-box" 
+            }}
           />
         </div>
         <button
           onClick={handleAddItemClick}
-          style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", background: "#3498db", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: '14px' }}
+          // FIX: Added whiteSpace nowrap and flexShrink to prevent button overlap
+          style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "6px", 
+              padding: "8px 16px", 
+              background: "#3498db", 
+              color: "white", 
+              border: "none", 
+              borderRadius: "6px", 
+              cursor: "pointer", 
+              fontSize: '14px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0
+            }}
         >
           <AiOutlinePlus /> Add Item
         </button>
@@ -343,8 +377,9 @@ const Items = ({ internalUser }) => {
                 </tr>
             </thead>
             <tbody>
-                {loading ? (<tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>) 
-                : items.length > 0 ? (
+                {loading ? (
+                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>
+                ) : items.length > 0 ? (
                     items.map((item) => (
                         <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
                             <td style={{ padding: "12px" }}>{item.pid}</td>
@@ -372,14 +407,17 @@ const Items = ({ internalUser }) => {
         </table>
       </div>
 
-      <div style={{ marginTop: "20px", display: "flex", justifyContent: 'center', gap: "8px", alignItems: 'center' }}>
-          <button onClick={() => handlePageChange('prev')} disabled={currentPage === 1 || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Previous</button>
-          <span>Page {currentPage}</span>
-          <button onClick={() => handlePageChange('next')} disabled={!hasNextPage || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Next</button>
-      </div>
+      {/* Pagination only shows if NOT searching */}
+      {!search && (
+          <div style={{ marginTop: "20px", display: "flex", justifyContent: 'center', gap: "8px", alignItems: 'center' }}>
+              <button onClick={() => handlePageChange('prev')} disabled={currentPage === 1 || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Previous</button>
+              <span>Page {currentPage}</span>
+              <button onClick={() => handlePageChange('next')} disabled={!hasNextPage || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Next</button>
+          </div>
+      )}
 
       {showModal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px" }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingItem ? "Edit Item" : "Add New Item"}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -433,52 +471,5 @@ const Items = ({ internalUser }) => {
     </div>
   );
 };
-
-/**
- * ✅ **ONE-TIME MIGRATION FUNCTION**
- * Run this function once to update all your existing items with the
- * new 'name_lowercase' field. You can temporarily add a button
- * in your component to call this function.
- * * Make sure 'db' and 'auth' are imported correctly in this file.
- */
-const migrateItemNames = async () => {
-  if (!window.confirm("This will update all items in the database to add a lowercase name field for searching. This is a one-time operation. Continue?")) return;
-
-  const uid = auth.currentUser?.uid;
-  if (!uid) return alert("You must be logged in to run the migration.");
-
-  console.log("Starting migration...");
-  let updatedCount = 0;
-  
-  try {
-    const itemsColRef = collection(db, uid, "items", "item_list");
-    const querySnapshot = await getDocs(itemsColRef);
-    
-    // Use a batch to update docs efficiently
-    const batch = writeBatch(db);
-
-    querySnapshot.docs.forEach(document => {
-      const data = document.data();
-      // Only update if the item has a name but NO name_lowercase field
-      if (data.name && data.name_lowercase === undefined) {
-        const itemRef = doc(db, uid, "items", "item_list", document.id);
-        batch.update(itemRef, { name_lowercase: data.name.toLowerCase() });
-        updatedCount++;
-      }
-    });
-
-    if (updatedCount > 0) {
-      await batch.commit();
-      alert(`Migration complete! ${updatedCount} items were successfully updated.`);
-    } else {
-      alert("Migration check complete. No items needed updating.");
-    }
-
-  } catch (error) {
-    console.error("Migration Failed:", error);
-    alert("An error occurred during migration: " + error.message);
-  }
-};
-
 
 export default Items;
