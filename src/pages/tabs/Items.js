@@ -35,6 +35,8 @@ const Items = ({ internalUser }) => {
   const [inventoryType, setInventoryType] = useState(null); 
   
   const [isSaving, setIsSaving] = useState(false);
+  // ✅ NEW: State for the buffering screen during sync
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -69,18 +71,11 @@ const Items = ({ internalUser }) => {
 
         const searchTerm = search.trim().toLowerCase();
 
-        // LOGIC CHANGE: 
-        // If searching, we fetch a larger batch and filter client-side to allow 
-        // searching by PID, Brand, SKU, etc. Firestore cannot do OR queries 
-        // across multiple fields easily with partial matching.
         if (searchTerm) {
-            // Fetch latest 500 items for search context (adjust limit as needed for performance)
             q = query(itemsColRef, orderBy("createdAt", "desc"), limit(500));
-            
             const itemsSnap = await getDocs(q);
             const allFetched = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-            // Client-side multi-field filter
             const filteredItems = allFetched.filter(item => {
                 return (
                     (item.pid && item.pid.toString().includes(searchTerm)) ||
@@ -92,11 +87,9 @@ const Items = ({ internalUser }) => {
             });
 
             setItems(filteredItems);
-            setHasNextPage(false); // Disable pagination during search
+            setHasNextPage(false); 
         } else {
-            // Standard Pagination Logic (No Search)
             q = query(itemsColRef, orderBy("createdAt", "desc"));
-            
             const cursor = pageCursors[currentPage];
             if (cursor) {
               q = query(q, startAfter(cursor));
@@ -147,7 +140,6 @@ const Items = ({ internalUser }) => {
   }, []);
 
   useEffect(() => {
-    // Only reset pagination if we are NOT loading to prevent jitter
     if (!loading) {
         setCurrentPage(1);
         setPageCursors({ 1: null });
@@ -247,17 +239,51 @@ const Items = ({ internalUser }) => {
           lastEditedAt: serverTimestamp(),
       };
 
-
       if (editingItem) {
+        // ✅ START SYNC: Show Buffering Screen
+        setIsSyncing(true);
+
         const itemDocRef = doc(itemsColRef, editingItem.id);
+        
+        // 1. Update the main item
         await updateDoc(itemDocRef, dataToSave);
+        
+        // 2. Sync changes to "priced_items" collection
+        try {
+            const pricedItemsRef = collection(db, uid, "price_categories", "priced_items");
+            // Find all entries in price lists that match this Item ID
+            const q = query(pricedItemsRef, where("itemId", "==", editingItem.id));
+            const querySnapshot = await getDocs(q);
+
+            if (!querySnapshot.empty) {
+                const batch = writeBatch(db);
+                querySnapshot.forEach((doc) => {
+                    batch.update(doc.ref, {
+                        itemName: finalName,
+                        itemSKU: form.sku || "",
+                        itemBrand: form.brand.trim(),
+                        itemType: form.type,
+                        // If you are storing 'sku' separately as requested previously:
+                        sku: form.sku || "" 
+                    });
+                });
+                await batch.commit();
+                console.log("Synced item updates to price categories.");
+            }
+        } catch (syncError) {
+            console.error("Error syncing to price categories:", syncError);
+            alert("Item saved, but failed to update price categories: " + syncError.message);
+        }
+
         setItems(prevItems => prevItems.map(item => 
           item.id === editingItem.id ? { ...item, ...dataToSave } : item
         ));
+
       } else {
         const pid = await getNextPID(uid);
         if (pid === null) {
           setIsSaving(false);
+          setIsSyncing(false);
           return;
         }
         const newData = { ...dataToSave, addedBy: username, createdAt: serverTimestamp(), pid };
@@ -272,6 +298,8 @@ const Items = ({ internalUser }) => {
       alert("Error saving item: " + error.message);
     } finally {
       setIsSaving(false);
+      // ✅ END SYNC: Hide Buffering Screen
+      setIsSyncing(false); 
     }
   };
 
@@ -318,11 +346,33 @@ const Items = ({ internalUser }) => {
     setShowModal(true);
   };
 
-  // REMOVED THE "EARLY RETURN" HERE to prevent search box from unmounting/losing focus
-  // if (loading && currentPage === 1 && !search) return <p>Loading items...</p>;
-
   return (
     <div style={{ padding: "24px", fontFamily: "'Segoe UI', sans-serif" }}>
+      
+      {/* ✅ BUFFERING SCREEN OVERLAY */}
+      {isSyncing && (
+        <div style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(255, 255, 255, 0.85)",
+            zIndex: 9999,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(2px)"
+        }}>
+            <div style={{
+                border: "5px solid #f3f3f3",
+                borderTop: "5px solid #3498db",
+                borderRadius: "50%",
+                width: "50px",
+                height: "50px",
+                animation: "spin 1s linear infinite"
+            }}></div>
+            <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            <h3 style={{ marginTop: "20px", color: "#333" }}>Updating Item & Syncing Data...</h3>
+            <p style={{ color: "#666" }}>Please wait while we update all price categories.</p>
+        </div>
+      )}
+
       <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333" }}>Items Management</h2>
 
       <div style={{ margin: "20px 0", display: "flex", gap: "12px", alignItems: "center" }}>
@@ -333,7 +383,6 @@ const Items = ({ internalUser }) => {
             placeholder="Search by ID, Name, Brand, SKU or Category..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            // FIX: Added boxSizing to prevent overflow
             style={{ 
                 flex: 1, 
                 width: "100%", 
@@ -346,7 +395,6 @@ const Items = ({ internalUser }) => {
         </div>
         <button
           onClick={handleAddItemClick}
-          // FIX: Added whiteSpace nowrap and flexShrink to prevent button overlap
           style={{ 
               display: "flex", 
               alignItems: "center", 
@@ -407,7 +455,6 @@ const Items = ({ internalUser }) => {
         </table>
       </div>
 
-      {/* Pagination only shows if NOT searching */}
       {!search && (
           <div style={{ marginTop: "20px", display: "flex", justifyContent: 'center', gap: "8px", alignItems: 'center' }}>
               <button onClick={() => handlePageChange('prev')} disabled={currentPage === 1 || loading} style={{ padding: "8px 12px", cursor: 'pointer' }}>Previous</button>

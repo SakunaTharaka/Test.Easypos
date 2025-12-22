@@ -20,9 +20,19 @@ const PriceCat = ({ internalUser }) => {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [items, setItems] = useState([]);
   const [pricedItems, setPricedItems] = useState([]);
+  
+  // Modals
   const [showItemPopup, setShowItemPopup] = useState(false);
+  const [showCatTypePopup, setShowCatTypePopup] = useState(false); 
+
   const [selectedItem, setSelectedItem] = useState(null);
-  const [price, setPrice] = useState("");
+  
+  // Item Form States
+  const [price, setPrice] = useState(""); // Final Selling Price
+  const [originalPrice, setOriginalPrice] = useState(""); 
+  const [discountPercentage, setDiscountPercentage] = useState(""); 
+  const [saveAmount, setSaveAmount] = useState(""); // New State for "Save" amount
+
   const [search, setSearch] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
 
@@ -34,7 +44,7 @@ const PriceCat = ({ internalUser }) => {
   
   const dropdownRef = useRef(null);
   const activeItemRef = useRef(null);
-  const priceInputRef = useRef(null);
+  const priceInputRef = useRef(null); 
   const saveButtonRef = useRef(null);
 
   const getCurrentInternal = () => {
@@ -93,6 +103,7 @@ const PriceCat = ({ internalUser }) => {
     fetchPricedItems();
   }, [fetchCategories]);
 
+  // Handle dropdown click outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -103,6 +114,7 @@ const PriceCat = ({ internalUser }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
   
+  // Scroll to active item in dropdown
   useEffect(() => {
     if (activeItemRef.current) {
         activeItemRef.current.scrollIntoView({
@@ -112,10 +124,83 @@ const PriceCat = ({ internalUser }) => {
     }
   }, [activeIndex]);
 
-  const handleSaveCategory = async () => {
-    if (!newCategoryName.trim()) return alert("Enter category name");
+  // --- HANDLERS FOR BIDIRECTIONAL CALCULATION ---
+
+  const handleOriginalPriceChange = (e) => {
+    const val = e.target.value;
+    setOriginalPrice(val);
     
+    const orig = parseFloat(val);
+    const disc = parseFloat(discountPercentage);
+    
+    if (!isNaN(orig) && !isNaN(disc)) {
+        // If discount exists, recalculate Save and Price
+        const saved = orig * (disc / 100);
+        setSaveAmount(saved.toFixed(2));
+        setPrice((orig - saved).toFixed(2));
+    } else if (!isNaN(orig)) {
+        // If no discount, Price = Orig, Save = 0 or empty? 
+        // Let's assume empty discount means full price
+        setPrice(orig.toFixed(2));
+        setSaveAmount(""); 
+    } else {
+        setPrice("");
+        setSaveAmount("");
+    }
+  };
+
+  const handleDiscountChange = (e) => {
+    const val = e.target.value;
+    setDiscountPercentage(val);
+    
+    const orig = parseFloat(originalPrice);
+    const disc = parseFloat(val);
+    
+    if (!isNaN(orig) && !isNaN(disc)) {
+        // Calculate Save Amount and Price
+        const saved = orig * (disc / 100);
+        setSaveAmount(saved.toFixed(2));
+        setPrice((orig - saved).toFixed(2));
+    } else if (!isNaN(orig) && val === "") {
+        // Discount cleared -> Revert to Original Price
+        setSaveAmount("");
+        setPrice(orig.toFixed(2));
+    }
+  };
+
+  const handleSaveAmountChange = (e) => {
+    const val = e.target.value;
+    setSaveAmount(val);
+    
+    const orig = parseFloat(originalPrice);
+    const saved = parseFloat(val);
+    
+    if (!isNaN(orig) && !isNaN(saved) && orig > 0) {
+        // Calculate Discount % and Price
+        const disc = (saved / orig) * 100;
+        setDiscountPercentage(disc.toFixed(2));
+        setPrice((orig - saved).toFixed(2));
+    } else if (!isNaN(orig) && val === "") {
+        // Save Amount cleared -> Revert to Original Price
+        setDiscountPercentage("");
+        setPrice(orig.toFixed(2));
+    }
+  };
+
+  // --- END HANDLERS ---
+
+  const initiateSaveCategory = () => {
+    if (!newCategoryName.trim()) return alert("Enter category name");
+    if (editingCategory) {
+        handleSaveCategory(editingCategory.isDiscountable || false);
+    } else {
+        setShowCatTypePopup(true);
+    }
+  };
+
+  const handleSaveCategory = async (isDiscountable) => {
     setIsSavingCategory(true);
+    setShowCatTypePopup(false); 
 
     const uid = auth.currentUser.uid;
     const catColRef = collection(db, uid, "price_categories", "categories");
@@ -131,6 +216,7 @@ const PriceCat = ({ internalUser }) => {
       } else {
         await addDoc(catColRef, {
           name: newCategoryName.trim(),
+          isDiscountable: isDiscountable, 
           createdBy: username,
           lastEditedBy: username,
           createdAt: serverTimestamp(),
@@ -172,22 +258,32 @@ const PriceCat = ({ internalUser }) => {
 
   const handleAddItem = async () => {
     if (!selectedItem || !price || !selectedCategory) return alert("Fill all fields");
+    
+    if (selectedCategory.isDiscountable) {
+        if(!originalPrice) return alert("Please enter original price.");
+    }
+
     const uid = auth.currentUser.uid;
     const pricedItemsColRef = collection(db, uid, "price_categories", "priced_items");
     const username = currentUser?.username || "Admin";
 
+    const commonData = {
+        price: Number(price), 
+        originalPrice: selectedCategory.isDiscountable ? Number(originalPrice) : null,
+        discountPercentage: selectedCategory.isDiscountable ? Number(discountPercentage) : null,
+        editedBy: username, 
+        editedAt: serverTimestamp() 
+    };
+
     try {
       if (selectedItem.pricedItemId) {
         const docRef = doc(pricedItemsColRef, selectedItem.pricedItemId);
-        await updateDoc(docRef, { 
-          price: Number(price), 
-          editedBy: username, 
-          editedAt: serverTimestamp() 
-        });
+        await updateDoc(docRef, commonData);
+
         setPricedItems((prev) =>
           prev.map((i) => 
             i.id === selectedItem.pricedItemId 
-              ? { ...i, price: Number(price), editedBy: username } 
+              ? { ...i, ...commonData } 
               : i
           )
         );
@@ -195,7 +291,7 @@ const PriceCat = ({ internalUser }) => {
         const duplicate = pricedItems.find(i => i.categoryId === selectedCategory.id && i.itemId === selectedItem.id);
         if (duplicate) return alert("This item already exists in this price category.");
 
-        const docRef = await addDoc(pricedItemsColRef, {
+        const newItemData = {
           categoryId: selectedCategory.id,
           categoryName: selectedCategory.name,
           itemId: selectedItem.id,
@@ -203,25 +299,23 @@ const PriceCat = ({ internalUser }) => {
           itemSKU: selectedItem.sku || "",
           itemBrand: selectedItem.brand || "",
           itemType: selectedItem.type || "",
-          price: Number(price),
+          // ✅ ADDED PID HERE
+          pid: selectedItem.pid || "",
           createdBy: username,
-          editedBy: username,
           createdAt: serverTimestamp(),
-        });
-        const newItem = {
-            id: docRef.id,
-            itemId: selectedItem.id,
-            categoryId: selectedCategory.id,
-            itemName: selectedItem.name,
-            itemSKU: selectedItem.sku || "",
-            price: Number(price),
-            createdBy: username,
-            editedBy: username,
+          ...commonData
         };
-        setPricedItems((prev) => [...prev, newItem]);
+
+        const docRef = await addDoc(pricedItemsColRef, newItemData);
+        
+        setPricedItems((prev) => [...prev, { id: docRef.id, ...newItemData }]);
       }
+      
       setSelectedItem(null);
       setPrice("");
+      setOriginalPrice("");
+      setDiscountPercentage("");
+      setSaveAmount("");
       setShowItemPopup(false);
       setDropdownSearch("");
     } catch (err) {
@@ -252,14 +346,12 @@ const PriceCat = ({ internalUser }) => {
       );
     });
 
-  // ✅ NEW LOGIC: Filter out items already in the current category
   const dropdownItems = items.filter(item => {
-    // 1. Matches Search Text
-    const matchesSearch = item.name.toLowerCase().includes(dropdownSearch.toLowerCase()) ||
-    (item.sku && item.sku.toLowerCase().includes(dropdownSearch.toLowerCase()));
+    const matchesSearch = 
+        item.name.toLowerCase().includes(dropdownSearch.toLowerCase()) ||
+        (item.sku && item.sku.toLowerCase().includes(dropdownSearch.toLowerCase())) ||
+        (item.pid && String(item.pid).includes(dropdownSearch));
 
-    // 2. Is NOT already in this specific category
-    // We create a check to see if this item ID exists in pricedItems for the selectedCategory
     const alreadyInCat = pricedItems.some(
         (pItem) => pItem.categoryId === selectedCategory?.id && pItem.itemId === item.id
     );
@@ -299,6 +391,30 @@ const PriceCat = ({ internalUser }) => {
     }
   };
 
+  const openItemPopup = (existingItem = null) => {
+    if (existingItem) {
+        setSelectedItem({ ...existingItem, pricedItemId: existingItem.id });
+        setPrice(existingItem.price);
+        setOriginalPrice(existingItem.originalPrice || "");
+        setDiscountPercentage(existingItem.discountPercentage || "");
+        // Calculate Save Amount on open
+        if(existingItem.originalPrice && existingItem.price) {
+             const saved = existingItem.originalPrice - existingItem.price;
+             setSaveAmount(saved.toFixed(2));
+        } else {
+             setSaveAmount("");
+        }
+    } else {
+        setSelectedItem(null);
+        setPrice("");
+        setOriginalPrice("");
+        setDiscountPercentage("");
+        setSaveAmount("");
+        setDropdownSearch("");
+    }
+    setShowItemPopup(true);
+  };
+
   return (
     <div style={{ display: "flex", height: "calc(100vh - 200px)" }}>
       <div style={{ width: "300px", borderRight: "1px solid #ddd", padding: 16, overflowY: 'auto' }}>
@@ -307,7 +423,7 @@ const PriceCat = ({ internalUser }) => {
           <div style={{ marginBottom: 16 }}>
             <input type="text" placeholder="New category name..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8, boxSizing: 'border-box' }} />
             <button 
-              onClick={handleSaveCategory} 
+              onClick={initiateSaveCategory} 
               disabled={isSavingCategory}
               style={{ 
                 width: "100%", 
@@ -330,7 +446,9 @@ const PriceCat = ({ internalUser }) => {
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {categories.map((c) => (
             <li key={c.id} style={{ padding: 10, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: selectedCategory?.id === c.id ? "#3498db" : "#f9f9f9", color: selectedCategory?.id === c.id ? "#fff" : "#333", borderRadius: 4, marginBottom: 6 }} >
-              <span onClick={() => setSelectedCategory(c)} style={{ flex: 1 }}>{c.name}</span>
+              <span onClick={() => setSelectedCategory(c)} style={{ flex: 1 }}>
+                {c.name} {c.isDiscountable && <span style={{fontSize:'10px', background:'#e74c3c', color:'white', padding:'2px 4px', borderRadius:'3px'}}>Promo</span>}
+              </span>
               {isAdmin && (
                 <span style={{ display: "flex", gap: 8 }}>
                   <AiOutlineEdit title="Edit" onClick={() => { setEditingCategory(c); setNewCategoryName(c.name); }} />
@@ -345,14 +463,14 @@ const PriceCat = ({ internalUser }) => {
       <div style={{ flex: 1, padding: 16, overflowY: 'auto' }}>
         {selectedCategory ? (
           <>
-            <h2>Items in: {selectedCategory.name}</h2>
+            <h2>Items in: {selectedCategory.name} {selectedCategory.isDiscountable && "(Discountable)"}</h2>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ position: "relative", flex: 1, marginRight: '16px' }}>
                 <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
                 <input type="text" placeholder="Search by item name or SKU..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", padding: "8px 8px 8px 34px", borderRadius: 4, border: "1px solid #ddd", boxSizing: 'border-box' }} />
               </div>
               {isAdmin && (
-                <button onClick={() => { setSelectedItem(null); setPrice(''); setDropdownSearch(''); setShowItemPopup(true); }} style={{ padding: "8px 16px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button onClick={() => openItemPopup()} style={{ padding: "8px 16px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <AiOutlinePlus /> Add Item to Category
                 </button>
               )}
@@ -363,7 +481,13 @@ const PriceCat = ({ internalUser }) => {
                 <tr style={{ background: "#f5f5f5" }}>
                     <th style={{ padding: 10, textAlign: 'left' }}>Item</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>SKU</th>
-                    <th style={{ padding: 10, textAlign: 'left' }}>Price (Rs.)</th>
+                    {selectedCategory.isDiscountable && (
+                        <>
+                         <th style={{ padding: 10, textAlign: 'left' }}>Orig. Price</th>
+                         <th style={{ padding: 10, textAlign: 'left' }}>Disc %</th>
+                        </>
+                    )}
+                    <th style={{ padding: 10, textAlign: 'left' }}>{selectedCategory.isDiscountable ? 'Final Price' : 'Price'} (Rs.)</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>Last Updated By</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>Actions</th>
                 </tr>
@@ -373,19 +497,27 @@ const PriceCat = ({ internalUser }) => {
                   <tr key={i.id} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={{ padding: 10 }}>{i.itemName}</td>
                     <td style={{ padding: 10 }}>{i.itemSKU || "-"}</td>
+                    
+                    {selectedCategory.isDiscountable && (
+                        <>
+                         <td style={{ padding: 10, color: '#7f8c8d' }}>{i.originalPrice ? Number(i.originalPrice).toFixed(2) : '-'}</td>
+                         <td style={{ padding: 10, color: '#e74c3c' }}>{i.discountPercentage ? `${i.discountPercentage}%` : '-'}</td>
+                        </>
+                    )}
+
                     <td style={{ padding: 10, fontWeight: 'bold' }}>{Number(i.price).toFixed(2)}</td>
                     <td style={{ padding: 10, color: '#555' }}>{i.editedBy || i.createdBy || '-'}</td>
                     <td style={{ padding: 10 }}>
                       {isAdmin && (
                         <span style={{ display: 'flex', gap: '8px' }}>
-                          <AiOutlineEdit title="Edit Price" style={{ cursor: "pointer" }} onClick={() => { setSelectedItem({ ...i, pricedItemId: i.id }); setPrice(i.price); setShowItemPopup(true); }} />
+                          <AiOutlineEdit title="Edit Price" style={{ cursor: "pointer" }} onClick={() => openItemPopup(i)} />
                           <AiOutlineDelete title="Remove from Category" style={{ cursor: "pointer" }} onClick={() => handleDeleteItem(i.id)} />
                         </span>
                       )}
                     </td>
                   </tr>
                 ))}
-                {filteredItems.length === 0 && (<tr><td colSpan={5} style={{ textAlign: "center", padding: 20, color: "#777" }}>No items found in this category.</td></tr>)}
+                {filteredItems.length === 0 && (<tr><td colSpan={selectedCategory.isDiscountable ? 7 : 5} style={{ textAlign: "center", padding: 20, color: "#777" }}>No items found in this category.</td></tr>)}
               </tbody>
             </table>
           </>
@@ -396,6 +528,26 @@ const PriceCat = ({ internalUser }) => {
           </div>
         )}
 
+        {/* Modal: Category Type Selection */}
+        {showCatTypePopup && (
+            <div style={popupStyle}>
+                <div style={popupInnerStyle}>
+                    <h3>Select Category Type</h3>
+                    <p>What kind of price category is <b>{newCategoryName}</b>?</p>
+                    <div style={{display:'flex', gap:'10px', marginTop:'20px'}}>
+                        <button onClick={() => handleSaveCategory(false)} style={{flex:1, padding: '15px', background:'#3498db', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>
+                            <b>Regular Price</b><br/><span style={{fontSize:'12px', opacity:0.9}}>Set a specific price for items.</span>
+                        </button>
+                        <button onClick={() => handleSaveCategory(true)} style={{flex:1, padding: '15px', background:'#e67e22', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>
+                            <b>Discountable</b><br/><span style={{fontSize:'12px', opacity:0.9}}>Set base price & discount %.</span>
+                        </button>
+                    </div>
+                    <button onClick={() => setShowCatTypePopup(false)} style={{marginTop:'15px', padding:'8px', width:'100%', background:'transparent', border:'none', color:'#777', cursor:'pointer'}}>Cancel</button>
+                </div>
+            </div>
+        )}
+
+        {/* Modal: Add Item */}
         {showItemPopup && (
           <div style={popupStyle}>
             <div style={popupInnerStyle}>
@@ -426,7 +578,11 @@ const PriceCat = ({ internalUser }) => {
                           }}
                           onClick={() => handleItemSelect(item)}
                         >
-                          {item.name} {item.sku ? `(SKU: ${item.sku})` : ''}
+                          {/* UPDATED LIST ITEM LAYOUT: PID ON RIGHT */}
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                                <span>{item.name} {item.sku ? `(SKU: ${item.sku})` : ''}</span>
+                                {item.pid && <span style={{fontWeight: 'bold', color: '#555', fontSize: '13px'}}>{item.pid}</span>}
+                          </div>
                         </li>
                       ))
                     ) : (
@@ -436,21 +592,69 @@ const PriceCat = ({ internalUser }) => {
                 )}
               </div>
               
-              <input
-                ref={priceInputRef}
-                onKeyDown={handlePriceInputKeyDown}
-                type="number"
-                placeholder="Set Price (Rs.)"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                style={{ width: "100%", padding: 10, marginBottom: 20, boxSizing: 'border-box' }}
-              />
+              {/* Conditional Rendering based on Category Type */}
+              {selectedCategory?.isDiscountable ? (
+                <>
+                    <div>
+                         <label style={{fontSize:'12px', fontWeight:'bold', color:'#555'}}>Original Price (Rs.)</label>
+                         <input
+                            ref={priceInputRef}
+                            type="number"
+                            placeholder="e.g. 1000"
+                            value={originalPrice}
+                            onChange={handleOriginalPriceChange}
+                            style={{ width: "100%", padding: 10, marginTop:5, marginBottom: 15, boxSizing: 'border-box' }}
+                        />
+                    </div>
+                    <div style={{display:'flex', gap:'10px'}}>
+                        <div style={{flex:1}}>
+                             <label style={{fontSize:'12px', fontWeight:'bold', color:'#555'}}>Discount (%)</label>
+                             <input
+                                type="number"
+                                placeholder="e.g. 10"
+                                value={discountPercentage}
+                                onChange={handleDiscountChange}
+                                style={{ width: "100%", padding: 10, marginTop:5, marginBottom: 15, boxSizing: 'border-box' }}
+                            />
+                        </div>
+                        <div style={{flex:1}}>
+                             <label style={{fontSize:'12px', fontWeight:'bold', color:'#555'}}>Save (Rs.)</label>
+                             <input
+                                type="number"
+                                placeholder="e.g. 100"
+                                value={saveAmount}
+                                onChange={handleSaveAmountChange}
+                                style={{ width: "100%", padding: 10, marginTop:5, marginBottom: 15, boxSizing: 'border-box' }}
+                            />
+                        </div>
+                    </div>
+                    <div style={{marginBottom:'20px', padding:'10px', background:'#f0f9ff', borderRadius:'6px', border:'1px solid #bae6fd'}}>
+                        <label style={{display:'block', fontSize:'12px', color:'#0369a1', marginBottom:'4px'}}>New Selling Price (Calculated)</label>
+                        <strong style={{fontSize:'18px', color:'#0284c7'}}>Rs. {price || "0.00"}</strong>
+                    </div>
+                </>
+              ) : (
+                // REGULAR CATEGORY UI
+                <input
+                    ref={priceInputRef}
+                    onKeyDown={handlePriceInputKeyDown}
+                    type="number"
+                    placeholder="Set Price (Rs.)"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    style={{ width: "100%", padding: 10, marginBottom: 20, boxSizing: 'border-box' }}
+                />
+              )}
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button 
                     onClick={() => { 
                         setShowItemPopup(false); 
                         setSelectedItem(null); 
                         setPrice(""); 
+                        setOriginalPrice("");
+                        setDiscountPercentage("");
+                        setSaveAmount("");
                         setDropdownSearch("");
                     }} 
                     style={popupBtnStyle}>Cancel</button>

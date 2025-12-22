@@ -62,6 +62,12 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderTotal - orderAdvance;
 
+  // ✅ NEW: Calculate Total Savings if discountable
+  const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
+    const orig = item.originalPrice || item.price;
+    return sum + (orig - item.price) * item.quantity;
+  }, 0) : 0;
+
   // Format Date Helper
   const formatDate = (dateVal) => {
       if (!dateVal) return 'N/A';
@@ -131,7 +137,16 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
               <tr>
                 <th style={{ ...styles.th, ...styles.thItem }}>Item / Service</th>
                 <th style={styles.th}>Qty</th>
-                <th style={styles.th}>Rate</th>
+                
+                {/* ✅ UPDATED: Conditional Columns for Discountable Categories */}
+                {invoice.isDiscountable && (
+                    <th style={styles.th}>Orig. Price</th>
+                )}
+
+                <th style={styles.th}>
+                    {invoice.isDiscountable ? "Our Price" : "Rate"}
+                </th>
+
                 <th style={styles.th}>Total</th>
               </tr>
             </thead>
@@ -140,6 +155,12 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 <tr key={index}>
                   <td style={styles.td}>{item.itemName}</td>
                   <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
+                  
+                  {/* ✅ UPDATED: Conditional Cells for Discountable Categories */}
+                  {invoice.isDiscountable && (
+                      <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                  )}
+
                   <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
                   <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
                 </tr>
@@ -192,6 +213,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                     /* 3. STANDARD INVOICE TOTALS */
                     <>
                         <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
+                        
+                        {/* ✅ UPDATED: Show Total Save */}
+                        {invoice.isDiscountable && totalSave > 0 && (
+                            <div style={styles.totalRow}>
+                                <span>Your Total Save:</span>
+                                <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
+                            </div>
+                        )}
+
                         {deliveryCharge > 0 && (
                             <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
                         )}
@@ -229,7 +259,7 @@ const InvoiceViewer = () => {
   const { invoiceId } = useParams();
   const [invoice, setInvoice] = useState(null);
   const [serviceJob, setServiceJob] = useState(null);
-  const [orderDetails, setOrderDetails] = useState(null); // ❗ Store Order Details
+  const [orderDetails, setOrderDetails] = useState(null); 
   const [companyInfo, setCompanyInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   
@@ -264,7 +294,7 @@ const InvoiceViewer = () => {
                 if (jobSnap.exists()) setServiceJob(jobSnap.data());
             }
 
-            // ❗ Check for Customer Order (ORD)
+            // Check for Customer Order (ORD)
             if (invData.invoiceNumber?.startsWith('ORD') && invData.relatedOrderId) {
                 const orderRef = doc(db, user.uid, 'data', 'orders', invData.relatedOrderId);
                 const orderSnap = await getDoc(orderRef);
