@@ -20,7 +20,7 @@ const SalesReport = ({ internalUser }) => {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All"); // ❗ New Filter
+  const [statusFilter, setStatusFilter] = useState("All"); 
 
   // Pagination
   const [lastVisibleDoc, setLastVisibleDoc] = useState(null);
@@ -55,7 +55,7 @@ const SalesReport = ({ internalUser }) => {
       if (selectedCustomers.length > 0) constraints.push(where("customerId", "in", selectedCustomers.map(c => c.value)));
       if (dateFrom) { const start = new Date(dateFrom); start.setHours(0,0,0,0); constraints.push(where("createdAt", ">=", Timestamp.fromDate(start))); }
       if (dateTo) { const end = new Date(dateTo); end.setHours(23,59,59,999); constraints.push(where("createdAt", "<=", Timestamp.fromDate(end))); }
-      if (statusFilter !== "All") constraints.push(where("status", "==", statusFilter)); // ❗ Status Constraint
+      if (statusFilter !== "All") constraints.push(where("status", "==", statusFilter));
 
       if (direction === "next" && lastVisibleDoc) { constraints.push(startAfter(lastVisibleDoc)); constraints.push(limit(ITEMS_PER_PAGE)); } 
       else if (direction === "prev" && firstVisibleDoc) { constraints = [orderBy("createdAt", "desc"), ...constraints.filter(c => c.type !== 'orderBy'), endBefore(firstVisibleDoc), limitToLast(ITEMS_PER_PAGE)]; } 
@@ -88,11 +88,21 @@ const SalesReport = ({ internalUser }) => {
   const handleDelete = async (invoice) => {
       const user = auth.currentUser;
       if (!user) return;
+
+      // ✅ LOCK CHECK: Prevent deletion if date is reconciled
+      if (invoice.createdAt) {
+          const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
+          const dateStr = dateVal.toISOString().split('T')[0];
+          if (reconciledDates.has(dateStr)) {
+              alert(`Cannot delete invoice from ${dateStr} because it has been reconciled and locked.`);
+              return;
+          }
+      }
+
       if (window.confirm(`Delete Invoice ${invoice.invoiceNumber}?`)) {
           try {
               await deleteDoc(doc(db, user.uid, "invoices", "invoice_list", invoice.id));
 
-              // ❗ Sync Deletion with Source
               if (invoice.type === 'SERVICE' && invoice.relatedJobId) {
                   try { await deleteDoc(doc(db, user.uid, "data", "service_jobs", invoice.relatedJobId)); } catch (e) {}
               }
@@ -113,7 +123,6 @@ const SalesReport = ({ internalUser }) => {
         <div style={styles.filterGroup}><label style={styles.label}>Date Range</label><div style={styles.dateInputs}><input type="date" style={styles.input} value={dateFrom} onChange={e => setDateFrom(e.target.value)} /><span>-</span><input type="date" style={styles.input} value={dateTo} onChange={e => setDateTo(e.target.value)} /></div></div>
         <div style={styles.filterGroup}><label style={styles.label}>Customer</label><Select isMulti options={allCustomers} value={selectedCustomers} onChange={setSelectedCustomers} placeholder="All Customers" /></div>
         
-        {/* ❗ Status Filter */}
         <div style={styles.filterGroup}>
             <label style={styles.label}>Status</label>
             <select style={styles.input} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>

@@ -192,7 +192,7 @@ const Orders = ({ internalUser }) => {
       else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
   };
 
-  // --- SAVE ORDER ---
+  // --- SAVE ORDER (UPDATED LOGIC) ---
   const executeSaveOrder = async (paymentMethod) => {
     setIsSaving(true);
     try {
@@ -210,33 +210,38 @@ const Orders = ({ internalUser }) => {
         const grandTotal = subtotal + dCharge;
         const advance = Number(advanceAmount) || 0;
 
+        // 1. Create the ADVANCE Invoice
+        // LOGIC FIX: Total is set to Advance amount, not grand total.
         const invoiceData = {
             invoiceNumber: newInvNum,
             customerId: "WALK-IN",
             customerName: customerName || "Walk-in Customer",
             customerTelephone: customerPhone,
             items: checkout,
-            total: grandTotal, 
-            deliveryCharge: dCharge, 
+            total: advance, // <--- Corrected: Total equals Advance
+            deliveryCharge: 0, // <--- Corrected: No delivery charge on advance invoice
             advanceAmount: 0,
             received: 0, 
             createdAt: serverTimestamp(),
             issuedBy: internalUser?.username || "Admin",
             status: "Pending", 
             type: "ORDER",
-            remarks: remarks,
+            // Added remarks to show original order value context
+            remarks: `[ADVANCE] Order Total Value: ${grandTotal.toFixed(2)}. ${remarks}`,
             relatedOrderId: null,
             paymentMethod: paymentMethod 
         };
 
         const invRef = await addDoc(collection(db, uid, "invoices", "invoice_list"), invoiceData);
 
+        // 2. Create the Order Record
+        // LOGIC: Order record keeps the FULL Grand Total and calculates correct balance
         const orderData = {
             orderNumber: newInvNum,
             customerName: customerName || "Walk-in",
             customerPhone,
             items: checkout,
-            totalAmount: grandTotal,
+            totalAmount: grandTotal, // Keeps actual full value
             deliveryCharge: dCharge,
             advanceAmount: advance,
             balance: grandTotal - advance,
@@ -427,7 +432,6 @@ const Orders = ({ internalUser }) => {
                       </div>
                       <div style={styles.orderActions}>
                           {order.status === 'Pending' && (<button style={styles.actionBtnSuccess} onClick={() => handleCompleteClick(order)} title="Complete & Pay"><FaCheckCircle /> Pay Balance</button>)}
-                          {/* ❗ Added View Button */}
                           <button style={styles.actionBtnPrimary} onClick={() => handleViewOrder(order)} title="View Details"><FaEye /></button>
                           <button style={styles.actionBtnDanger} onClick={() => handleDeleteOrder(order.id, order.linkedInvoiceId)} title="Delete"><FaTrash /></button>
                       </div>

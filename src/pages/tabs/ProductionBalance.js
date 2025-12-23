@@ -77,16 +77,18 @@ const ProductionBalance = () => {
             const prodSnap = await getDocs(prodQuery);
             const productionMap = new Map();
             prodSnap.docs.forEach(doc => {
-                doc.data().lineItems.forEach(item => {
+                const items = doc.data().lineItems || [];
+                items.forEach(item => {
                     // ✅ Filter: Only count if the item is one of 'ourProduct's
                     if (ourProductIds.has(item.id)) {
                         const currentQty = productionMap.get(item.id) || 0;
-                        productionMap.set(item.id, currentQty + item.quantity);
+                        productionMap.set(item.id, currentQty + (Number(item.quantity) || 0));
                     }
                 });
             });
 
             // 3. Fetch Invoice (Billed) Data for date and shift
+            // This captures invoices that explicitly have a shift assigned
             const invColRef = collection(db, uid, "invoices", "invoice_list");
             const invQuery = query(invColRef, 
                 where("createdAt", ">=", startTimestamp), 
@@ -96,11 +98,33 @@ const ProductionBalance = () => {
             const invSnap = await getDocs(invQuery);
             const billedMap = new Map();
             invSnap.docs.forEach(doc => {
-                doc.data().items.forEach(item => {
-                    // ✅ Filter: Only count if the item is one of 'ourProduct's
-                    if (ourProductIds.has(item.itemId)) {
-                        const currentQty = billedMap.get(item.itemId) || 0;
-                        billedMap.set(item.itemId, currentQty + item.quantity);
+                const items = doc.data().items || [];
+                items.forEach(item => {
+                    // Items in invoices might use 'itemId' or 'id' depending on source
+                    const itemId = item.itemId || item.id;
+                    if (ourProductIds.has(itemId)) {
+                        const currentQty = billedMap.get(itemId) || 0;
+                        billedMap.set(itemId, currentQty + (Number(item.quantity) || 0));
+                    }
+                });
+            });
+
+            // ✅ 3.5 Fetch Orders (NEW ADDITION)
+            // Orders from the Orders page usually don't have a shift, so we fetch by Date
+            const ordersColRef = collection(db, uid, "data", "orders");
+            const ordersQuery = query(ordersColRef, 
+                where("createdAt", ">=", startTimestamp), 
+                where("createdAt", "<=", endTimestamp)
+            );
+            const ordersSnap = await getDocs(ordersQuery);
+            ordersSnap.docs.forEach(doc => {
+                const items = doc.data().items || [];
+                items.forEach(item => {
+                    // Check both itemId and id to be safe
+                    const itemId = item.itemId || item.id;
+                    if (ourProductIds.has(itemId)) {
+                        const currentQty = billedMap.get(itemId) || 0;
+                        billedMap.set(itemId, currentQty + (Number(item.quantity) || 0));
                     }
                 });
             });
@@ -160,7 +184,7 @@ const ProductionBalance = () => {
 
             <div style={styles.tableContainer}>
                 {loading ? (
-                    <p>Loading report...</p>
+                    <p style={{padding:'20px'}}>Loading report...</p>
                 ) : (
                     <table style={styles.table}>
                         <thead><tr><th style={styles.th}>Item Name</th><th style={styles.th}>Production Qty</th><th style={styles.th}>Billed Qty</th><th style={styles.th}>Difference</th><th style={styles.th}>Status</th></tr></thead>

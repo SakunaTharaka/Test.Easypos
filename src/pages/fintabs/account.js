@@ -1,12 +1,18 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
   addDoc, 
   getDocs, 
-  serverTimestamp
+  serverTimestamp,
+  query,
+  orderBy,
+  where,
+  limit,
+  startAfter
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
+import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight } from 'react-icons/ai';
 
 const Accounts = () => {
   const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
@@ -27,6 +33,16 @@ const Accounts = () => {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferDesc, setTransferDesc] = useState('');
 
+  // --- HISTORY STATE ---
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [filterDate, setFilterDate] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageCursors, setPageCursors] = useState([null]);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const PAGE_SIZE = 30;
+
   const uid = auth.currentUser ? auth.currentUser.uid : null;
 
   // --- 1. Fetch Data & Calculate Balances ---
@@ -35,6 +51,13 @@ const Accounts = () => {
     calculateBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, cashBookBalances]);
+
+  // --- 2. Fetch History on Change ---
+  useEffect(() => {
+    if(!uid) return;
+    fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, currentPage, filterDate]); // Re-fetch when page or date changes
 
   const calculateBalances = async () => {
     setLoading(true);
@@ -97,6 +120,48 @@ const Accounts = () => {
     }
   };
 
+  const fetchHistory = async () => {
+      setHistoryLoading(true);
+      try {
+          let q = collection(db, uid, "finance", "transfers");
+          let constraints = [orderBy("createdAt", "desc")];
+
+          if (filterDate) {
+               const start = new Date(filterDate); start.setHours(0,0,0,0);
+               const end = new Date(filterDate); end.setHours(23,59,59,999);
+               constraints.push(where("createdAt", ">=", start));
+               constraints.push(where("createdAt", "<=", end));
+          }
+
+          const cursor = pageCursors[currentPage - 1];
+          if (cursor) {
+              constraints.push(startAfter(cursor));
+          }
+
+          constraints.push(limit(PAGE_SIZE));
+
+          const finalQuery = query(q, ...constraints);
+          const snap = await getDocs(finalQuery);
+
+          const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
+          setHistory(data);
+          setHasNextPage(snap.docs.length === PAGE_SIZE);
+
+          if (snap.docs.length > 0) {
+               const lastVisible = snap.docs[snap.docs.length - 1];
+               setPageCursors(prev => {
+                  const newCursors = [...prev];
+                  // Ensure we don't overwrite if user clicked previous then next
+                  if(!newCursors[currentPage]) newCursors[currentPage] = lastVisible;
+                  return newCursors;
+               });
+          }
+      } catch (err) {
+          console.error("Error fetching history:", err);
+      }
+      setHistoryLoading(false);
+  };
+
   const getAllOptions = () => {
       const options = [
           { value: 'SALES_CASH', label: 'Cash from Sale', type: 'BUCKET' },
@@ -109,7 +174,7 @@ const Accounts = () => {
       return options;
   };
 
-  // --- 2. Handle Transfer ---
+  // --- Handle Transfer ---
   const handleTransfer = async (e) => {
     e.preventDefault();
     
@@ -155,11 +220,10 @@ const Accounts = () => {
         }));
 
         // 2. Handle Cash Books Integration (Money Movement)
-        // If SOURCE is a Cash Book -> Create Expense (Reduction)
         if (transferFrom.type === 'CASHBOOK') {
             batchPromises.push(addDoc(collection(db, uid, 'user_data', 'expenses'), {
                 expenseId: `TRF-${Date.now()}`,
-                category: 'Internal Transfer', // Key for CashBook.js to recognize
+                category: 'Internal Transfer',
                 amount: amt,
                 details: `Transfer to ${transferTo.label} - ${transferDesc}`,
                 cashBookId: transferFrom.value,
@@ -169,7 +233,6 @@ const Accounts = () => {
             }));
         }
 
-        // If DESTINATION is a Cash Book -> Create Cash In Entry (Addition)
         if (transferTo.type === 'CASHBOOK') {
             batchPromises.push(addDoc(collection(db, uid, 'cash_book_entries', 'entry_list'), {
                 amount: amt,
@@ -189,7 +252,11 @@ const Accounts = () => {
         setTransferToId('');
         
         await refreshBalances(); 
-        calculateBalances();     
+        calculateBalances();
+        // Reset pagination and fetch new history
+        setCurrentPage(1);
+        setPageCursors([null]);
+        fetchHistory();     
 
     } catch (error) {
         console.error("Transfer failed:", error);
@@ -197,6 +264,27 @@ const Accounts = () => {
     } finally {
         setIsTransferring(false);
     }
+  };
+
+  // Client-side search filtering on the current page
+  const displayedHistory = history.filter(item => {
+      if (!searchTerm) return true;
+      const lower = searchTerm.toLowerCase();
+      return (
+          item.description?.toLowerCase().includes(lower) ||
+          item.fromLabel?.toLowerCase().includes(lower) ||
+          item.toLabel?.toLowerCase().includes(lower) ||
+          item.amount?.toString().includes(lower)
+      );
+  });
+
+  const handleNextPage = () => { if (hasNextPage) setCurrentPage(p => p + 1); };
+  const handlePrevPage = () => { if (currentPage > 1) setCurrentPage(p => p - 1); };
+  
+  const handleDateFilterChange = (e) => {
+      setFilterDate(e.target.value);
+      setCurrentPage(1);
+      setPageCursors([null]);
   };
 
   return (
@@ -326,6 +414,70 @@ const Accounts = () => {
                   </button>
 
               </form>
+          </div>
+      </div>
+      
+      {/* --- SECTION 4: TRANSACTION HISTORY (NEW) --- */}
+      <div style={styles.section}>
+          <h3 style={styles.sectionTitle}>Transaction History</h3>
+          
+          <div style={styles.controlsRow}>
+              <div style={styles.searchBox}>
+                  <AiOutlineSearch style={{color: '#94a3b8'}} />
+                  <input 
+                    type="text" 
+                    placeholder="Search by note, account, amount..." 
+                    style={styles.simpleInput} 
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                  />
+              </div>
+              <div style={styles.dateBox}>
+                  <label style={{fontSize: '13px', fontWeight: '600', color: '#64748b'}}>Filter Date:</label>
+                  <input type="date" style={styles.simpleInput} value={filterDate} onChange={handleDateFilterChange} />
+                  {filterDate && <button onClick={() => { setFilterDate(""); setCurrentPage(1); setPageCursors([null]); }} style={styles.clearBtn}>Clear</button>}
+              </div>
+          </div>
+
+          <div style={styles.tableWrapper}>
+              <table style={styles.table}>
+                  <thead>
+                      <tr>
+                          <th style={styles.th}>Date</th>
+                          <th style={styles.th}>From</th>
+                          <th style={styles.th}>To</th>
+                          <th style={styles.th}>Amount</th>
+                          <th style={styles.th}>Reference</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {historyLoading ? (
+                          <tr><td colSpan="5" style={styles.loadingTd}>Loading transactions...</td></tr>
+                      ) : displayedHistory.length > 0 ? (
+                          displayedHistory.map(tx => (
+                              <tr key={tx.id}>
+                                  <td style={styles.td}>{tx.createdAt?.toDate ? tx.createdAt.toDate().toLocaleString() : 'N/A'}</td>
+                                  <td style={styles.td}><span style={styles.tag}>{tx.fromLabel}</span></td>
+                                  <td style={styles.td}><span style={{...styles.tag, background: '#dcfce7', color: '#16a34a'}}>{tx.toLabel}</span></td>
+                                  <td style={{...styles.td, fontWeight: 'bold'}}>Rs. {tx.amount?.toFixed(2)}</td>
+                                  <td style={{...styles.td, color: '#64748b'}}>{tx.description || '-'}</td>
+                              </tr>
+                          ))
+                      ) : (
+                          <tr><td colSpan="5" style={styles.loadingTd}>No transactions found.</td></tr>
+                      )}
+                  </tbody>
+              </table>
+          </div>
+
+          <div style={styles.paginationRow}>
+              <button onClick={handlePrevPage} disabled={currentPage === 1 || historyLoading} style={styles.pageBtn}>
+                  <AiOutlineArrowLeft /> Prev
+              </button>
+              <span style={styles.pageInfo}>Page {currentPage}</span>
+              <button onClick={handleNextPage} disabled={!hasNextPage || historyLoading} style={styles.pageBtn}>
+                  Next <AiOutlineArrowRight />
+              </button>
           </div>
       </div>
 
@@ -484,7 +636,22 @@ const styles = {
     fontWeight: '600',
     cursor: 'not-allowed',
     marginBottom: '1px'
-  }
+  },
+  // New Styles for History
+  controlsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' },
+  searchBox: { display: 'flex', alignItems: 'center', gap: '10px', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1, minWidth: '250px' },
+  dateBox: { display: 'flex', alignItems: 'center', gap: '10px' },
+  simpleInput: { border: 'none', background: 'transparent', outline: 'none', fontSize: '14px', width: '100%' },
+  clearBtn: { padding: '4px 8px', fontSize: '12px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' },
+  tableWrapper: { overflowX: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
+  th: { padding: '12px 16px', textAlign: 'left', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: '600' },
+  td: { padding: '12px 16px', borderBottom: '1px solid #e2e8f0', color: '#334155' },
+  loadingTd: { textAlign: 'center', padding: '24px', color: '#94a3b8' },
+  tag: { padding: '4px 8px', borderRadius: '4px', background: '#f1f5f9', fontSize: '12px', fontWeight: '500', color: '#475569' },
+  paginationRow: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginTop: '20px' },
+  pageBtn: { display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer' },
+  pageInfo: { fontSize: '14px', color: '#64748b' }
 };
 
 export default Accounts;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { db, auth } from '../../firebase';
-import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp, orderBy, limit, startAfter, endBefore } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp, orderBy, limit, startAfter, endBefore, Timestamp } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
 import { AiOutlineLock, AiOutlineUnlock, AiOutlineEye, AiOutlinePrinter, AiOutlineLeft, AiOutlineRight } from 'react-icons/ai';
 
@@ -50,7 +50,7 @@ const ReconciliationReportModal = ({ report, onClose }) => {
                         <div style={styles.modalBody}>
                             {Object.entries(summary).map(([key, value]) => (
                                 <div key={key} style={styles.reportSection}>
-                                    <h4 style={styles.reportSectionTitle}>{key.replace(/([A-Z])/g, ' $1').toUpperCase()} - TOTAL: Rs. {value.total.toFixed(2)}</h4>
+                                    <h4 style={styles.reportSectionTitle}>{key.replace(/([A-Z])/g, ' $1').toUpperCase()} - TOTAL: Rs. {(value.total || 0).toFixed(2)}</h4>
                                     {value.list && value.list.length > 0 ? (
                                         <table style={styles.reportTable}>
                                             <thead>
@@ -62,7 +62,8 @@ const ReconciliationReportModal = ({ report, onClose }) => {
                                                         <td>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</td>
                                                         <td>{item.details || item.customerName || item.receiverName || 'N/A'}</td>
                                                         <td>{item.issuedBy || item.createdBy || item.paidBy}</td>
-                                                        <td>Rs. {(item.total || item.amount).toFixed(2)}</td>
+                                                        {/* ✅ FIXED: Added || 0 fallback to prevent crash */}
+                                                        <td>Rs. {(item.total || item.amount || 0).toFixed(2)}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -117,14 +118,52 @@ const Reconcile = () => {
         const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
         
         try {
+            // ✅ 1. Check for the latest reconciliation on this date
+            const historyRef = collection(db, uid, 'user_data', 'reconciliation_history');
+            const latestHistoryQuery = query(
+                historyRef,
+                where('reconciliationDate', '==', date),
+                orderBy('reconciledAt', 'desc'),
+                limit(1)
+            );
+            const historySnap = await getDocs(latestHistoryQuery);
+
+            let queryStartTime = startOfDay;
+            let queryOperator = '>=';
+
+            // If a report exists, only fetch items created AFTER the last report
+            if (!historySnap.empty) {
+                const lastReport = historySnap.docs[0].data();
+                if (lastReport.reconciledAt) {
+                    queryStartTime = lastReport.reconciledAt.toDate();
+                    queryOperator = '>'; // Strictly greater than
+                }
+            }
+
             const customersRef = collection(db, uid, "customers", "customer_list");
             const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
 
+            // ✅ 2. Fetch Transactions using the calculated Start Time and Operator
             const [creditCustomersSnap, invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
                 getDocs(creditCustomersQuery),
-                getDocs(query(collection(db, uid, 'invoices', 'invoice_list'), where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay))),
-                getDocs(query(collection(db, uid, 'user_data', 'expenses'), where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay))),
-                getDocs(query(collection(db, uid, 'stock_payments', 'payments'), where('paidAt', '>=', startOfDay), where('paidAt', '<=', endOfDay)))
+                
+                getDocs(query(
+                    collection(db, uid, 'invoices', 'invoice_list'), 
+                    where('createdAt', queryOperator, queryStartTime), 
+                    where('createdAt', '<=', endOfDay)
+                )),
+                
+                getDocs(query(
+                    collection(db, uid, 'user_data', 'expenses'), 
+                    where('createdAt', queryOperator, queryStartTime), 
+                    where('createdAt', '<=', endOfDay)
+                )),
+                
+                getDocs(query(
+                    collection(db, uid, 'stock_payments', 'payments'), 
+                    where('paidAt', queryOperator, queryStartTime), 
+                    where('paidAt', '<=', endOfDay)
+                ))
             ]);
 
             const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
@@ -145,11 +184,11 @@ const Reconcile = () => {
             const onlineSalesList = validInvoices.filter(i => i.paymentMethod === 'Online' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Online'));
 
             setSummaryData({
-                cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + i.total, 0) },
-                onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + i.total, 0) },
-                cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + i.total, 0) },
-                expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + e.amount, 0) },
-                stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + p.amount, 0) },
+                cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + (i.total || 0), 0) },
+                onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + (i.total || 0), 0) },
+                cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + (i.total || 0), 0) },
+                expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + (e.amount || 0), 0) },
+                stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + (p.amount || 0), 0) },
             });
         } catch (error) {
             console.error("Error fetching summary data:", error);
@@ -258,13 +297,15 @@ const Reconcile = () => {
     
     const renderSummarySection = (title, items, total) => (
         <div style={styles.summaryCard}>
-            <h3 style={styles.summaryTitle}>{title} - Total: Rs. {total.toFixed(2)}</h3>
+            {/* ✅ FIXED: Fallback for total to prevent crash */}
+            <h3 style={styles.summaryTitle}>{title} - Total: Rs. {(total || 0).toFixed(2)}</h3>
             {items.length > 0 ? (
                 <ul style={styles.summaryList}>
                     {items.map((item, idx) => (
                         <li key={idx} style={styles.summaryListItem}>
                           <span>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</span>
-                          <span>Rs. {(item.total || item.amount)?.toFixed(2)}</span>
+                          {/* ✅ FIXED: Added || 0 fallback */}
+                          <span>Rs. {(item.total || item.amount || 0).toFixed(2)}</span>
                           <span style={{color: '#6c757d'}}>by {item.issuedBy || item.createdBy || item.paidBy}</span>
                         </li>
                     ))}
@@ -330,10 +371,11 @@ const Reconcile = () => {
                             : reconciliationHistory.length > 0 ? reconciliationHistory.map(rec => (
                                 <tr key={rec.id}>
                                     <td style={styles.td}>{rec.reconciledAt?.toDate().toLocaleString()}</td>
-                                    <td style={styles.td}>Rs. {rec.summary.cashSales.total.toFixed(2)}</td>
-                                    <td style={styles.td}>Rs. {rec.summary.cardSales.total.toFixed(2)}</td>
-                                    <td style={styles.td}>Rs. {rec.summary.expenses.total.toFixed(2)}</td>
-                                    <td style={styles.td}>Rs. {rec.summary.stockPayments.total.toFixed(2)}</td>
+                                    {/* ✅ FIXED: Added || 0 fallbacks for history display too */}
+                                    <td style={styles.td}>Rs. {(rec.summary.cashSales.total || 0).toFixed(2)}</td>
+                                    <td style={styles.td}>Rs. {(rec.summary.cardSales.total || 0).toFixed(2)}</td>
+                                    <td style={styles.td}>Rs. {(rec.summary.expenses.total || 0).toFixed(2)}</td>
+                                    <td style={styles.td}>Rs. {(rec.summary.stockPayments.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>{rec.reconciledBy}</td>
                                     <td style={styles.td}>
                                         <button onClick={() => { setSelectedReport(rec); setShowReportModal(true); }} style={styles.viewButton}>
