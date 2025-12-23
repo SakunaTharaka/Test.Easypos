@@ -1,6 +1,6 @@
 /* global qz */
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import ReactDOM from "react-dom"; //
+import ReactDOM from "react-dom";
 import { auth, db } from "../firebase";
 import {
   collection,
@@ -15,37 +15,10 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
-// --- STYLES ---
-
-const printStyles = {
-    // Reduced padding-top to 0 for minimal wastage
-    invoiceBox: { padding: '0 2mm 2mm 2mm', color: '#000', boxSizing: 'border-box', fontFamily: "'Courier New', monospace"}, 
-    logoContainer: { textAlign: 'center', marginBottom: '5px', paddingTop: '5px' },
-    logo: { maxWidth: '80px', maxHeight: '80px', display: 'inline-block' },
-    companyNameText: { fontSize: '1.4em', margin: '2px 0', fontWeight: 'bold', textAlign: 'center', lineHeight: '1.2' },
-    headerText: { margin: '2px 0', fontSize: '0.9em', textAlign: 'center', lineHeight: '1.2' },
-    metaSection: { textAlign: 'center', marginTop: '10px', marginBottom: '10px' },
-    metaText: { margin: '2px 0', fontSize: '0.9em' },
-    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
-    th: { borderBottom: '1px solid #000', padding: '5px 2px', textAlign: 'right', background: '#f0f0f0', fontSize: '0.9em' },
-    thItem: { textAlign: 'left' },
-    thQty: { textAlign: 'center' },
-    thRate: { textAlign: 'right' },
-    thTotal: { textAlign: 'right' },
-    tdItem: { padding: '5px 2px', borderBottom: '1px dotted #ccc', lineHeight: '1.2', textAlign: 'left', fontSize: '0.9em' },
-    tdQty: { padding: '5px 2px', borderBottom: '1px dotted #ccc', lineHeight: '1.2', textAlign: 'center', fontSize: '0.9em' },
-    tdRate: { padding: '5px 2px', borderBottom: '1px dotted #ccc', lineHeight: '1.2', textAlign: 'right', fontSize: '0.9em' },
-    tdTotal: { padding: '5px 2px', borderBottom: '1px dotted #ccc', lineHeight: '1.2', textAlign: 'right', fontSize: '0.9em' },
-    totalsSection: { marginTop: '10px' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: '0.9em', lineHeight: '1.4' },
-    grandTotalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1.1em', fontWeight: 'bold', borderTop: '1px solid #000', marginTop: '5px' },
-    balanceRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1.1em', fontWeight: 'bold', marginTop: '5px' },
-    dashedLine: { border: 'none', borderTop: '1px dashed #000', margin: '8px 0' },
-    footer: { textAlign: 'center', marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em', lineHeight: '1.5' },
-    creditFooter: { textAlign: 'center', marginTop: '5px', fontSize: '0.7em', color: '#777', lineHeight: '1.5' },
-};
+// --- STYLES FROM INVOICE VIEWER ---
 
 const styles = {
+    // --- Layout Styles (Screen) ---
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
     rightPanel: { flex: 2, display: 'flex', flexDirection: 'column' },
@@ -75,8 +48,7 @@ const styles = {
     emptyState: { textAlign: 'center', color: '#9ca3af', padding: '20px' },
     removeButton: { background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' },
     totalsSection: { padding: '16px', borderTop: '1px solid #e5e7eb' },
-    totalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '14px' },
-    grandTotalRow: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', color: '#16a34a', paddingTop: '8px', borderTop: '2px solid #e5e7eb' },
+    grandTotalRowScreen: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', color: '#16a34a', paddingTop: '8px', borderTop: '2px solid #e5e7eb' }, // Renamed to avoid conflict
     deliveryInput: { width: '120px', padding: '8px', textAlign: 'right' },
     paymentSection: { padding: '16px' },
     amountInput: { fontSize: '18px', fontWeight: 'bold', textAlign: 'right' },
@@ -95,125 +67,277 @@ const styles = {
     savingSpinner: { border: '4px solid #f3f4f6', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '16px' },
     qzStatus: { padding: '15px', margin: '15px 0', backgroundColor: '#f3f4f6', borderRadius: '6px', textAlign: 'left' },
     qzControls: { textAlign: 'left', marginTop: '10px' },
-    closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }
+    closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' },
+
+    // --- PRINT / VIEWER STYLES (Copied from InvoiceViewer) ---
+    invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
+    logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
+    companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
+    headerText: { margin: '2px 0', fontSize: '0.9em' },
+    itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+    th: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
+    thItem: { textAlign: 'left' },
+    td: { padding: '8px', borderBottom: '1px dotted #ccc' },
+    tdCenter: { textAlign: 'center' },
+    tdRight: { textAlign: 'right' },
+    totalsContainer: { width: '100%' },
+    totals: { paddingTop: '10px' },
+    totalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1em' },
+    hr: { border: 'none', borderTop: '1px dashed #000' },
+    footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
+    creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
 };
 
 // --- COMPONENTS ---
 
-const PrintableLayout = ({ invoice, companyInfo, onImageLoad }) => {
-    if (!invoice || !Array.isArray(invoice.items)) return null;
-    const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const totalBeforeReceived = subtotal + (invoice.deliveryCharge || 0);
-    const balanceToDisplay = invoice.received === 0 ? 0 : invoice.received - totalBeforeReceived;
-    const createdAtDate = invoice.createdAt instanceof Date ? invoice.createdAt : invoice.createdAt?.toDate();
-    const totalSave = invoice.items.reduce((sum, item) => {
-        const orig = item.originalPrice || item.price;
-        return sum + (orig - item.price) * item.quantity;
-    }, 0);
-  
-    return (
-      <div style={printStyles.invoiceBox}>
-        {companyInfo?.companyLogo && (
-          <div style={printStyles.logoContainer}>
-            <img 
-              src={companyInfo.companyLogo} 
-              style={printStyles.logo} 
-              alt="Company Logo" 
-              onLoad={onImageLoad} 
-              onError={onImageLoad} 
-            />
-          </div>
-        )}
-        <h1 style={printStyles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
-        <p style={printStyles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
-        {companyInfo?.phone && <p style={printStyles.headerText}>{companyInfo.phone}</p>}
-        
-        <div style={printStyles.metaSection}>
-          <p style={printStyles.metaText}><strong>Invoice #:</strong> {invoice.invoiceNumber}</p>
-          <p style={printStyles.metaText}><strong>Date:</strong> {createdAtDate?.toLocaleDateString()}</p>
-          <p style={printStyles.metaText}><strong>Customer:</strong> {invoice.customerName}</p>
-          <p style={printStyles.metaText}><strong>Issued By:</strong> {invoice.issuedBy}</p>
-        </div>
-        
-        <table style={printStyles.itemsTable}>
-          <thead>
-            <tr>
-              <th style={{ ...printStyles.th, ...printStyles.thItem }}>Item</th>
-              <th style={{ ...printStyles.th, ...printStyles.thQty }}>Qty</th>
-              {invoice.isDiscountable && (
-                  <th style={{ ...printStyles.th, ...printStyles.thRate }}>Orig.</th>
-              )}
-              <th style={{ ...printStyles.th, ...printStyles.thRate }}>
-                  {invoice.isDiscountable ? "Price" : "Rate"}
-              </th>
-              <th style={{ ...printStyles.th, ...printStyles.thTotal }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.items.map((item, index) => (
-              <tr key={index}>
-                <td style={printStyles.tdItem}>{item.itemName}</td>
-                <td style={printStyles.tdQty}>{item.quantity}</td>
-                {invoice.isDiscountable && (
-                    <td style={printStyles.tdRate}>{(item.originalPrice || item.price).toFixed(2)}</td>
-                )}
-                <td style={printStyles.tdRate}>{item.price.toFixed(2)}</td>
-                <td style={printStyles.tdTotal}>{(item.quantity * item.price).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        <div style={printStyles.totalsSection}>
-          <div style={printStyles.totalRow}>
-            <span>Subtotal:</span>
-            <span>Rs. {subtotal.toFixed(2)}</span>
-          </div>
+const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderDetails }) => {
+  if (!invoice || (!Array.isArray(invoice.items) && !serviceJob && !orderDetails)) {
+    return null;
+  }
 
-          {invoice.isDiscountable && totalSave > 0 && (
-             <div style={printStyles.totalRow}>
-                <span>Your Total Save:</span>
-                <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
-             </div>
-          )}
-          
-          {invoice.deliveryCharge > 0 && (
-            <div style={printStyles.totalRow}>
-              <span>Delivery:</span>
-              <span>Rs. {invoice.deliveryCharge.toFixed(2)}</span>
-            </div>
-          )}
-          
-          <div style={printStyles.grandTotalRow}>
-            <span>Grand Total:</span>
-            <span>Rs. {invoice.total.toFixed(2)}</span>
-          </div>
-          
-          <div style={printStyles.dashedLine}></div>
-          
-          <div style={printStyles.totalRow}>
-            <span>Amount Received:</span>
-            <span>Rs. {invoice.received.toFixed(2)}</span>
-          </div>
-          
-          <div style={printStyles.balanceRow}>
-            <span>Balance:</span>
-            <span>Rs. {balanceToDisplay.toFixed(2)}</span>
-          </div>
+  // ✅ Check Language Setting
+  const isSinhala = companyInfo?.useSinhalaInvoice || false;
+
+  const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
+  const isOrder = invoice.invoiceNumber?.startsWith('ORD');
+
+  // --- Calculations ---
+  const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
+  const deliveryCharge = Number(invoice.deliveryCharge) || 0;
+  const invTotal = invSubtotal + deliveryCharge;
+  
+  // Handle POS Context where createdAt might be serverTimestamp or Date object
+  const dateObj = invoice.createdAt?.toDate ? invoice.createdAt.toDate() : (invoice.createdAt instanceof Date ? invoice.createdAt : new Date());
+
+  const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
+  
+  // ✅ LOGIC UPDATE: If received is 0, Balance is 0
+  const invBalance = invReceived === 0 ? 0 : (invTotal - invReceived);
+
+  // Service Job Specific Calculations (Defaults to invoice if no job)
+  const jobTotal = serviceJob ? Number(serviceJob.totalCharge || 0) : invTotal;
+  const jobAdvance = serviceJob ? Number(serviceJob.advanceAmount || 0) : invReceived;
+  const jobBalance = jobAdvance === 0 ? 0 : (jobTotal - jobAdvance);
+
+  // Order Specific Calculations
+  const orderTotal = orderDetails ? Number(orderDetails.totalAmount || 0) : invTotal;
+  const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
+  const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
+
+  // Calculate Total Savings if discountable
+  const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
+    const orig = item.originalPrice || item.price;
+    return sum + (orig - item.price) * item.quantity;
+  }, 0) : 0;
+
+  // Format Date Helper
+  const formatDate = (dateVal) => {
+      if (!dateVal) return 'N/A';
+      if (dateVal.toDate) return dateVal.toDate().toLocaleDateString(); 
+      return new Date(dateVal).toLocaleDateString();
+  };
+
+  return (
+    <div style={styles.invoiceBox}>
+      {/* --- HEADER SECTION --- */}
+      <div className="invoice-header-section">
+        <div className="company-details">
+            {companyInfo?.companyLogo && (
+            <img 
+                src={companyInfo.companyLogo} 
+                style={styles.logo} 
+                alt="Company Logo" 
+                onLoad={onImageLoad}
+                onError={onImageLoad}
+            />
+            )}
+            <h1 style={styles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
+            <p style={styles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
+            {companyInfo?.phone && <p style={styles.headerText}>{companyInfo.phone}</p>}
         </div>
         
-        <div style={printStyles.dashedLine}></div>
-        <div style={printStyles.footer}>
-          <p>Thank you for your business!</p>
-        </div>
-        <div style={printStyles.creditFooter}>
-          <p>Wayne Software Solutions | 078 722 3407</p>
+        <div className="invoice-meta-details">
+            <h3 style={{marginTop:0, borderBottom: '2px solid #000', paddingBottom: 5}}>
+                {isServiceOrder ? "SERVICE ORDER" : isOrder ? "CUSTOMER ORDER" : "INVOICE"}
+            </h3>
+            
+            <p><strong>{isServiceOrder || isOrder ? "Order #:" : "Invoice #:"}</strong> {invoice.invoiceNumber}</p>
+            <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
+            <p><strong>Customer:</strong> {invoice.customerName}</p>
+            {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
+            
+            {/* SHOW DELIVERY DATE FOR ORDERS */}
+            {isOrder && orderDetails && orderDetails.deliveryDate && (
+                 <p style={{marginTop: 5, fontWeight: 'bold'}}>
+                    <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
+                 </p>
+            )}
+
+            {/* SERVICE DETAILS */}
+            {isServiceOrder && serviceJob && (
+                <div style={{marginTop: 10, padding: 8, background: '#f9f9f9', border: '1px dashed #ccc', textAlign: 'left'}}>
+                    <p style={{fontSize: '1.1em'}}><strong>Type:</strong> {serviceJob.jobType}</p>
+                    <p><strong>Est. Date:</strong> {formatDate(serviceJob.jobCompleteDate)}</p>
+                    {serviceJob.generalInfo && (
+                        <p style={{marginTop: 5, whiteSpace: 'pre-wrap', fontSize: '0.9em'}}>
+                            <strong>Notes:</strong> {serviceJob.generalInfo}
+                        </p>
+                    )}
+                </div>
+            )}
+            
+            <p style={{marginTop: 5, fontSize: '0.85em', color: '#555'}}><strong>Issued By:</strong> {invoice.issuedBy}</p>
         </div>
       </div>
-    );
+      
+      {/* --- ITEMS TABLE (Hidden in Print for Service Orders only) --- */}
+      <div className={isServiceOrder ? "no-print" : ""}>
+          {isServiceOrder && <h4 style={{marginTop: 20, marginBottom: 5, color: '#444'}}>Billing Details (Office View)</h4>}
+          
+          <table style={styles.itemsTable}>
+            <thead>
+              <tr>
+                {/* ✅ TRANSLATION: Item / Service */}
+                <th style={{ ...styles.th, ...styles.thItem }}>
+                    {isSinhala ? "අයිතමය" : "Item / Service"}
+                </th>
+                <th style={styles.th}>Qty</th>
+                
+                {/* Conditional Columns for Discountable Categories */}
+                {invoice.isDiscountable && (
+                    /* ✅ TRANSLATION: Orig. Price */
+                    <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
+                )}
+
+                <th style={styles.th}>
+                    {/* ✅ TRANSLATION: Our Price (Also handles 'Rate') */}
+                    {invoice.isDiscountable 
+                        ? (isSinhala ? "අපේ මිල" : "Our Price") 
+                        : (isSinhala ? "මිල" : "Rate")
+                    }
+                </th>
+
+                {/* ✅ TRANSLATION: Total */}
+                <th style={styles.th}>{isSinhala ? "එකතුව" : "Total"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoice.items && invoice.items.map((item, index) => (
+                <tr key={index}>
+                  <td style={styles.td}>{item.itemName}</td>
+                  <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
+                  
+                  {/* Conditional Cells for Discountable Categories */}
+                  {invoice.isDiscountable && (
+                      <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                  )}
+
+                  <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
+                  <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+      </div>
+
+      {/* --- TOTALS / FINANCIALS --- */}
+      <div className="invoice-footer-section">
+        <div style={styles.totalsContainer}>
+            <div style={styles.totals}>
+                
+                {/* 1. SERVICE ORDER TOTALS */}
+                {isServiceOrder ? (
+                    <div style={{border: '2px solid #000', padding: '10px', marginTop: '15px', borderRadius: '4px'}}>
+                        <div style={styles.totalRow}>
+                            <strong>Total Job Amount:</strong>
+                            <span>Rs. {jobTotal.toFixed(2)}</span>
+                        </div>
+                        <div style={styles.totalRow}>
+                            <strong>Advance Paid:</strong>
+                            <span>Rs. {jobAdvance.toFixed(2)}</span>
+                        </div>
+                        <hr style={styles.hr} />
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
+                            <strong>Balance Due:</strong>
+                            <span>Rs. {jobBalance.toFixed(2)}</span>
+                        </div>
+                    </div>
+                ) : isOrder ? (
+                    /* 2. ORDER TOTALS */
+                     <div style={{border: '1px dashed #000', padding: '10px', marginTop: '15px'}}>
+                        <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
+                        {deliveryCharge > 0 && (
+                            <div style={styles.totalRow}><strong>Delivery Charge:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
+                        )}
+                        <div style={styles.totalRow}><strong>Grand Total:</strong><span>Rs. {orderTotal.toFixed(2)}</span></div>
+                        <hr style={styles.hr} />
+                        <div style={styles.totalRow}>
+                            <strong>Advance Paid:</strong>
+                            <span>Rs. {orderAdvance.toFixed(2)}</span>
+                        </div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
+                            <strong>Balance Due:</strong>
+                            <span>Rs. {orderBalance.toFixed(2)}</span>
+                        </div>
+                     </div>
+                ) : (
+                    /* 3. STANDARD INVOICE TOTALS (Translating this section) */
+                    <>
+                        <div style={styles.totalRow}>
+                            {/* ✅ TRANSLATION: Subtotal */}
+                            <strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong>
+                            <span>Rs. {invSubtotal.toFixed(2)}</span>
+                        </div>
+                        
+                        {/* Show Total Save */}
+                        {invoice.isDiscountable && totalSave > 0 && (
+                            <div style={styles.totalRow}>
+                                {/* ✅ TRANSLATION: Your Total Save */}
+                                <span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span>
+                                <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
+                            </div>
+                        )}
+
+                        {deliveryCharge > 0 && (
+                            <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
+                        )}
+                        <div style={styles.totalRow}>
+                            {/* ✅ TRANSLATION: Grand Total */}
+                            <strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong>
+                            <span>Rs. {invTotal.toFixed(2)}</span>
+                        </div>
+                        <hr style={styles.hr} />
+                        <div style={styles.totalRow}>
+                            {/* ✅ TRANSLATION: Amount Received */}
+                            <strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong>
+                            <span>Rs. {invReceived.toFixed(2)}</span>
+                        </div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.1em' }}>
+                            {/* ✅ TRANSLATION: Balance */}
+                            <strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong>
+                            <span>Rs. {invBalance.toFixed(2)}</span>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+      </div>
+      
+      {/* Footer Disclaimer */}
+      {isServiceOrder ? (
+          <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
+            <p><strong>Terms:</strong> Please bring this receipt when collecting your item. Items not collected within 30 days may be disposed of.</p>
+          </div>
+      ) : (
+          <div style={styles.footer}><p>Thank you for your business!</p></div>
+      )}
+      
+      <div style={styles.creditFooter}><p>Wayne Software Solutions | 078 722 3407</p></div>
+    </div>
+  );
 };
 
-// 2. BrowserPrintComponent - REWRITTEN WITH PORTAL
+// 2. BrowserPrintComponent - REWRITTEN WITH INVOICE VIEWER CSS INJECTION
 const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
     const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
@@ -222,21 +346,16 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     const [portalNode, setPortalNode] = useState(null);
 
     useEffect(() => {
-        // Create div and append to body
         const node = document.createElement('div');
         node.className = 'print-portal-root';
         document.body.appendChild(node);
         setPortalNode(node);
-        
-        // Cleanup on unmount
         return () => {
-            if (document.body.contains(node)) {
-                document.body.removeChild(node);
-            }
+            if (document.body.contains(node)) document.body.removeChild(node);
         }
     }, []);
 
-    // Inject Styles to hide app and show portal
+    // Inject Styles to hide app and show portal WITH INVOICE VIEWER FLEX LAYOUTS
     useEffect(() => {
         if (!portalNode) return;
         const style = document.createElement('style');
@@ -257,39 +376,48 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
                 max-height: 90vh;
                 overflow-y: auto;
                 box-shadow: 0 0 20px rgba(0,0,0,0.5);
+                font-family: 'Inter', sans-serif;
             }
 
-            /* --- PRINT STYLES --- */
+            /* --- INVOICE VIEWER SPECIFIC CLASS SUPPORT --- */
+            .invoice-header-section { text-align: center; }
+            .invoice-meta-details { text-align: center; margin-top: 10px; }
+            .company-details { text-align: center; }
+            .totalsContainer { width: 100%; }
+            .totals { padding-top: 10px; }
+            
+            /* --- PRINT STYLES (Fixed blank preview) --- */
             @media print {
-                /* Hide the Main App (assuming #root, or all direct children except portal) */
+                /* 1. Hide everything in body except the portal */
                 body > *:not(.print-portal-root) { 
                     display: none !important; 
                 }
                 
-                /* Reset Body/HTML */
+                /* 2. Reset HTML/Body to ensure full height/visibility */
                 html, body {
                     margin: 0 !important;
                     padding: 0 !important;
-                    height: auto !important;
+                    height: 100% !important;
                     overflow: visible !important;
                     background: #fff !important;
                 }
 
-                /* Position Portal at Top-Left */
+                /* 3. Force Portal to be visible, top-left, and white */
                 .print-portal-root {
                     position: absolute !important;
                     top: 0 !important;
                     left: 0 !important;
                     width: 100% !important;
                     height: auto !important;
-                    background: transparent !important;
+                    background: white !important;
                     display: block !important;
                     margin: 0 !important;
                     padding: 0 !important;
-                    z-index: 1 !important;
+                    z-index: 99999 !important;
+                    visibility: visible !important;
                 }
                 
-                /* Reset Wrapper */
+                /* 4. Reset Wrapper styles for print flow */
                 .print-area-wrapper-screen {
                     width: 100% !important;
                     box-shadow: none !important;
@@ -297,12 +425,22 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
                     overflow: visible !important;
                     margin: 0 !important;
                     padding: 0 !important;
+                    background: white !important;
+                    display: block !important;
                 }
 
                 .no-print { display: none !important; }
                 
-                /* Remove Printer Margins */
                 @page { size: auto; margin: 0mm; }
+                
+                /* Ensure tables print correctly */
+                table { width: 100%; border-collapse: collapse; }
+                
+                /* Viewer specific overrides for print */
+                .invoice-header-section,
+                .company-details,
+                .invoice-meta-details { text-align: center; }
+                .invoice-footer-section { margin-top: 20px;}
             }
         `;
         document.head.appendChild(style);
@@ -312,7 +450,8 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     // Trigger Print
     useEffect(() => {
         if (isPrintReady && portalNode) {
-            const timer = setTimeout(() => window.print(), 500);
+            // Increased timeout to 800ms to allow rendering before print
+            const timer = setTimeout(() => window.print(), 800);
             return () => clearTimeout(timer);
         }
     }, [isPrintReady, portalNode]);
@@ -354,7 +493,7 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     );
 };
 
-// --- QZ PRINT MODAL (Same as before) ---
+// --- QZ PRINT MODAL ---
 const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const [status, setStatus] = useState('Initializing...');
     const [isConnecting, setIsConnecting] = useState(true);
@@ -662,6 +801,8 @@ const Invoice = ({ internalUser }) => {
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
+        // Return a constructed object that mimics the firestore document for immediate printing
+        // We use 'new Date()' for createdAt because serverTimestamp hasn't resolved yet
         return { ...invData, createdAt: new Date(), invoiceNumber: newInvNum };
       });
 
@@ -745,7 +886,7 @@ const Invoice = ({ internalUser }) => {
             <div style={styles.totalsSection}>
                 <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div>
                 {settings?.offerDelivery && ( <div style={styles.totalRow}><label htmlFor="deliveryCharge" style={{cursor: 'pointer'}}>Delivery (F5)</label><input ref={deliveryChargeRef} id="deliveryCharge" type="number" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value)} style={{...styles.input, ...styles.deliveryInput, ...(deliveryChargeMode ? styles.activeInput : {})}} placeholder="0.00" /></div> )}
-                <div style={styles.grandTotalRow}><span>TOTAL</span><span>Rs. {total.toFixed(2)}</span></div>
+                <div style={styles.grandTotalRowScreen}><span>TOTAL</span><span>Rs. {total.toFixed(2)}</span></div>
             </div>
             <div style={styles.paymentSection}>
                 <label style={styles.label}>AMOUNT RECEIVED (F2)</label>

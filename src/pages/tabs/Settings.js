@@ -54,6 +54,7 @@ const Settings = () => {
   const [offerDelivery, setOfferDelivery] = useState(false);
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
+  const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false); // ✅ Added Sinhala toggle state
 
   // --- NEW STATE FOR SERVICE & ORDERS ---
   const [priceCategories, setPriceCategories] = useState([]);
@@ -96,6 +97,7 @@ const Settings = () => {
           setOfferDelivery(data.offerDelivery || false);
           setMaintainCreditCustomers(data.maintainCreditCustomers || false);
           setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
+          setUseSinhalaInvoice(data.useSinhalaInvoice || false); // ✅ Load Sinhala setting
           // --- LOAD SERVICE PRICE CATEGORY ---
           setServicePriceCategory(data.serviceJobPriceCategory || "");
 
@@ -135,6 +137,7 @@ const Settings = () => {
             offerDelivery: false,
             maintainCreditCustomers: false,
             openCashDrawerWithPrint: false,
+            useSinhalaInvoice: false, // ✅ Default Sinhala setting
             // --- ADD TO DEFAULT SETTINGS ---
             serviceJobPriceCategory: "",
           };
@@ -161,6 +164,7 @@ const Settings = () => {
           setOfferDelivery(defaultSettings.offerDelivery);
           setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
           setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
+          setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice); // ✅ Set default
           // --- LOAD FROM DEFAULT SETTINGS ---
           setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
         }
@@ -308,6 +312,12 @@ const Settings = () => {
     setOpenCashDrawerWithPrint(value);
     await updateDoc(getSettingsDocRef(), { openCashDrawerWithPrint: value });
   };
+  
+  // ✅ Handler for Sinhala Invoice Toggle
+  const handleUseSinhalaInvoiceChange = async (value) => {
+    setUseSinhalaInvoice(value);
+    await updateDoc(getSettingsDocRef(), { useSinhalaInvoice: value });
+  };
 
   // --- NEW HANDLER FOR SERVICE PRICE CATEGORY ---
   const handleServicePriceCategoryChange = async (value) => {
@@ -406,6 +416,16 @@ const Settings = () => {
                 <button onClick={() => handleOpenCashDrawerChange(false)} style={!openCashDrawerWithPrint ? styles.toggleButtonActive : styles.toggleButton}>No</button>
             </div>
             <p style={styles.helpText}>If set to 'Yes', a command to open the cash drawer will be sent with the print job.</p>
+        </div>
+        
+        {/* ✅ **Added Sinhala Invoice Toggle** */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Use Sinhala format in invoices</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleUseSinhalaInvoiceChange(true)} style={useSinhalaInvoice ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleUseSinhalaInvoiceChange(false)} style={!useSinhalaInvoice ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to print invoices using the Sinhala language format.</p>
         </div>
       </div>
 
