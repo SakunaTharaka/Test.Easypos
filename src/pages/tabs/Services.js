@@ -118,6 +118,11 @@ const Services = ({ internalUser }) => {
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
   }, [showPaymentConfirm, confirmPaymentMethod]);
 
+  // Helper: Get Date in Sri Lanka Time
+  const getSriLankaDate = (dateObj = new Date()) => {
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+  };
+
   // --- ACTIONS ---
 
   const handleSaveClick = (e) => {
@@ -154,7 +159,7 @@ const Services = ({ internalUser }) => {
       }
   };
 
-  // --- SAVE JOB ---
+  // --- SAVE JOB (UPDATED: Adds to Daily Sales) ---
   const executeSaveJob = async (paymentMethod) => {
     if (!uid) { setError('User not authenticated.'); return; }
     setIsLoading(true);
@@ -188,6 +193,21 @@ const Services = ({ internalUser }) => {
 
         const totalVal = parseFloat(totalCharge) || 0;
         const advanceVal = parseFloat(advanceAmount) || 0;
+
+        // Daily Stats Logic
+        const dailyDateString = getSriLankaDate(); 
+        const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+        const dailyStatsSnap = await transaction.get(dailyStatsRef);
+        const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+        
+        // Update Daily Stats (Add Advance)
+        if (advanceVal > 0) {
+            transaction.set(dailyStatsRef, { 
+                totalSales: currentDailySales + advanceVal,
+                date: dailyDateString,
+                lastUpdated: serverTimestamp()
+            }, { merge: true });
+        }
 
         const newInvoiceRef = doc(collection(db, uid, "invoices", "invoice_list"));
         const newJobRef = doc(collection(db, uid, 'data', 'service_jobs'));
@@ -242,7 +262,7 @@ const Services = ({ internalUser }) => {
     finally { setIsLoading(false); setPendingAction(null); }
   };
 
-  // --- COMPLETE JOB ---
+  // --- COMPLETE JOB (UPDATED: Adds Balance to Daily Sales) ---
   const executeCompleteJob = async (jobToComplete, paymentMethod) => {
       if (!uid) return;
       setIsUpdating(true);
@@ -270,6 +290,20 @@ const Services = ({ internalUser }) => {
 
             const jobData = jobSnap.data();
             const balanceAmount = (jobData.totalCharge || 0) - (jobData.advanceAmount || 0);
+
+            // Daily Stats Logic (Add Balance)
+            const dailyDateString = getSriLankaDate(); 
+            const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+            const dailyStatsSnap = await transaction.get(dailyStatsRef);
+            const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+            
+            if (balanceAmount > 0) {
+                 transaction.set(dailyStatsRef, { 
+                    totalSales: currentDailySales + balanceAmount,
+                    date: dailyDateString,
+                    lastUpdated: serverTimestamp()
+                }, { merge: true });
+            }
 
             transaction.update(serviceJobRef, { status: 'Completed' });
 
@@ -313,7 +347,7 @@ const Services = ({ internalUser }) => {
       finally { setIsUpdating(false); setPendingAction(null); }
   };
 
-  // --- DELETE JOB (UPDATED: DEDUCT FROM WALLET) ---
+  // --- DELETE JOB (UPDATED: DEDUCT FROM WALLET & DAILY SALES) ---
   const handleDeleteJob = (jobId) => {
     if (!uid) { setError("Authentication error."); return; }
     setJobToDelete(jobId);
@@ -347,11 +381,13 @@ const Services = ({ internalUser }) => {
             if (jobData.generatedInvoiceNumber) {
                 const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
                 const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
-                const balSnaps = await getDocs(q); // Note: Queries must be done carefully outside txn if possible, or we assume single document
-                // For simplicity in this structure, we fetch docs. 
-                // Technically `getDocs` isn't transactional reading unless we pass transaction, but Firestore JS SDK `runTransaction` 
-                // doesn't support query-based reads directly easily. 
-                // WORKAROUND: We fetch the doc reference first, then transactional read.
+                // Note: Need query results. In transaction, usually we must fetch doc refs first.
+                // Assuming unique invoice numbers, we query outside/before or use a known ID structure.
+                // Since `runTransaction` doesn't support query directly, we do the query first (non-transactional read of ID)
+                // However, inside `runTransaction` we should ideally read everything.
+                // For simplicity here, we assume we fetch the doc snapshot via query first (outside transaction block is risky).
+                // Correction: We'll use the query result to get REF, then transaction.get(REF).
+                const balSnaps = await getDocs(q);
                 if (!balSnaps.empty) {
                     balInvoiceRef = balSnaps.docs[0].ref;
                     const balSnap = await transaction.get(balInvoiceRef);
@@ -359,10 +395,11 @@ const Services = ({ internalUser }) => {
                 }
             }
 
-            // 4. Helper to Deduct
-            const deductFromWallet = async (invoice) => {
+            // 4. Helper to Deduct (Wallet & Daily Sales)
+            const reverseFinancials = async (invoice) => {
                 if (!invoice || !invoice.received || invoice.received <= 0) return;
                 
+                // A. Wallet Deduction
                 let wId = null;
                 if (invoice.paymentMethod === 'Cash') wId = 'cash';
                 else if (invoice.paymentMethod === 'Card') wId = 'card';
@@ -379,11 +416,27 @@ const Services = ({ internalUser }) => {
                         }, { merge: true });
                     }
                 }
+
+                // B. Daily Sales Reversal
+                if (invoice.createdAt) {
+                    const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
+                    const dailyDateString = getSriLankaDate(dateVal); // Use helper for consistency
+                    const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+                    const dailyStatsSnap = await transaction.get(dailyStatsRef);
+                    
+                    if (dailyStatsSnap.exists()) {
+                        const currentSales = Number(dailyStatsSnap.data().totalSales) || 0;
+                        transaction.set(dailyStatsRef, {
+                            totalSales: currentSales - Number(invoice.received),
+                            lastUpdated: serverTimestamp()
+                        }, { merge: true });
+                    }
+                }
             };
 
-            // 5. Execute Deductions
-            if (advInvoiceData) await deductFromWallet(advInvoiceData);
-            if (balInvoiceData) await deductFromWallet(balInvoiceData);
+            // 5. Execute Reversals
+            if (advInvoiceData) await reverseFinancials(advInvoiceData);
+            if (balInvoiceData) await reverseFinancials(balInvoiceData);
 
             // 6. Delete Documents
             transaction.delete(jobRef);
@@ -680,8 +733,8 @@ const themeColors = {
     primary: '#00A1FF', 
     secondary: '#F089D7', 
     success: '#10b981', 
-    warning: '#f59e0b',
-    danger: '#ef4444',
+    warning: '#f59e0b', 
+    danger: '#ef4444', 
     dark: '#1e293b', 
     light: '#f8fafc', 
     border: '#e2e8f0' 

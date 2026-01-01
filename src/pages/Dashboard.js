@@ -51,7 +51,7 @@ const Dashboard = () => {
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showPopup, setShowPopup] = useState(false);
-  const [activeTab, setActiveTab] = useState("Dashboard");
+  const [activeTab, setActiveTab] = useState("Invoicing"); // Default changed to Invoicing since Dashboard might be hidden
   const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order");
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
   const [activeServiceTab, setActiveServiceTab] = useState("Services"); 
@@ -204,7 +204,20 @@ const Dashboard = () => {
   if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p style={styles.loadingText}>Loading dashboard...</p></div> );
 
   const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
-  const visibleTabs = allTabs.filter(tab => !((tab === "Finance" || "Admin" || "Settings") && !internalLoggedInUser?.isAdmin));
+  
+  // --- FIXED VISIBILITY LOGIC ---
+  const visibleTabs = allTabs.filter(tab => {
+    // If user is Admin, they see everything
+    if (internalLoggedInUser?.isAdmin) return true;
+
+    // If user is NOT Admin, hide these specific tabs
+    // Note: I included "Dashboard" in restricted because it wasn't in your allowed list. 
+    // If you want them to see the Dashboard charts, remove "Dashboard" from this list.
+    const restrictedTabs = ["Dashboard", "Finance", "Admin", "Settings"];
+    
+    // Only return tabs that are NOT in the restricted list
+    return !restrictedTabs.includes(tab);
+  });
 
   // Render sticky sub-tabs
   const renderSubTabs = () => {
@@ -265,8 +278,13 @@ const Dashboard = () => {
   // Render tab content
   const renderTabContent = () => {
     if (!auth.currentUser && !loading) { return <p style={styles.accessDenied}>Please log in to continue.</p>; }
-    if ((activeTab === "Finance" || activeTab === "Admin") && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
-    if (activeTab === "Settings" && !internalLoggedInUser?.isAdmin) { return <p style={styles.accessDenied}>Access Denied: Admins only.</p>; }
+    
+    // Safety check for direct component access
+    if ((activeTab === "Finance" || activeTab === "Admin" || activeTab === "Settings" || activeTab === "Dashboard") && !internalLoggedInUser?.isAdmin) { 
+        // Fallback to Invoicing if they somehow land on a restricted tab
+        if(activeTab !== "Invoicing") setActiveTab("Invoicing");
+        return null;
+    }
 
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;

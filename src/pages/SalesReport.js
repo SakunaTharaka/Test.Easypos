@@ -85,12 +85,11 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
-  // --- DELETE HANDLER ---
+  // --- DELETE HANDLER (FIXED: ALL READS BEFORE WRITES) ---
   const handleDelete = async (invoice) => {
       const user = auth.currentUser;
       if (!user) return;
 
-      // 1. Lock Check (Reconciliation)
       if (invoice.createdAt) {
           const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
           const dateStr = dateVal.toISOString().split('T')[0];
@@ -100,50 +99,92 @@ const SalesReport = ({ internalUser }) => {
           }
       }
 
-      if (!window.confirm(`Delete Invoice ${invoice.invoiceNumber}? This will deduct the amount from your wallet.`)) return;
+      if (!window.confirm(`Delete Invoice ${invoice.invoiceNumber}? This will deduct the amount from your wallet and reverse daily sales.`)) return;
 
       try {
           await runTransaction(db, async (transaction) => {
-              // 2. Get Fresh Invoice Data
+              // =========================================================
+              // PHASE 1: ALL READS (Must be done before any write)
+              // =========================================================
+
+              // 1. Read Invoice
               const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoice.id);
               const invoiceSnap = await transaction.get(invoiceRef);
               if (!invoiceSnap.exists()) throw "Invoice does not exist.";
-              
               const invData = invoiceSnap.data();
 
-              // 3. Identify Wallet Type
-              let walletDocId = null;
-              if (invData.paymentMethod === 'Cash') walletDocId = 'cash';
-              else if (invData.paymentMethod === 'Card') walletDocId = 'card';
-              else if (invData.paymentMethod === 'Online') walletDocId = 'online';
-
-              // 4. Determine Amount to Deduct
-              // Standard Invoices (from Invoice.js) add 'total' to wallet on creation.
-              // Service/Order Invoices add 'received' (advance) to wallet on creation.
-              let amountToDeduct = 0;
-              if (!invData.type) { 
-                  // Standard Invoice (No Type) -> Deduct TOTAL
-                  amountToDeduct = Number(invData.total) || 0;
-              } else {
-                  // Service or Order -> Deduct RECEIVED
-                  amountToDeduct = Number(invData.received) || 0;
+              // Determine references needed for secondary reads
+              let dailyStatsRef = null;
+              if (invData.createdAt) {
+                  const dateVal = invData.createdAt.toDate ? invData.createdAt.toDate() : new Date(invData.createdAt);
+                  const dailyDateString = dateVal.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
+                  dailyStatsRef = doc(db, user.uid, "daily_stats", "entries", dailyDateString);
               }
 
-              // 5. Update Wallet (Deduct Amount)
-              if (walletDocId && amountToDeduct > 0) {
-                  const walletRef = doc(db, user.uid, "wallet", "accounts", walletDocId);
-                  const walletSnap = await transaction.get(walletRef);
+              let walletRef = null;
+              let amountToReverseSales = 0;
+              let amountToReverseCOGS = Number(invData.totalCOGS) || 0;
+
+              // Calculate reversal amounts
+              if (!invData.type) { 
+                  // Standard Invoice
+                  amountToReverseSales = Number(invData.total) || 0;
+              } else {
+                  // Service/Order
+                  amountToReverseSales = Number(invData.received) || 0;
+              }
+
+              // Determine Wallet Reference
+              if (amountToReverseSales > 0) {
+                  let walletDocId = null;
+                  if (invData.paymentMethod === 'Cash') walletDocId = 'cash';
+                  else if (invData.paymentMethod === 'Card') walletDocId = 'card';
+                  else if (invData.paymentMethod === 'Online') walletDocId = 'online';
                   
-                  if (walletSnap.exists()) {
-                      const currentBalance = Number(walletSnap.data().balance) || 0;
-                      transaction.set(walletRef, {
-                          balance: currentBalance - amountToDeduct,
-                          lastUpdated: serverTimestamp()
-                      }, { merge: true });
+                  if (walletDocId) {
+                      walletRef = doc(db, user.uid, "wallet", "accounts", walletDocId);
                   }
               }
 
-              // 6. Delete Related Documents (If Service/Order)
+              // 2. Read Daily Stats (if applicable)
+              let dailyStatsSnap = null;
+              if (dailyStatsRef) {
+                  dailyStatsSnap = await transaction.get(dailyStatsRef);
+              }
+
+              // 3. Read Wallet (if applicable)
+              let walletSnap = null;
+              if (walletRef) {
+                  walletSnap = await transaction.get(walletRef);
+              }
+
+              // =========================================================
+              // PHASE 2: ALL WRITES
+              // =========================================================
+
+              // 4. Update Daily Stats
+              if (dailyStatsRef && dailyStatsSnap && dailyStatsSnap.exists()) {
+                  const currentStats = dailyStatsSnap.data();
+                  const currentSales = Number(currentStats.totalSales) || 0;
+                  const currentCOGS = Number(currentStats.totalCOGS) || 0;
+
+                  transaction.set(dailyStatsRef, {
+                      totalSales: currentSales - amountToReverseSales,
+                      totalCOGS: currentCOGS - amountToReverseCOGS,
+                      lastUpdated: serverTimestamp()
+                  }, { merge: true });
+              }
+
+              // 5. Update Wallet
+              if (walletRef && walletSnap && walletSnap.exists()) {
+                  const currentBalance = Number(walletSnap.data().balance) || 0;
+                  transaction.set(walletRef, {
+                      balance: currentBalance - amountToReverseSales,
+                      lastUpdated: serverTimestamp()
+                  }, { merge: true });
+              }
+
+              // 6. Delete Related Documents (Jobs/Orders)
               if (invData.type === 'SERVICE' && invData.relatedJobId) {
                   const jobRef = doc(db, user.uid, "data", "service_jobs", invData.relatedJobId);
                   transaction.delete(jobRef);
@@ -153,7 +194,7 @@ const SalesReport = ({ internalUser }) => {
                   transaction.delete(orderRef);
               }
 
-              // 7. Delete the Invoice itself
+              // 7. Delete the Invoice
               transaction.delete(invoiceRef);
           });
 
@@ -162,7 +203,7 @@ const SalesReport = ({ internalUser }) => {
 
       } catch (err) {
           console.error(err);
-          alert("Error deleting invoice: " + err.message);
+          alert("Error deleting invoice: " + err.message); // If error persists, it will show exact reason
       }
   };
 

@@ -48,7 +48,7 @@ const styles = {
     emptyState: { textAlign: 'center', color: '#9ca3af', padding: '20px' },
     removeButton: { background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' },
     totalsSection: { padding: '16px', borderTop: '1px solid #e5e7eb' },
-    grandTotalRowScreen: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', color: '#16a34a', paddingTop: '8px', borderTop: '2px solid #e5e7eb' }, // Renamed to avoid conflict
+    grandTotalRowScreen: { display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '20px', color: '#16a34a', paddingTop: '8px', borderTop: '2px solid #e5e7eb' }, 
     deliveryInput: { width: '120px', padding: '8px', textAlign: 'right' },
     paymentSection: { padding: '16px' },
     amountInput: { fontSize: '18px', fontWeight: 'bold', textAlign: 'right' },
@@ -69,7 +69,7 @@ const styles = {
     qzControls: { textAlign: 'left', marginTop: '10px' },
     closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' },
 
-    // --- PRINT / VIEWER STYLES (Copied from InvoiceViewer) ---
+    // --- PRINT / VIEWER STYLES ---
     invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
     logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
     companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
@@ -95,42 +95,32 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
     return null;
   }
 
-  // ✅ Check Language Setting
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
-
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
 
-  // --- Calculations ---
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
   const invTotal = invSubtotal + deliveryCharge;
   
-  // Handle POS Context where createdAt might be serverTimestamp or Date object
   const dateObj = invoice.createdAt?.toDate ? invoice.createdAt.toDate() : (invoice.createdAt instanceof Date ? invoice.createdAt : new Date());
 
   const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
-  
-  // ✅ LOGIC UPDATE: If received is 0, Balance is 0
   const invBalance = invReceived === 0 ? 0 : (invTotal - invReceived);
 
-  // Service Job Specific Calculations (Defaults to invoice if no job)
   const jobTotal = serviceJob ? Number(serviceJob.totalCharge || 0) : invTotal;
   const jobAdvance = serviceJob ? Number(serviceJob.advanceAmount || 0) : invReceived;
   const jobBalance = jobAdvance === 0 ? 0 : (jobTotal - jobAdvance);
 
-  // Order Specific Calculations
   const orderTotal = orderDetails ? Number(orderDetails.totalAmount || 0) : invTotal;
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
-  // Calculate Total Savings if discountable
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
   }, 0) : 0;
 
-  // Format Date Helper
   const formatDate = (dateVal) => {
       if (!dateVal) return 'N/A';
       if (dateVal.toDate) return dateVal.toDate().toLocaleDateString(); 
@@ -139,7 +129,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
   return (
     <div style={styles.invoiceBox}>
-      {/* --- HEADER SECTION --- */}
       <div className="invoice-header-section">
         <div className="company-details">
             {companyInfo?.companyLogo && (
@@ -160,20 +149,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <h3 style={{marginTop:0, borderBottom: '2px solid #000', paddingBottom: 5}}>
                 {isServiceOrder ? "SERVICE ORDER" : isOrder ? "CUSTOMER ORDER" : "INVOICE"}
             </h3>
-            
             <p><strong>{isServiceOrder || isOrder ? "Order #:" : "Invoice #:"}</strong> {invoice.invoiceNumber}</p>
             <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
-            
-            {/* SHOW DELIVERY DATE FOR ORDERS */}
             {isOrder && orderDetails && orderDetails.deliveryDate && (
                  <p style={{marginTop: 5, fontWeight: 'bold'}}>
                     <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
                  </p>
             )}
-
-            {/* SERVICE DETAILS */}
             {isServiceOrder && serviceJob && (
                 <div style={{marginTop: 10, padding: 8, background: '#f9f9f9', border: '1px dashed #ccc', textAlign: 'left'}}>
                     <p style={{fontSize: '1.1em'}}><strong>Type:</strong> {serviceJob.jobType}</p>
@@ -185,39 +169,28 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                     )}
                 </div>
             )}
-            
             <p style={{marginTop: 5, fontSize: '0.85em', color: '#555'}}><strong>Issued By:</strong> {invoice.issuedBy}</p>
         </div>
       </div>
       
-      {/* --- ITEMS TABLE (Hidden in Print for Service Orders only) --- */}
       <div className={isServiceOrder ? "no-print" : ""}>
           {isServiceOrder && <h4 style={{marginTop: 20, marginBottom: 5, color: '#444'}}>Billing Details (Office View)</h4>}
-          
           <table style={styles.itemsTable}>
             <thead>
               <tr>
-                {/* ✅ TRANSLATION: Item / Service */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
                     {isSinhala ? "අයිතමය" : "Item / Service"}
                 </th>
                 <th style={styles.th}>Qty</th>
-                
-                {/* Conditional Columns for Discountable Categories */}
                 {invoice.isDiscountable && (
-                    /* ✅ TRANSLATION: Orig. Price */
                     <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
                 )}
-
                 <th style={styles.th}>
-                    {/* ✅ TRANSLATION: Our Price (Also handles 'Rate') */}
                     {invoice.isDiscountable 
                         ? (isSinhala ? "අපේ මිල" : "Our Price") 
                         : (isSinhala ? "මිල" : "Rate")
                     }
                 </th>
-
-                {/* ✅ TRANSLATION: Total */}
                 <th style={styles.th}>{isSinhala ? "එකතුව" : "Total"}</th>
               </tr>
             </thead>
@@ -226,12 +199,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 <tr key={index}>
                   <td style={styles.td}>{item.itemName}</td>
                   <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
-                  
-                  {/* Conditional Cells for Discountable Categories */}
                   {invoice.isDiscountable && (
                       <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                   )}
-
                   <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
                   <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
                 </tr>
@@ -240,90 +210,42 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           </table>
       </div>
 
-      {/* --- TOTALS / FINANCIALS --- */}
       <div className="invoice-footer-section">
         <div style={styles.totalsContainer}>
             <div style={styles.totals}>
-                
-                {/* 1. SERVICE ORDER TOTALS */}
                 {isServiceOrder ? (
                     <div style={{border: '2px solid #000', padding: '10px', marginTop: '15px', borderRadius: '4px'}}>
-                        <div style={styles.totalRow}>
-                            <strong>Total Job Amount:</strong>
-                            <span>Rs. {jobTotal.toFixed(2)}</span>
-                        </div>
-                        <div style={styles.totalRow}>
-                            <strong>Advance Paid:</strong>
-                            <span>Rs. {jobAdvance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>Total Job Amount:</strong><span>Rs. {jobTotal.toFixed(2)}</span></div>
+                        <div style={styles.totalRow}><strong>Advance Paid:</strong><span>Rs. {jobAdvance.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
-                            <strong>Balance Due:</strong>
-                            <span>Rs. {jobBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}><strong>Balance Due:</strong><span>Rs. {jobBalance.toFixed(2)}</span></div>
                     </div>
                 ) : isOrder ? (
-                    /* 2. ORDER TOTALS */
                      <div style={{border: '1px dashed #000', padding: '10px', marginTop: '15px'}}>
                         <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
-                        {deliveryCharge > 0 && (
-                            <div style={styles.totalRow}><strong>Delivery Charge:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
-                        )}
+                        {deliveryCharge > 0 && <div style={styles.totalRow}><strong>Delivery Charge:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>}
                         <div style={styles.totalRow}><strong>Grand Total:</strong><span>Rs. {orderTotal.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={styles.totalRow}>
-                            <strong>Advance Paid:</strong>
-                            <span>Rs. {orderAdvance.toFixed(2)}</span>
-                        </div>
-                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
-                            <strong>Balance Due:</strong>
-                            <span>Rs. {orderBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>Advance Paid:</strong><span>Rs. {orderAdvance.toFixed(2)}</span></div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}><strong>Balance Due:</strong><span>Rs. {orderBalance.toFixed(2)}</span></div>
                      </div>
                 ) : (
-                    /* 3. STANDARD INVOICE TOTALS (Translating this section) */
                     <>
-                        <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Subtotal */}
-                            <strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong>
-                            <span>Rs. {invSubtotal.toFixed(2)}</span>
-                        </div>
-                        
-                        {/* Show Total Save */}
+                        <div style={styles.totalRow}><strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
                         {invoice.isDiscountable && totalSave > 0 && (
-                            <div style={styles.totalRow}>
-                                {/* ✅ TRANSLATION: Your Total Save */}
-                                <span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span>
-                                <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
-                            </div>
+                            <div style={styles.totalRow}><span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span><span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span></div>
                         )}
-
-                        {deliveryCharge > 0 && (
-                            <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
-                        )}
-                        <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Grand Total */}
-                            <strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong>
-                            <span>Rs. {invTotal.toFixed(2)}</span>
-                        </div>
+                        {deliveryCharge > 0 && <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>}
+                        <div style={styles.totalRow}><strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong><span>Rs. {invTotal.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Amount Received */}
-                            <strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong>
-                            <span>Rs. {invReceived.toFixed(2)}</span>
-                        </div>
-                        <div style={{ ...styles.totalRow, fontSize: '1.1em' }}>
-                            {/* ✅ TRANSLATION: Balance */}
-                            <strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong>
-                            <span>Rs. {invBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong><span>Rs. {invReceived.toFixed(2)}</span></div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.1em' }}><strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong><span>Rs. {invBalance.toFixed(2)}</span></div>
                     </>
                 )}
             </div>
         </div>
       </div>
       
-      {/* Footer Disclaimer */}
       {isServiceOrder ? (
           <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
             <p><strong>Terms:</strong> Please bring this receipt when collecting your item. Items not collected within 30 days may be disposed of.</p>
@@ -331,18 +253,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       ) : (
           <div style={styles.footer}><p>Thank you for your business!</p></div>
       )}
-      
       <div style={styles.creditFooter}><p>Wayne Software Solutions | 078 722 3407</p></div>
     </div>
   );
 };
 
-// 2. BrowserPrintComponent - REWRITTEN WITH INVOICE VIEWER CSS INJECTION
+// 2. BrowserPrintComponent
 const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
     const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
-    
-    // Create a DOM node for the Portal
     const [portalNode, setPortalNode] = useState(null);
 
     useEffect(() => {
@@ -350,96 +269,29 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
         node.className = 'print-portal-root';
         document.body.appendChild(node);
         setPortalNode(node);
-        return () => {
-            if (document.body.contains(node)) document.body.removeChild(node);
-        }
+        return () => { if (document.body.contains(node)) document.body.removeChild(node); }
     }, []);
 
-    // Inject Styles to hide app and show portal WITH INVOICE VIEWER FLEX LAYOUTS
     useEffect(() => {
         if (!portalNode) return;
         const style = document.createElement('style');
         style.innerHTML = `
-            /* --- SCREEN STYLES (Overlay Modal) --- */
-            .print-portal-root {
-                position: fixed;
-                top: 0; left: 0; right: 0; bottom: 0;
-                background-color: rgba(0,0,0,0.6);
-                z-index: 99999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .print-area-wrapper-screen {
-                background: white;
-                width: 80mm;
-                max-height: 90vh;
-                overflow-y: auto;
-                box-shadow: 0 0 20px rgba(0,0,0,0.5);
-                font-family: 'Inter', sans-serif;
-            }
-
-            /* --- INVOICE VIEWER SPECIFIC CLASS SUPPORT --- */
+            .print-portal-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.6); z-index: 99999; display: flex; align-items: center; justify-content: center; }
+            .print-area-wrapper-screen { background: white; width: 80mm; max-height: 90vh; overflow-y: auto; box-shadow: 0 0 20px rgba(0,0,0,0.5); font-family: 'Inter', sans-serif; }
             .invoice-header-section { text-align: center; }
             .invoice-meta-details { text-align: center; margin-top: 10px; }
             .company-details { text-align: center; }
             .totalsContainer { width: 100%; }
             .totals { padding-top: 10px; }
-            
-            /* --- PRINT STYLES (Fixed blank preview) --- */
             @media print {
-                /* 1. Hide everything in body except the portal */
-                body > *:not(.print-portal-root) { 
-                    display: none !important; 
-                }
-                
-                /* 2. Reset HTML/Body to ensure full height/visibility */
-                html, body {
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    height: 100% !important;
-                    overflow: visible !important;
-                    background: #fff !important;
-                }
-
-                /* 3. Force Portal to be visible, top-left, and white */
-                .print-portal-root {
-                    position: absolute !important;
-                    top: 0 !important;
-                    left: 0 !important;
-                    width: 100% !important;
-                    height: auto !important;
-                    background: white !important;
-                    display: block !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    z-index: 99999 !important;
-                    visibility: visible !important;
-                }
-                
-                /* 4. Reset Wrapper styles for print flow */
-                .print-area-wrapper-screen {
-                    width: 100% !important;
-                    box-shadow: none !important;
-                    max-height: none !important;
-                    overflow: visible !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    background: white !important;
-                    display: block !important;
-                }
-
+                body > *:not(.print-portal-root) { display: none !important; }
+                html, body { margin: 0 !important; padding: 0 !important; height: 100% !important; overflow: visible !important; background: #fff !important; }
+                .print-portal-root { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: auto !important; background: white !important; display: block !important; margin: 0 !important; padding: 0 !important; z-index: 99999 !important; visibility: visible !important; }
+                .print-area-wrapper-screen { width: 100% !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: white !important; display: block !important; }
                 .no-print { display: none !important; }
-                
                 @page { size: auto; margin: 0mm; }
-                
-                /* Ensure tables print correctly */
                 table { width: 100%; border-collapse: collapse; }
-                
-                /* Viewer specific overrides for print */
-                .invoice-header-section,
-                .company-details,
-                .invoice-meta-details { text-align: center; }
+                .invoice-header-section, .company-details, .invoice-meta-details { text-align: center; }
                 .invoice-footer-section { margin-top: 20px;}
             }
         `;
@@ -447,49 +299,28 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
         return () => document.head.removeChild(style);
     }, [portalNode]);
 
-    // Trigger Print
     useEffect(() => {
         if (isPrintReady && portalNode) {
-            // Increased timeout to 800ms to allow rendering before print
             const timer = setTimeout(() => window.print(), 800);
             return () => clearTimeout(timer);
         }
     }, [isPrintReady, portalNode]);
 
-    // Handle ESC and Cleanup
     useEffect(() => {
         const handleAfterPrint = () => onPrintFinished();
-        const handleKeyDown = (e) => {
-             if (e.key === 'Escape') {
-                e.preventDefault();
-                onPrintFinished();
-            }
-        };
+        const handleKeyDown = (e) => { if (e.key === 'Escape') { e.preventDefault(); onPrintFinished(); } };
         window.addEventListener('afterprint', handleAfterPrint);
         window.addEventListener('keydown', handleKeyDown);
-        return () => {
-            window.removeEventListener('afterprint', handleAfterPrint);
-            window.removeEventListener('keydown', handleKeyDown);
-        };
+        return () => { window.removeEventListener('afterprint', handleAfterPrint); window.removeEventListener('keydown', handleKeyDown); };
     }, [onPrintFinished]);
 
     if (!portalNode) return null;
 
-    // Render into the Portal
     return ReactDOM.createPortal(
         <div className="print-area-wrapper-screen">
-             <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#333', color: '#fff', fontSize: '12px' }}>
-                {isPrintReady ? 'Printing... (Press ESC to close)' : 'Loading preview...'}
-            </div>
-            {invoice ? 
-                <PrintableLayout 
-                    invoice={invoice} 
-                    companyInfo={companyInfo} 
-                    onImageLoad={() => setIsImageLoaded(true)} 
-                /> 
-            : <p>Loading...</p>}
-        </div>,
-        portalNode
+             <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#333', color: '#fff', fontSize: '12px' }}>{isPrintReady ? 'Printing... (Press ESC to close)' : 'Loading preview...'}</div>
+            {invoice ? <PrintableLayout invoice={invoice} companyInfo={companyInfo} onImageLoad={() => setIsImageLoaded(true)} /> : <p>Loading...</p>}
+        </div>, portalNode
     );
 };
 
@@ -504,14 +335,8 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
     const printableRef = useRef(null);
 
     const handlePrint = useCallback(async () => {
-        if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) {
-            alert('QZ Tray is not connected.');
-            return;
-        }
-        if (!selectedPrinter) {
-            alert('Please select a printer.');
-            return;
-        }
+        if (typeof qz === 'undefined' || !qz.websocket || !qz.websocket.isActive()) { alert('QZ Tray is not connected.'); return; }
+        if (!selectedPrinter) { alert('Please select a printer.'); return; }
         setIsPrinting(true);
         try {
             qz.security.setSignaturePromise(async (toSign) => {
@@ -520,23 +345,14 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
                 const result = await getQzSignature({ requestToSign: toSign });
                 return result.data.signature;
             });
-
             const config = qz.configs.create(selectedPrinter, { units: 'mm', width: 80 });
             const printData = [{ type: 'html', format: 'plain', data: printableRef.current.innerHTML }];
-            
             await qz.print(config, printData);
             const drawerCommand = '\x1B\x70\x00\x19\xFA'; 
             await qz.print(config, [drawerCommand]);
-
             alert('Print successful!');
             onClose();
-        } catch (err) {
-            console.error(err);
-            alert('Printing failed: ' + err.toString());
-            setAutoPrintingStatus('');
-        } finally {
-            setIsPrinting(false);
-        }
+        } catch (err) { console.error(err); alert('Printing failed: ' + err.toString()); setAutoPrintingStatus(''); } finally { setIsPrinting(false); }
     }, [selectedPrinter, onClose]);
 
     useEffect(() => {
@@ -545,26 +361,15 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
             qz.printers.find().then(foundPrinters => {
                 setPrinters(foundPrinters);
                 const savedPrinter = localStorage.getItem('selectedPrinter');
-                if (savedPrinter && foundPrinters.includes(savedPrinter)) {
-                    setAutoPrintingStatus(`Found saved: "${savedPrinter}". Printing...`);
-                    setSelectedPrinter(savedPrinter);
-                } else {
-                    setIsConnecting(false);
-                    if (foundPrinters.length > 0) setSelectedPrinter(foundPrinters[0]);
-                }
+                if (savedPrinter && foundPrinters.includes(savedPrinter)) { setAutoPrintingStatus(`Found saved: "${savedPrinter}". Printing...`); setSelectedPrinter(savedPrinter); }
+                else { setIsConnecting(false); if (foundPrinters.length > 0) setSelectedPrinter(foundPrinters[0]); }
             }).catch(err => { console.error(err); setStatus('Error finding printers.'); setIsConnecting(false); });
         };
-        if (!qz.websocket.isActive()) {
-            qz.websocket.connect().then(() => { setStatus('Connected.'); findPrintersAndPrint(); })
-            .catch(err => { setStatus('Connection Failed.'); setIsConnecting(false); });
-        } else { setStatus('Connected.'); findPrintersAndPrint(); }
+        if (!qz.websocket.isActive()) { qz.websocket.connect().then(() => { setStatus('Connected.'); findPrintersAndPrint(); }).catch(err => { setStatus('Connection Failed.'); setIsConnecting(false); }); } else { setStatus('Connected.'); findPrintersAndPrint(); }
     }, [isQzReady]);
 
     useEffect(() => {
-        if (autoPrintingStatus && selectedPrinter) {
-            const timer = setTimeout(() => { handlePrint(); }, 500); 
-            return () => clearTimeout(timer);
-        }
+        if (autoPrintingStatus && selectedPrinter) { const timer = setTimeout(() => { handlePrint(); }, 500); return () => clearTimeout(timer); }
     }, [autoPrintingStatus, selectedPrinter, handlePrint]);
 
     useEffect(() => { if (selectedPrinter) localStorage.setItem('selectedPrinter', selectedPrinter); }, [selectedPrinter]);
@@ -573,22 +378,16 @@ const QZPrintModal = ({ invoice, companyInfo, onClose, isQzReady }) => {
         <div style={styles.confirmOverlay}>
             <div style={{...styles.confirmPopup, minWidth: '450px'}}>
                 <h4>Direct Print with QZ Tray</h4>
-                <div style={styles.qzStatus}>
-                    <strong>Status:</strong><span style={{color: '#10b981', marginLeft: '8px'}}>{autoPrintingStatus || status}</span>
-                </div>
+                <div style={styles.qzStatus}><strong>Status:</strong><span style={{color: '#10b981', marginLeft: '8px'}}>{autoPrintingStatus || status}</span></div>
                 {!isConnecting && !autoPrintingStatus && (
                     <div style={styles.qzControls}>
                         <label style={styles.label}>Select Printer</label>
-                        <select value={selectedPrinter} onChange={e => setSelectedPrinter(e.target.value)} style={{...styles.input, marginBottom: '20px'}}>
-                            {printers.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
+                        <select value={selectedPrinter} onChange={e => setSelectedPrinter(e.target.value)} style={{...styles.input, marginBottom: '20px'}}>{printers.map(p => <option key={p} value={p}>{p}</option>)}</select>
                         <button onClick={handlePrint} disabled={isPrinting} style={styles.saveButton}>{isPrinting ? 'Printing...' : 'Print'}</button>
                     </div>
                 )}
                 <button onClick={onClose} style={styles.closeButton}>Cancel</button>
-                <div style={{ position: 'absolute', left: '-9999px' }} ref={printableRef}>
-                   {invoice && <PrintableLayout invoice={invoice} companyInfo={companyInfo} />}
-                </div>
+                <div style={{ position: 'absolute', left: '-9999px' }} ref={printableRef}>{invoice && <PrintableLayout invoice={invoice} companyInfo={companyInfo} />}</div>
             </div>
         </div>
     );
@@ -634,7 +433,11 @@ const Invoice = ({ internalUser }) => {
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
 
-  // Load scripts, fullscreen, fetch number, init data (Same as original)
+  // Helper: Get Date in Sri Lanka Time
+  const getSriLankaDate = () => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+  };
+
   useEffect(() => {
     const loadScript = (src, id) => {
       return new Promise((resolve, reject) => {
@@ -777,7 +580,7 @@ const Invoice = ({ internalUser }) => {
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
   
-  // --- UPDATED SAVE FUNCTION WITH WALLET LOGIC FIX ---
+  // --- UPDATED SAVE FUNCTION WITH ALL READS BEFORE WRITES ---
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
@@ -789,22 +592,44 @@ const Invoice = ({ internalUser }) => {
       
       const counterRef = doc(db, user.uid, "counters");
       
-      // Determine which wallet document to update based on payment method
       let walletDocId = null;
       if (method === 'Cash') walletDocId = 'cash';
       else if (method === 'Card') walletDocId = 'card';
       else if (method === 'Online') walletDocId = 'online';
       
-      // FIX: Use 4 segments (User -> wallet(doc) -> accounts(col) -> [type](doc)) to avoid "odd number of segments" error
       const walletRef = walletDocId ? doc(db, user.uid, "wallet", "accounts", walletDocId) : null;
 
+      // 1. Prepare Daily Stats Ref (Daily Sales + COGS)
+      const dailyDateString = getSriLankaDate(); 
+      const dailyStatsRef = doc(db, user.uid, "daily_stats", "entries", dailyDateString);
+
       const finalInvoiceData = await runTransaction(db, async (t) => {
-        // 1. Get Counter
+        // --- ALL READS FIRST ---
+
+        // 1. Read Item Costs for COGS
+        let invoiceTotalCOGS = 0;
+        for (const item of checkout) {
+             if (item.itemId) {
+                 const itemMasterRef = doc(db, user.uid, "items", "item_list", item.itemId);
+                 const itemSnap = await t.get(itemMasterRef);
+                 if (itemSnap.exists()) {
+                     const avgCost = Number(itemSnap.data().averageCost) || 0;
+                     const qty = Number(item.quantity) || 0;
+                     invoiceTotalCOGS += (avgCost * qty);
+                 }
+             }
+        }
+
+        // 2. Read Daily Stats (COGS & Sales)
+        const dailyStatsSnap = await t.get(dailyStatsRef);
+        const currentDailyCOGS = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalCOGS) || 0) : 0;
+        const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+        
+        // 3. Read Counter
         const cDoc = await t.get(counterRef);
         const nextSeq = (cDoc.exists() ? cDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
-        const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
         
-        // 2. Get Current Wallet Balance
+        // 4. Read Wallet
         let currentWalletBalance = 0;
         if (walletRef) {
             const wDoc = await t.get(walletRef);
@@ -812,23 +637,38 @@ const Invoice = ({ internalUser }) => {
                 currentWalletBalance = Number(wDoc.data().balance) || 0;
             }
         }
+
+        // --- ALL WRITES AFTER ---
         
-        // 3. Update Counter
+        // 1. Update Daily Stats (Sales & COGS)
+        const newDailyCOGS = currentDailyCOGS + invoiceTotalCOGS;
+        const newDailySales = currentDailySales + total; // Add current invoice total to daily sales
+
+        t.set(dailyStatsRef, { 
+            totalCOGS: newDailyCOGS,
+            totalSales: newDailySales,
+            date: dailyDateString,
+            lastUpdated: serverTimestamp()
+        }, { merge: true });
+
+        // 2. Update Counter
         t.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
         
-        // 4. Create Invoice
+        // 3. Create Invoice
+        const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, items: checkout, 
           total, deliveryCharge: Number(deliveryCharge) || 0,
           received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
           balance: selectedCustomer.isCreditCustomer ? total : balance,
           createdAt: serverTimestamp(), invoiceNumber: newInvNum, issuedBy: internalUser?.username || "Admin", 
-          shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable, 
+          shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
+          totalCOGS: invoiceTotalCOGS // Save COGS to invoice for future deletion logic
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
 
-        // 5. Update Wallet (Add Grand Total to existing balance)
+        // 4. Update Wallet
         if (walletRef) {
             const newBalance = currentWalletBalance + invData.total;
             t.set(walletRef, { 

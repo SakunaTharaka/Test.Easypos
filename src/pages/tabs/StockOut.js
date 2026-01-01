@@ -1,8 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
-import { collection, addDoc, getDocs, query, serverTimestamp, deleteDoc, doc, runTransaction, orderBy, limit, startAfter, where } from "firebase/firestore";
+import { 
+  collection, 
+  getDocs, 
+  query, 
+  serverTimestamp, 
+  deleteDoc, 
+  doc, 
+  runTransaction, 
+  orderBy, 
+  limit, 
+  startAfter, 
+  where 
+} from "firebase/firestore";
 import { Link } from "react-router-dom";
-import { AiOutlinePlus, AiOutlineDelete, AiOutlineSearch, AiOutlineFilter } from "react-icons/ai";
+import { 
+  AiOutlinePlus, 
+  AiOutlineDelete, 
+  AiOutlineSearch, 
+  AiOutlineFilter,
+  AiOutlineLoading 
+} from "react-icons/ai";
 import Select from "react-select";
 
 const ITEMS_PER_PAGE = 25;
@@ -12,8 +30,11 @@ const StockOut = ({ internalUser }) => {
   const [availableItems, setAvailableItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  
+  // --- Race Condition Prevention ---
+  const [isProcessing, setIsProcessing] = useState(false);
+  
   const [form, setForm] = useState({
-    stockInId: "",
     itemId: "",
     category: "",
     item: "",
@@ -34,10 +55,8 @@ const StockOut = ({ internalUser }) => {
   // --- Pagination State ---
   const [page, setPage] = useState(1);
   const [lastVisible, setLastVisible] = useState(null);
-  const [pageHistory, setPageHistory] = useState([null]); // Stores the first doc of each page
+  const [pageHistory, setPageHistory] = useState([null]); 
   const [isLastPage, setIsLastPage] = useState(false);
-
-  const [showStockInId, setShowStockInId] = useState(true);
 
   const getCurrentInternal = () => {
     try {
@@ -47,26 +66,48 @@ const StockOut = ({ internalUser }) => {
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
-  // --- Core Data Fetching Function with Server-Side Pagination ---
+  // --- REUSABLE DATA FETCHING FUNCTION ---
+  // This is now outside useEffect so we can call it when opening the modal
+  const fetchDropdownData = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const uid = user.uid;
+
+    try {
+      const itemsColRef = collection(db, uid, "items", "item_list");
+      const q = query(itemsColRef, where("type", "in", ["storesItem", "buySell"]));
+      const itemSnap = await getDocs(q);
+      
+      const itemOptions = itemSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+              value: doc.id, 
+              label: `${data.name} (Available: ${data.qtyOnHand || 0} ${data.unit || ''})`, 
+              category: data.category || "",
+              unit: data.unit || "", 
+              type: data.type || "",
+              itemName: data.name,
+              currentAvgCost: data.averageCost 
+          };
+      });
+      setAvailableItems(itemOptions);
+    } catch(error) {
+      console.error("Error fetching available items:", error);
+    }
+  };
+
+  // --- Data Fetching ---
   const fetchStockOuts = async (direction = 'initial') => {
     setLoading(true);
     const user = auth.currentUser;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    if (!user) { setLoading(false); return; }
     const uid = user.uid;
     const stockOutColRef = collection(db, uid, "inventory", "stock_out");
     
     let q = query(stockOutColRef, orderBy("createdAt", "desc"));
 
-    // Apply server-side date filtering
-    if (dateFrom) {
-        q = query(q, where("createdAt", ">=", new Date(dateFrom + "T00:00:00")));
-    }
-    if (dateTo) {
-        q = query(q, where("createdAt", "<=", new Date(dateTo + "T23:59:59")));
-    }
+    if (dateFrom) q = query(q, where("createdAt", ">=", new Date(dateFrom + "T00:00:00")));
+    if (dateTo) q = query(q, where("createdAt", "<=", new Date(dateTo + "T23:59:59")));
 
     try {
       let querySnapshot;
@@ -75,7 +116,7 @@ const StockOut = ({ internalUser }) => {
       } else if (direction === 'prev' && page > 1) {
         const prevPageStart = pageHistory[page - 2];
         q = query(q, limit(ITEMS_PER_PAGE), startAfter(prevPageStart));
-      } else { // Initial fetch or filter apply
+      } else { 
         q = query(q, limit(ITEMS_PER_PAGE));
       }
 
@@ -85,9 +126,7 @@ const StockOut = ({ internalUser }) => {
 
       if (stockData.length > 0) {
         setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
-        if (direction === 'next') {
-          setPageHistory(prev => [...prev, querySnapshot.docs[0]]);
-        }
+        if (direction === 'next') setPageHistory(prev => [...prev, querySnapshot.docs[0]]);
       }
       setIsLastPage(stockData.length < ITEMS_PER_PAGE);
     } catch (error) {
@@ -98,43 +137,17 @@ const StockOut = ({ internalUser }) => {
     }
   };
   
-  // Fetch initial data and dropdowns only once on component mount
   useEffect(() => {
     fetchStockOuts('initial');
-    
-    const user = auth.currentUser;
-    if (!user) return;
-    const uid = user.uid;
-
-    const fetchDropdownData = async () => {
-      try {
-        const stockInColRef = collection(db, uid, "inventory", "stock_in");
-        const invSnap = await getDocs(query(stockInColRef));
-        
-        const itemOptions = invSnap.docs.flatMap(doc => {
-            const stockInData = doc.data();
-            const stockInId = stockInData.stockInId;
-            const docId = doc.id;
-            if (Array.isArray(stockInData.lineItems)) {
-                return stockInData.lineItems.map((lineItem, index) => ({
-                    value: `${docId}-${index}`, 
-                    label: `${lineItem.name} (from ${stockInId})`,
-                    category: lineItem.category,
-                    unit: lineItem.unit,
-                    type: lineItem.type,
-                    stockInId: stockInId,
-                    itemName: lineItem.name,
-                }));
-            }
-            return []; 
-        });
-        setAvailableItems(itemOptions);
-      } catch(error) {
-        console.error("Error fetching available items:", error);
-      }
-    };
-    fetchDropdownData();
+    fetchDropdownData(); // Initial load
   }, []);
+
+  // --- MODAL HANDLER ---
+  const handleOpenModal = async () => {
+      // Refresh the items list to get the latest Stock On Hand before showing the modal
+      await fetchDropdownData(); 
+      setShowModal(true);
+  };
 
   const handleApplyFilters = () => {
     setPage(1);
@@ -143,22 +156,8 @@ const StockOut = ({ internalUser }) => {
     fetchStockOuts('initial');
   };
 
-  const handleNextPage = () => {
-    if (!isLastPage) {
-      setPage(prev => prev + 1);
-      fetchStockOuts('next');
-    }
-  };
-
-  const handlePrevPage = () => {
-    if (page > 1) {
-      const newPageHistory = [...pageHistory];
-      newPageHistory.pop();
-      setPageHistory(newPageHistory);
-      setPage(prev => prev - 1);
-      fetchStockOuts('prev');
-    }
-  };
+  const handleNextPage = () => !isLastPage && (setPage(prev => prev + 1), fetchStockOuts('next'));
+  const handlePrevPage = () => page > 1 && (setPageHistory(prev => { const n = [...prev]; n.pop(); return n; }), setPage(prev => prev - 1), fetchStockOuts('prev'));
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -172,77 +171,169 @@ const StockOut = ({ internalUser }) => {
             ...form, 
             itemId: selectedOption.value,
             item: selectedOption.itemName, 
-            category: selectedOption.category, 
-            unit: selectedOption.unit, 
-            type: selectedOption.type,
-            stockInId: selectedOption.stockInId 
+            category: selectedOption.category || "", 
+            unit: selectedOption.unit || "", 
+            type: selectedOption.type || "",
         });
     } else {
-        setForm({ ...form, itemId: "", item: "", category: "", unit: "", type: "", stockInId: "" });
+        setForm({ ...form, itemId: "", item: "", category: "", unit: "", type: "" });
     }
   };
 
   const getNextStockOutId = async (uid) => {
     const counterRef = doc(db, uid, "counters");
     try {
-      const newId = await runTransaction(db, async (transaction) => {
+      return await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
         const currentId = counterDoc.exists() ? counterDoc.data().lastStockOutID || 0 : 0;
         const nextId = currentId + 1;
         transaction.set(counterRef, { lastStockOutID: nextId }, { merge: true });
-        return nextId;
+        return `SO-${String(nextId).padStart(6, "0")}`;
       });
-      return `SO-${String(newId).padStart(6, "0")}`;
     } catch (err) {
       console.error("Error generating Stock Out ID:", err);
-      alert("Could not generate a new Stock Out ID. Please try again.");
       return null;
     }
   };
 
-  // 💡 FIX: Updated handleSave to refetch data instead of updating local state
+  // --- SAVE Transaction (Stock Out) ---
   const handleSave = async () => {
     if (!form.item || !form.quantity || !form.receiverId || !form.receiverName) { return alert("Please fill all required fields (*)."); }
+    if (isProcessing) return; // Prevent double click
+
+    setIsProcessing(true);
     const user = auth.currentUser;
-    if (!user) return alert("You are not logged in.");
+    if (!user) { setIsProcessing(false); return alert("You are not logged in."); }
+    const uid = user.uid;
+
+    const stockOutId = await getNextStockOutId(uid);
+    if (!stockOutId) { setIsProcessing(false); return alert("System busy, please try again."); }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+          const itemRef = doc(db, uid, "items", "item_list", form.itemId);
+          const itemSnap = await transaction.get(itemRef);
+
+          if (!itemSnap.exists()) throw new Error("Item not found!");
+
+          const itemData = itemSnap.data();
+          const currentQty = parseFloat(itemData.qtyOnHand) || 0;
+          const requestedQty = parseFloat(form.quantity);
+
+          if (currentQty < requestedQty) {
+              throw new Error(`Insufficient Stock! Available: ${currentQty}, Requested: ${requestedQty}`);
+          }
+
+          const newQty = currentQty - requestedQty;
+          
+          // Note: Standard Stock Out does NOT change Average Cost.
+          // We simply reduce quantity. Cost per unit remains the same.
+          const costAtTimeOfSale = parseFloat(itemData.averageCost) || 0;
+
+          transaction.update(itemRef, { qtyOnHand: newQty });
+
+          const stockOutRef = doc(collection(db, uid, "inventory", "stock_out"));
+          const stockOutData = { 
+              itemId: form.itemId,
+              category: form.category || "",
+              item: form.item,
+              type: form.type || "",
+              unit: form.unit || "", 
+              remark: form.remark || "",
+              receiverId: form.receiverId,
+              receiverName: form.receiverName,
+              stockOutId, 
+              quantity: requestedQty, 
+              costAtTimeOfSale: costAtTimeOfSale, 
+              addedBy: getCurrentInternal()?.username || "Admin", 
+              createdAt: serverTimestamp() 
+          };
+          
+          transaction.set(stockOutRef, stockOutData);
+      });
+      
+      handleApplyFilters();
+      setForm({ itemId: "", category: "", item: "", quantity: "", receiverId: "", receiverName: "", unit: "", remark: "", type: "" });
+      setShowModal(false);
+      alert("Stock Out Recorded Successfully.");
+
+    } catch (error) {
+      console.error(error);
+      alert("Failed: " + error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // --- DELETE Transaction (Reverse Stock Out) ---
+  const handleDelete = async (item) => {
+    if (!isAdmin) return alert("Only admins can delete stock-out entries.");
+    if (isProcessing) return; // Prevent double click
+
+    if (!window.confirm(`ROLLBACK WARNING:\n\nDeleting this record will:\n1. RESTORE ${item.quantity} ${item.unit} to inventory.\n2. Recalculate Average Cost (treating returned items at their original cost).\n\nAre you sure you want to proceed?`)) return;
+    
+    setIsProcessing(true);
+    const user = auth.currentUser;
     const uid = user.uid;
 
     try {
-      const addedBy = getCurrentInternal()?.username || "Admin";
-      const stockOutId = await getNextStockOutId(uid);
-      if (stockOutId === null) return;
-      const stockOutColRef = collection(db, uid, "inventory", "stock_out");
-      const stockOutData = { ...form, quantity: Number(form.quantity), stockOutId, addedBy, createdAt: serverTimestamp() };
-      
-      await addDoc(stockOutColRef, stockOutData);
-      
-      // After saving, reset and refetch the first page to show the new record
-      handleApplyFilters();
-      
-      setForm({ itemId: "", category: "", item: "", quantity: "", receiverId: "", receiverName: "", unit: "", remark: "", stockInId: "", type: "" });
-      setShowModal(false);
-    } catch (error) {
-      alert("Error adding stock-out record: " + error.message);
-    }
-  };
+      await runTransaction(db, async (transaction) => {
+        // 1. Get the Stock Out Doc (to be deleted)
+        const stockOutRef = doc(db, uid, "inventory", "stock_out", item.id);
+        const stockOutSnap = await transaction.get(stockOutRef);
+        if (!stockOutSnap.exists()) throw new Error("Record already deleted.");
+        
+        const data = stockOutSnap.data();
+        const restoreQty = parseFloat(data.quantity);
+        const restoreCost = parseFloat(data.costAtTimeOfSale) || 0; // The cost when it left
+        const itemId = data.itemId;
 
-  // 💡 FIX: Updated handleDelete to refetch data
-  const handleDelete = async (id) => {
-    if (!isAdmin) return alert("Only admins can delete stock-out entries.");
-    if (!window.confirm("Are you sure you want to delete this entry?")) return;
-    const uid = auth.currentUser.uid;
-    const docRef = doc(db, uid, "inventory", "stock_out", id);
-    try {
-      await deleteDoc(docRef);
-      // After deleting, refetch the current page of data
+        // 2. Get the Master Item
+        const itemRef = doc(db, uid, "items", "item_list", itemId);
+        const itemSnap = await transaction.get(itemRef);
+
+        if (!itemSnap.exists()) throw new Error("The original item master no longer exists. Cannot restore stock.");
+
+        const masterData = itemSnap.data();
+        const currentMasterQty = parseFloat(masterData.qtyOnHand) || 0;
+        const currentMasterAvg = parseFloat(masterData.averageCost) || 0;
+        
+        // 3. RESTORE QTY & UPDATE AVG COST
+        // When we roll back a Stock Out, we are putting items BACK into the pool.
+        // If the Average Cost has changed since these items left, we must recalculate.
+        // Logic: (CurrentTotalValue + ReturnedValue) / NewTotalQty
+        
+        const newMasterQty = currentMasterQty + restoreQty;
+        let newAvgCost = 0;
+
+        if (newMasterQty > 0) {
+            const currentTotalValue = currentMasterQty * currentMasterAvg;
+            const returnedValue = restoreQty * restoreCost;
+            newAvgCost = (currentTotalValue + returnedValue) / newMasterQty;
+        } else {
+            newAvgCost = restoreCost;
+        }
+
+        transaction.update(itemRef, { 
+            qtyOnHand: newMasterQty,
+            averageCost: newAvgCost 
+        });
+        
+        transaction.delete(stockOutRef);
+      });
+
+      // Refresh UI
       fetchStockOuts(page > 1 ? 'prev' : 'initial');
-      alert("Stock out record deleted.");
+      alert("Record deleted, Stock Restored, and Average Cost updated successfully.");
+
     } catch (error) {
-      alert("Error deleting stock-out: " + error.message);
+      console.error("Delete failed:", error);
+      alert("Error rolling back: " + error.message);
+    } finally {
+      setIsProcessing(false);
     }
   };
   
-  // Client-side search for the current page
   const filteredList = stockOutList.filter((item) => {
     if (!search) return true;
     return Object.values(item).some((val) => val?.toString().toLowerCase().includes(search.toLowerCase()));
@@ -252,7 +343,10 @@ const StockOut = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
+      {/* --- HEADER --- */}
       <div style={styles.headerContainer}><h2 style={styles.header}>Stock Out</h2><p style={styles.subHeader}>Record inventory items leaving your stock</p></div>
+      
+      {/* --- CONTROLS --- */}
       <div style={styles.controlsContainer}>
           <div style={styles.searchContainer}>
             <div style={styles.searchInputContainer}>
@@ -270,11 +364,18 @@ const StockOut = ({ internalUser }) => {
               </div>
             </div>
           )}
-          <button style={styles.stockOutBtn} onClick={() => setShowModal(true)}><AiOutlinePlus size={20} /> New Stock Out</button>
+          <button 
+            style={{...styles.stockOutBtn, opacity: isProcessing ? 0.6 : 1}} 
+            onClick={handleOpenModal} // UPDATED: Calls handleOpenModal which refreshes data
+            disabled={isProcessing}
+          >
+            <AiOutlinePlus size={20} /> New Stock Out
+          </button>
       </div>
       
+      {/* --- MODAL --- */}
       {showModal && (<div style={styles.modalOverlay}><div style={styles.modal}><div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock Out</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div><div style={styles.formGrid}>
-        <div style={styles.formGroupFull}><label style={styles.label}>Select Item *</label><Select options={availableItems} onChange={handleItemSelect} placeholder="Search by item name or Stock In ID..." isClearable /></div>
+        <div style={styles.formGroupFull}><label style={styles.label}>Select Item *</label><Select options={availableItems} onChange={handleItemSelect} placeholder="Search by item name..." isClearable /></div>
         <div style={styles.formGroupFull}>
             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px'}}>
                 <div style={styles.formGroup}><label style={styles.label}>Category</label><input type="text" value={form.category || 'N/A'} style={styles.inputDisabled} readOnly /></div>
@@ -282,19 +383,27 @@ const StockOut = ({ internalUser }) => {
                 <div style={styles.formGroup}><label style={styles.label}>Unit</label><input type="text" value={form.unit || 'N/A'} style={styles.inputDisabled} readOnly /></div>
             </div>
         </div>
-        <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div><hr style={styles.hr} /><div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div><div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div><div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div></div><div style={styles.modalButtons}><button style={styles.cancelButton} onClick={() => setShowModal(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Stock Out</button></div></div></div>)}
+        <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div><hr style={styles.hr} /><div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div><div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div><div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div></div>
+        
+        <div style={styles.modalButtons}>
+            <button style={styles.cancelButton} onClick={() => setShowModal(false)} disabled={isProcessing}>Cancel</button>
+            <button style={styles.saveButton} onClick={handleSave} disabled={isProcessing}>
+                {isProcessing ? <AiOutlineLoading className="spin-anim" /> : "Save Stock Out"}
+            </button>
+        </div>
+        </div></div>)}
 
+      {/* --- TABLE --- */}
       <div style={styles.tableContainer}>
         {loading && <div style={styles.loadingOverlay}><span>Loading...</span></div>}
-        <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock Out History</span><label><input type="checkbox" checked={showStockInId} onChange={() => setShowStockInId(!showStockInId)} /> Show Stock In ID</label></div>
+        <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock Out History</span></div>
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
-            <thead><tr><th style={styles.th}>Stock Out ID</th>{showStockInId && <th style={styles.th}>From Stock In ID</th>}<th style={styles.th}>Item</th><th style={styles.th}>Type</th><th style={styles.th}>Category</th><th style={styles.th}>Quantity</th><th style={styles.th}>Receiver</th><th style={styles.th}>Added By</th><th style={styles.th}>Date & Time</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
+            <thead><tr><th style={styles.th}>Stock Out ID</th><th style={styles.th}>Item</th><th style={styles.th}>Type</th><th style={styles.th}>Category</th><th style={styles.th}>Quantity</th><th style={styles.th}>Receiver</th><th style={styles.th}>Added By</th><th style={styles.th}>Date & Time</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
             <tbody>
               {filteredList.length > 0 ? (filteredList.map((item) => (
                   <tr key={item.id} style={styles.tr}>
                     <td style={styles.td}><Link to={`/stockout-view/${item.id}`} style={styles.link}>{item.stockOutId}</Link></td>
-                    {showStockInId && <td style={styles.td}>{item.stockInId}</td>}
                     <td style={styles.td}>{item.item}</td>
                     <td style={styles.td}>{item.type}</td>
                     <td style={styles.td}>{item.category}</td>
@@ -302,9 +411,18 @@ const StockOut = ({ internalUser }) => {
                     <td style={styles.td}>{item.receiverName} ({item.receiverId})</td>
                     <td style={styles.td}>{item.addedBy}</td>
                     <td style={styles.td}>{item.createdAt?.toDate ? item.createdAt.toDate().toLocaleString() : 'N/A'}</td>
-                    {isAdmin && (<td style={styles.td}><button style={styles.deleteBtn} onClick={() => handleDelete(item.id)} title="Delete entry"><AiOutlineDelete size={16}/></button></td>)}
+                    {isAdmin && (<td style={styles.td}>
+                        <button 
+                            style={{...styles.deleteBtn, cursor: isProcessing ? 'not-allowed' : 'pointer'}} 
+                            onClick={() => handleDelete(item)} 
+                            disabled={isProcessing}
+                            title="Delete entry"
+                        >
+                            {isProcessing ? <AiOutlineLoading className="spin-anim" /> : <AiOutlineDelete size={16}/>}
+                        </button>
+                    </td>)}
                   </tr>
-                ))) : (!loading && <tr><td colSpan={isAdmin ? (showStockInId ? 10 : 9) : (showStockInId ? 9 : 8)} style={styles.noData}>No stock out records found.</td></tr>)}
+                ))) : (!loading && <tr><td colSpan={isAdmin ? 9 : 8} style={styles.noData}>No stock out records found.</td></tr>)}
             </tbody>
           </table>
         </div>
@@ -353,7 +471,7 @@ const styles = {
     textarea: { padding: '12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', resize: 'vertical', minHeight: '80px', fontFamily: 'inherit' },
     hr: { gridColumn: 'span 2', border: 'none', borderTop: '1px solid #eaeaea', margin: '10px 0' },
     modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },
-    saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: '600' },
+    saveButton: { padding: '12px 24px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center' },
     cancelButton: { padding: '12px 24px', backgroundColor: 'transparent', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', color: '#6c757d' },
     tableContainer: { position: 'relative', backgroundColor: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' },
     tableHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '1px solid #eaeaea' },
@@ -372,7 +490,10 @@ const styles = {
 };
 
 const styleSheet = document.createElement("style");
-styleSheet.innerText = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+styleSheet.innerText = `
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  .spin-anim { animation: spin 1s linear infinite; }
+`;
 document.head.appendChild(styleSheet);
 
 export default StockOut;

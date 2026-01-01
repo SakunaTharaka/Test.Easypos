@@ -172,6 +172,11 @@ const Orders = ({ internalUser }) => {
       setItemInput(""); setQtyInput(1); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
   };
 
+  // Helper: Get Date in Sri Lanka Time
+  const getSriLankaDate = (dateObj = new Date()) => {
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+  };
+
   const handleSaveClick = () => {
     if (!selectedCategory || checkout.length === 0) return alert("Category and Items are required.");
     setPendingAction({ type: 'SAVE' });
@@ -193,11 +198,12 @@ const Orders = ({ internalUser }) => {
       else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
   };
 
-  // --- SAVE ORDER ---
+  // --- SAVE ORDER (UPDATED: Adds Advance to Daily Sales) ---
   const executeSaveOrder = async (paymentMethod) => {
     setIsSaving(true);
     try {
         await runTransaction(db, async (transaction) => {
+            // PHASE 1: ALL READS
             const today = new Date();
             const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
             
@@ -205,26 +211,42 @@ const Orders = ({ internalUser }) => {
             const counterDoc = await transaction.get(counterRef);
             const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
             const newCount = currentCount + 1;
-            const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
-
+            
             let walletDocId = null;
             if (paymentMethod === 'Cash') walletDocId = 'cash';
             else if (paymentMethod === 'Card') walletDocId = 'card';
             else if (paymentMethod === 'Online') walletDocId = 'online';
             const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+            
             let currentWalletBalance = 0;
-
             if (walletRef) {
                 const wDoc = await transaction.get(walletRef);
                 if (wDoc.exists()) {
                     currentWalletBalance = Number(wDoc.data().balance) || 0;
                 }
             }
+            
+            // Daily Stats Read
+            const dailyDateString = getSriLankaDate(); 
+            const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+            const dailyStatsSnap = await transaction.get(dailyStatsRef);
+            const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
 
+            // PHASE 2: CALCULATIONS & WRITES
+            const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
             const subtotal = checkout.reduce((sum, i) => sum + (i.price * i.quantity), 0);
             const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
             const grandTotal = subtotal + dCharge;
             const advance = Number(advanceAmount) || 0;
+
+            // Update Daily Stats (Add Advance)
+            if (advance > 0) {
+                 transaction.set(dailyStatsRef, { 
+                    totalSales: currentDailySales + advance,
+                    date: dailyDateString,
+                    lastUpdated: serverTimestamp()
+                }, { merge: true });
+            }
 
             const invRef = doc(collection(db, uid, "invoices", "invoice_list"));
             const orderRef = doc(collection(db, uid, "data", "orders"));
@@ -282,24 +304,39 @@ const Orders = ({ internalUser }) => {
     finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- COMPLETE ORDER ---
+  // --- COMPLETE ORDER (FIXED: ALL READS BEFORE WRITES) ---
   const executeCompleteOrder = async (order, paymentMethod) => {
       setIsSaving(true);
       try {
           await runTransaction(db, async (transaction) => {
+              // =========================================================
+              // PHASE 1: ALL READS
+              // =========================================================
+              
+              // 1. Read Wallet
               let walletDocId = null;
               if (paymentMethod === 'Cash') walletDocId = 'cash';
               else if (paymentMethod === 'Card') walletDocId = 'card';
               else if (paymentMethod === 'Online') walletDocId = 'online';
               const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+              
               let currentWalletBalance = 0;
-
               if (walletRef) {
                   const wDoc = await transaction.get(walletRef);
                   if (wDoc.exists()) {
                       currentWalletBalance = Number(wDoc.data().balance) || 0;
                   }
               }
+
+              // 2. Read Daily Stats
+              const dailyDateString = getSriLankaDate(); 
+              const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+              const dailyStatsSnap = await transaction.get(dailyStatsRef);
+              const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+
+              // =========================================================
+              // PHASE 2: ALL WRITES
+              // =========================================================
 
               const orderDocRef = doc(db, uid, "data", "orders", order.id);
               transaction.update(orderDocRef, { status: "Completed" });
@@ -310,6 +347,13 @@ const Orders = ({ internalUser }) => {
               }
 
               if (order.balance > 0) {
+                  // Add balance to daily stats
+                  transaction.set(dailyStatsRef, { 
+                    totalSales: currentDailySales + order.balance,
+                    date: dailyDateString,
+                    lastUpdated: serverTimestamp()
+                }, { merge: true });
+
                   const balInvoiceRef = doc(collection(db, uid, "invoices", "invoice_list"));
                   const balInvoiceData = {
                       invoiceNumber: `${order.orderNumber}_BAL`,
@@ -340,7 +384,7 @@ const Orders = ({ internalUser }) => {
       finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET) ---
+  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET & DAILY SALES) ---
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
       if(!window.confirm("Delete this order and linked invoices? This will deduct amounts from wallet.")) return;
       
@@ -375,10 +419,23 @@ const Orders = ({ internalUser }) => {
                   }
               }
 
-              // 4. Helper to Deduct
-              const deductFromWallet = async (invoice) => {
+              // 4. Helper to Deduct (Wallet & Daily Sales)
+              // Note: Inside transaction, we must do reads before writes. 
+              // This structure is tricky because we have multiple invoices.
+              // We'll read all necessary docs first.
+
+              // We need wallet refs and daily stat refs for both invoices.
+              // For simplicity, let's assume one wallet update per transaction or read them all.
+              
+              // To properly fix "Read before Write" in this dynamic scenario (multiple unknown dates/wallets),
+              // we will collect all operations first.
+              
+              const ops = []; // { type: 'wallet'|'stats', ref: ..., amount: ... }
+
+              const prepareReversal = async (invoice) => {
                   if (!invoice || !invoice.received || invoice.received <= 0) return;
-                  
+
+                  // Wallet Read
                   let wId = null;
                   if (invoice.paymentMethod === 'Cash') wId = 'cash';
                   else if (invoice.paymentMethod === 'Card') wId = 'card';
@@ -386,22 +443,38 @@ const Orders = ({ internalUser }) => {
 
                   if (wId) {
                       const wRef = doc(db, uid, "wallet", "accounts", wId);
-                      const wDoc = await transaction.get(wRef);
+                      const wDoc = await transaction.get(wRef); // READ
                       if (wDoc.exists()) {
-                          const currentBal = Number(wDoc.data().balance) || 0;
-                          transaction.set(wRef, { 
-                              balance: currentBal - Number(invoice.received),
-                              lastUpdated: serverTimestamp()
-                          }, { merge: true });
+                           ops.push({ type: 'wallet', ref: wRef, currentVal: Number(wDoc.data().balance) || 0, deduct: Number(invoice.received) });
+                      }
+                  }
+
+                  // Daily Stats Read
+                  if (invoice.createdAt) {
+                      const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
+                      const dailyDateString = getSriLankaDate(dateVal);
+                      const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
+                      const dailyStatsSnap = await transaction.get(dailyStatsRef); // READ
+                      if (dailyStatsSnap.exists()) {
+                          ops.push({ type: 'stats', ref: dailyStatsRef, currentVal: Number(dailyStatsSnap.data().totalSales) || 0, deduct: Number(invoice.received) });
                       }
                   }
               };
 
-              // 5. Execute Deductions
-              if (advInvoiceData) await deductFromWallet(advInvoiceData);
-              if (balInvoiceData) await deductFromWallet(balInvoiceData);
+              // EXECUTE READS
+              if (advInvoiceData) await prepareReversal(advInvoiceData);
+              if (balInvoiceData) await prepareReversal(balInvoiceData);
 
-              // 6. Delete Documents
+              // EXECUTE WRITES
+              ops.forEach(op => {
+                  if (op.type === 'wallet') {
+                      transaction.set(op.ref, { balance: op.currentVal - op.deduct, lastUpdated: serverTimestamp() }, { merge: true });
+                  } else if (op.type === 'stats') {
+                      transaction.set(op.ref, { totalSales: op.currentVal - op.deduct, lastUpdated: serverTimestamp() }, { merge: true });
+                  }
+              });
+
+              // Delete Documents
               transaction.delete(orderRef);
               if (advInvoiceRef) transaction.delete(advInvoiceRef);
               if (balInvoiceRef) transaction.delete(balInvoiceRef);
