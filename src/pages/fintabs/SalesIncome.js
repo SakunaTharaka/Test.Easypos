@@ -179,10 +179,7 @@ const SalesIncome = () => {
                 <span>Online Transfer Total:</span>
                 <span>Rs. {totals.online.toFixed(2)}</span>
             </div>
-             <div style={{...styles.totalRow, color: '#006400', fontSize: '14px', fontStyle: 'italic'}}>
-                <span>(Including Credit Repayments):</span>
-                <span>Rs. {totals.creditRepayment.toFixed(2)}</span>
-            </div>
+            {/* Removed Credit Repayment Section */}
             <div style={styles.grandTotalRow}>
                 <span>Grand Total for {new Date(selectedDate).toLocaleDateString()}:</span>
                 <span>Rs. {totals.grand.toFixed(2)}</span>
@@ -213,4 +210,3 @@ const styles = {
 };
 
 export default SalesIncome;
-

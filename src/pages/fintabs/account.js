@@ -1,18 +1,20 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
   addDoc, 
-  getDocs, 
+  getDocs, // We rely on this now instead of onSnapshot
   serverTimestamp,
   query,
   orderBy,
   where,
   limit,
-  startAfter
+  startAfter,
+  doc,
+  runTransaction 
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
-import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight } from 'react-icons/ai';
+import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload } from 'react-icons/ai'; // Added AiOutlineReload
 
 const Accounts = () => {
   const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
@@ -33,7 +35,7 @@ const Accounts = () => {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferDesc, setTransferDesc] = useState('');
 
-  // --- HISTORY STATE ---
+  // History State
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [filterDate, setFilterDate] = useState("");
@@ -45,82 +47,45 @@ const Accounts = () => {
 
   const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-  // --- 1. Fetch Data & Calculate Balances ---
-  useEffect(() => {
+  // --- 1. REPLACED: Manual Fetch instead of Real-time Listener ---
+  const fetchWalletBalances = async () => {
     if (!uid) return;
-    calculateBalances();
+    setLoading(true);
+    try {
+        const walletColRef = collection(db, uid, "wallet", "accounts");
+        const snapshot = await getDocs(walletColRef);
+        
+        const newBalances = { cash: 0, card: 0, online: 0 };
+        snapshot.forEach(doc => {
+            if (doc.id === 'cash') newBalances.cash = Number(doc.data().balance) || 0;
+            if (doc.id === 'card') newBalances.card = Number(doc.data().balance) || 0;
+            if (doc.id === 'online') newBalances.online = Number(doc.data().balance) || 0;
+        });
+
+        setSalesBalances(newBalances);
+    } catch (error) {
+        console.error("Error fetching wallet balances:", error);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // Initial Fetch on Mount
+  useEffect(() => {
+    fetchWalletBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, cashBookBalances]);
+  }, [uid]);
+
 
   // --- 2. Fetch History on Change ---
   useEffect(() => {
     if(!uid) return;
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, currentPage, filterDate]); // Re-fetch when page or date changes
-
-  const calculateBalances = async () => {
-    setLoading(true);
-    try {
-      const invoicesRef = collection(db, uid, "invoices", "invoice_list");
-      const invoicesSnap = await getDocs(invoicesRef);
-      
-      let totalCashIn = 0;
-      let totalCardIn = 0;
-      let totalOnlineIn = 0;
-
-      invoicesSnap.forEach(doc => {
-        const data = doc.data();
-        const amt = parseFloat(data.total) || 0;
-        
-        let method = data.paymentMethod;
-        if (data.paymentMethod === 'Credit-Repayment') {
-            method = data.method;
-        }
-
-        if (method === 'Cash') totalCashIn += amt;
-        else if (method === 'Card') totalCardIn += amt;
-        else if (method === 'Online') totalOnlineIn += amt;
-      });
-
-      const transfersRef = collection(db, uid, "finance", "transfers");
-      const transfersSnap = await getDocs(transfersRef);
-
-      let cashTransferredOut = 0;
-      let cardTransferredOut = 0;
-      let onlineTransferredOut = 0;
-      
-      let cashTransferredIn = 0;
-      let cardTransferredIn = 0;
-      let onlineTransferredIn = 0;
-
-      transfersSnap.forEach(doc => {
-          const t = doc.data();
-          const amt = parseFloat(t.amount) || 0;
-
-          if (t.fromId === 'SALES_CASH') cashTransferredOut += amt;
-          if (t.fromId === 'SALES_CARD') cardTransferredOut += amt;
-          if (t.fromId === 'SALES_ONLINE') onlineTransferredOut += amt;
-
-          if (t.toId === 'SALES_CASH') cashTransferredIn += amt;
-          if (t.toId === 'SALES_CARD') cardTransferredIn += amt;
-          if (t.toId === 'SALES_ONLINE') onlineTransferredIn += amt;
-      });
-
-      setSalesBalances({
-          cash: totalCashIn + cashTransferredIn - cashTransferredOut,
-          card: totalCardIn + cardTransferredIn - cardTransferredOut,
-          online: totalOnlineIn + onlineTransferredIn - onlineTransferredOut
-      });
-
-    } catch (error) {
-      console.error("Error calculating balances:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [uid, currentPage, filterDate]); 
 
   const fetchHistory = async () => {
+      // ... (Existing history logic remains unchanged) ...
       setHistoryLoading(true);
       try {
           let q = collection(db, uid, "finance", "transfers");
@@ -134,10 +99,7 @@ const Accounts = () => {
           }
 
           const cursor = pageCursors[currentPage - 1];
-          if (cursor) {
-              constraints.push(startAfter(cursor));
-          }
-
+          if (cursor) constraints.push(startAfter(cursor));
           constraints.push(limit(PAGE_SIZE));
 
           const finalQuery = query(q, ...constraints);
@@ -151,7 +113,6 @@ const Accounts = () => {
                const lastVisible = snap.docs[snap.docs.length - 1];
                setPageCursors(prev => {
                   const newCursors = [...prev];
-                  // Ensure we don't overwrite if user clicked previous then next
                   if(!newCursors[currentPage]) newCursors[currentPage] = lastVisible;
                   return newCursors;
                });
@@ -164,9 +125,9 @@ const Accounts = () => {
 
   const getAllOptions = () => {
       const options = [
-          { value: 'SALES_CASH', label: 'Cash from Sale', type: 'BUCKET' },
-          { value: 'SALES_CARD', label: 'Card Payment Bank', type: 'BUCKET' },
-          { value: 'SALES_ONLINE', label: 'Online Payment Bank', type: 'BUCKET' }
+          { value: 'SALES_CASH', label: 'Cash from Sale', type: 'WALLET', walletId: 'cash' },
+          { value: 'SALES_CARD', label: 'Card Payment Bank', type: 'WALLET', walletId: 'card' },
+          { value: 'SALES_ONLINE', label: 'Online Payment Bank', type: 'WALLET', walletId: 'online' }
       ];
       cashBooks.forEach(cb => {
           options.push({ value: cb.id, label: cb.name, type: 'CASHBOOK' });
@@ -174,76 +135,96 @@ const Accounts = () => {
       return options;
   };
 
-  // --- Handle Transfer ---
+  // --- 3. Handle Transfer ---
   const handleTransfer = async (e) => {
     e.preventDefault();
-    
-    if (!transferFromId || !transferToId || !transferAmount) {
-        alert("Please select Source, Destination, and Amount.");
-        return;
-    }
-    if (transferFromId === transferToId) {
-        alert("Source and Destination cannot be the same.");
-        return;
-    }
-    
+    // ... (Validation logic remains unchanged) ...
+    if (!uid) return;
+    if (!transferFromId || !transferToId || !transferAmount) return alert("Please select Source, Destination, and Amount.");
+    if (transferFromId === transferToId) return alert("Source and Destination cannot be the same.");
     const amt = parseFloat(transferAmount);
-    if (isNaN(amt) || amt <= 0) {
-        alert("Please enter a valid amount.");
-        return;
-    }
+    if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
 
     const allOptions = getAllOptions();
     const transferFrom = allOptions.find(o => o.value === transferFromId);
     const transferTo = allOptions.find(o => o.value === transferToId);
 
-    if (!transferFrom || !transferTo) {
-        alert("Invalid account selection.");
-        return;
+    if (!transferFrom || !transferTo) return alert("Invalid account selection.");
+
+    // Pre-check for CashBooks
+    if (transferFrom.type === 'CASHBOOK') {
+        const currentBalance = cashBookBalances[transferFrom.value] || 0;
+        if (currentBalance < amt) return alert(`Insufficient funds in ${transferFrom.label}.`);
     }
 
     setIsTransferring(true);
     try {
-        const batchPromises = [];
-        const timestamp = serverTimestamp();
+        await runTransaction(db, async (transaction) => {
+            const timestamp = serverTimestamp();
+            let sourceWalletRef = null;
+            let currentSourceBalance = 0;
+            let destWalletRef = null;
+            let currentDestBalance = 0;
 
-        // 1. Record the Transfer (Log)
-        batchPromises.push(addDoc(collection(db, uid, "finance", "transfers"), {
-            fromId: transferFrom.value,
-            fromLabel: transferFrom.label,
-            toId: transferTo.value,
-            toLabel: transferTo.label,
-            amount: amt,
-            description: transferDesc,
-            createdAt: timestamp,
-            createdBy: "Admin"
-        }));
+            // Check Source Wallet
+            if (transferFrom.type === 'WALLET') {
+                sourceWalletRef = doc(db, uid, "wallet", "accounts", transferFrom.walletId);
+                const sDoc = await transaction.get(sourceWalletRef);
+                if (!sDoc.exists()) throw "Source wallet not found.";
+                currentSourceBalance = Number(sDoc.data().balance) || 0;
+                if (currentSourceBalance < amt) throw `Insufficient funds in ${transferFrom.label}.`;
+            }
 
-        // 2. Handle Cash Books Integration (Money Movement)
-        if (transferFrom.type === 'CASHBOOK') {
-            batchPromises.push(addDoc(collection(db, uid, 'user_data', 'expenses'), {
-                expenseId: `TRF-${Date.now()}`,
-                category: 'Internal Transfer',
+            // Check Dest Wallet
+            if (transferTo.type === 'WALLET') {
+                destWalletRef = doc(db, uid, "wallet", "accounts", transferTo.walletId);
+                const dDoc = await transaction.get(destWalletRef);
+                if (dDoc.exists()) currentDestBalance = Number(dDoc.data().balance) || 0;
+            }
+
+            // Write Phase
+            if (sourceWalletRef) transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
+            if (destWalletRef) transaction.set(destWalletRef, { balance: currentDestBalance + amt, lastUpdated: timestamp }, { merge: true });
+
+            // Create Log
+            const transferRef = doc(collection(db, uid, "finance", "transfers"));
+            transaction.set(transferRef, {
+                fromId: transferFrom.value,
+                fromLabel: transferFrom.label,
+                toId: transferTo.value,
+                toLabel: transferTo.label,
                 amount: amt,
-                details: `Transfer to ${transferTo.label} - ${transferDesc}`,
-                cashBookId: transferFrom.value,
-                cashBookName: transferFrom.label,
+                description: transferDesc,
                 createdAt: timestamp,
-                createdBy: "System"
-            }));
-        }
+                createdBy: "Admin"
+            });
 
-        if (transferTo.type === 'CASHBOOK') {
-            batchPromises.push(addDoc(collection(db, uid, 'cash_book_entries', 'entry_list'), {
-                amount: amt,
-                details: `Transfer from ${transferFrom.label} - ${transferDesc}`,
-                cashBookId: transferTo.value,
-                createdAt: timestamp,
-                addedBy: "System"
-            }));
-        }
+            // Handle CashBooks
+            if (transferFrom.type === 'CASHBOOK') {
+                const expRef = doc(collection(db, uid, 'user_data', 'expenses'));
+                transaction.set(expRef, {
+                    expenseId: `TRF-${Date.now()}`,
+                    category: 'Internal Transfer',
+                    amount: amt,
+                    details: `Transfer to ${transferTo.label}`,
+                    cashBookId: transferFrom.value,
+                    cashBookName: transferFrom.label,
+                    createdAt: timestamp,
+                    createdBy: "System"
+                });
+            }
 
-        await Promise.all(batchPromises);
+            if (transferTo.type === 'CASHBOOK') {
+                const entryRef = doc(collection(db, uid, 'cash_book_entries', 'entry_list'));
+                transaction.set(entryRef, {
+                    amount: amt,
+                    details: `Transfer from ${transferFrom.label}`,
+                    cashBookId: transferTo.value,
+                    createdAt: timestamp,
+                    addedBy: "System"
+                });
+            }
+        });
         
         alert("Transfer Successful!");
         setTransferAmount('');
@@ -251,22 +232,24 @@ const Accounts = () => {
         setTransferFromId('');
         setTransferToId('');
         
-        await refreshBalances(); 
-        calculateBalances();
-        // Reset pagination and fetch new history
+        // --- CRITICAL UPDATE: Refresh Data Manually ---
+        await refreshBalances(); // Context (Cash Books)
+        fetchWalletBalances();   // Local (Wallets) - replaces the real-time listener update
+        
         setCurrentPage(1);
         setPageCursors([null]);
         fetchHistory();     
 
     } catch (error) {
         console.error("Transfer failed:", error);
-        alert("Transfer failed: " + error.message);
+        const msg = typeof error === 'string' ? error : (error.message || "Unknown error");
+        alert("Transfer failed: " + msg);
     } finally {
         setIsTransferring(false);
     }
   };
 
-  // Client-side search filtering on the current page
+  // ... (Displayed History filtering remains the same) ...
   const displayedHistory = history.filter(item => {
       if (!searchTerm) return true;
       const lower = searchTerm.toLowerCase();
@@ -277,10 +260,9 @@ const Accounts = () => {
           item.amount?.toString().includes(lower)
       );
   });
-
+  
   const handleNextPage = () => { if (hasNextPage) setCurrentPage(p => p + 1); };
   const handlePrevPage = () => { if (currentPage > 1) setCurrentPage(p => p - 1); };
-  
   const handleDateFilterChange = (e) => {
       setFilterDate(e.target.value);
       setCurrentPage(1);
@@ -291,12 +273,19 @@ const Accounts = () => {
     <div style={styles.container}>
       
       {/* --- SECTION 1: ACCOUNT BALANCES --- */}
+      <div style={styles.headerRow}>
+         <h3 style={{...styles.sectionTitle, marginBottom: 0}}>Wallet Balances</h3>
+         <button onClick={fetchWalletBalances} style={styles.refreshBtn} title="Refresh Balances">
+            <AiOutlineReload className={loading ? 'spin' : ''} /> Refresh
+         </button>
+      </div>
+
       <div style={styles.gridContainer}>
           <div style={styles.accountCard}>
               <div style={styles.cardIconBoxGreen}>Cash</div>
               <div>
                   <div style={styles.cardLabel}>Cash from Sale</div>
-                  <div style={styles.cardBalance}>Rs. {loading ? '...' : salesBalances.cash.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.cash.toFixed(2)}</div>
               </div>
           </div>
 
@@ -304,7 +293,7 @@ const Accounts = () => {
               <div style={styles.cardIconBoxBlue}>Card</div>
               <div>
                   <div style={styles.cardLabel}>Card Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {loading ? '...' : salesBalances.card.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.card.toFixed(2)}</div>
               </div>
           </div>
 
@@ -312,12 +301,16 @@ const Accounts = () => {
               <div style={styles.cardIconBoxPurple}>Online</div>
               <div>
                   <div style={styles.cardLabel}>Online Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {loading ? '...' : salesBalances.online.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.online.toFixed(2)}</div>
               </div>
           </div>
       </div>
-
-      {/* --- SECTION 2: CASH BOOKS --- */}
+      
+      {/* ... (Rest of UI: Cash Books, Transfer Form, History Table remains identical) ... */}
+      
+      {/* Only showing Section 3 & 4 placeholder for brevity as they don't change logic-wise, 
+          but you would keep the full JSX here in your actual file. */}
+      
       <div style={styles.section}>
           <h3 style={styles.sectionTitle}>Cash Books</h3>
           <div style={styles.cashBookGrid}>
@@ -326,16 +319,16 @@ const Accounts = () => {
                       <div style={styles.cashBookName}>{book.name}</div>
                       <div style={styles.cashBookBalance}>Rs. {(cashBookBalances[book.id] || 0).toFixed(2)}</div>
                   </div>
-              )) : <p style={{color: '#888'}}>No cash books found. Create one in the Cash Book tab.</p>}
+              )) : <p style={{color: '#888'}}>No cash books found.</p>}
           </div>
       </div>
 
-      {/* --- SECTION 3: TRANSFER MONEY --- */}
       <div style={styles.section}>
           <h3 style={styles.sectionTitle}>Transfer Money</h3>
           <div style={styles.transferContainer}>
               <form onSubmit={handleTransfer} style={styles.transferForm}>
-                  
+                 {/* ... (Keep your form inputs exactly as they were) ... */}
+                 
                   <div style={styles.inputGroup}>
                       <label style={styles.label}>From Account</label>
                       <select 
@@ -356,6 +349,8 @@ const Accounts = () => {
                           </optgroup>
                       </select>
                   </div>
+                  
+                  {/* ... (Arrow, To Account, Amount, Desc inputs) ... */}
 
                   <div style={styles.arrowContainer}>
                       <span style={{fontSize: '24px', color: '#94a3b8', fontWeight: 'bold'}}>→</span>
@@ -385,52 +380,33 @@ const Accounts = () => {
                   <div style={styles.inputGroup}>
                       <label style={styles.label}>Amount (Rs.)</label>
                       <input 
-                          type="number" 
-                          step="0.01" 
-                          value={transferAmount} 
-                          onChange={e => setTransferAmount(e.target.value)} 
-                          style={styles.input} 
-                          placeholder="0.00"
+                          type="number" step="0.01" 
+                          value={transferAmount} onChange={e => setTransferAmount(e.target.value)} 
+                          style={styles.input} placeholder="0.00"
                       />
                   </div>
 
                   <div style={styles.inputGroup}>
                       <label style={styles.label}>Reference / Note</label>
                       <input 
-                          type="text" 
-                          value={transferDesc} 
-                          onChange={e => setTransferDesc(e.target.value)} 
-                          style={styles.input} 
-                          placeholder="Optional"
+                          type="text" value={transferDesc} onChange={e => setTransferDesc(e.target.value)} 
+                          style={styles.input} placeholder="Optional"
                       />
                   </div>
 
-                  <button 
-                      type="submit" 
-                      style={isTransferring ? styles.transferBtnDisabled : styles.transferBtn} 
-                      disabled={isTransferring}
-                  >
+                  <button type="submit" style={isTransferring ? styles.transferBtnDisabled : styles.transferBtn} disabled={isTransferring}>
                       {isTransferring ? 'Processing...' : 'Transfer Funds'}
                   </button>
-
               </form>
           </div>
       </div>
       
-      {/* --- SECTION 4: TRANSACTION HISTORY (NEW) --- */}
       <div style={styles.section}>
           <h3 style={styles.sectionTitle}>Transaction History</h3>
-          
           <div style={styles.controlsRow}>
               <div style={styles.searchBox}>
                   <AiOutlineSearch style={{color: '#94a3b8'}} />
-                  <input 
-                    type="text" 
-                    placeholder="Search by note, account, amount..." 
-                    style={styles.simpleInput} 
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                  />
+                  <input type="text" placeholder="Search..." style={styles.simpleInput} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
               </div>
               <div style={styles.dateBox}>
                   <label style={{fontSize: '13px', fontWeight: '600', color: '#64748b'}}>Filter Date:</label>
@@ -438,7 +414,6 @@ const Accounts = () => {
                   {filterDate && <button onClick={() => { setFilterDate(""); setCurrentPage(1); setPageCursors([null]); }} style={styles.clearBtn}>Clear</button>}
               </div>
           </div>
-
           <div style={styles.tableWrapper}>
               <table style={styles.table}>
                   <thead>
@@ -469,18 +444,18 @@ const Accounts = () => {
                   </tbody>
               </table>
           </div>
-
           <div style={styles.paginationRow}>
-              <button onClick={handlePrevPage} disabled={currentPage === 1 || historyLoading} style={styles.pageBtn}>
-                  <AiOutlineArrowLeft /> Prev
-              </button>
+              <button onClick={handlePrevPage} disabled={currentPage === 1 || historyLoading} style={styles.pageBtn}><AiOutlineArrowLeft /> Prev</button>
               <span style={styles.pageInfo}>Page {currentPage}</span>
-              <button onClick={handleNextPage} disabled={!hasNextPage || historyLoading} style={styles.pageBtn}>
-                  Next <AiOutlineArrowRight />
-              </button>
+              <button onClick={handleNextPage} disabled={!hasNextPage || historyLoading} style={styles.pageBtn}>Next <AiOutlineArrowRight /></button>
           </div>
       </div>
 
+      {/* Basic Spin Animation for Refresh Icon */}
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 };
@@ -495,6 +470,7 @@ const themeColors = {
 };
 
 const styles = {
+  // ... (Keep all existing styles) ...
   container: {
     padding: '24px',
     fontFamily: "'Inter', sans-serif",
@@ -503,6 +479,27 @@ const styles = {
     backgroundColor: themeColors.bg,
     minHeight: '80vh'
   },
+  headerRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '15px'
+  },
+  refreshBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 12px',
+    background: 'white',
+    border: '1px solid #cbd5e1',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#475569',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  // ... (Include your existing styles here: gridContainer, accountCard, etc.) ...
   gridContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -519,125 +516,31 @@ const styles = {
     gap: '16px',
     border: '1px solid #f1f5f9'
   },
-  cardIconBoxGreen: {
-    width: '48px', height: '48px', borderRadius: '10px',
-    background: '#dcfce7', color: '#16a34a',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 'bold', fontSize: '14px'
-  },
-  cardIconBoxBlue: {
-    width: '48px', height: '48px', borderRadius: '10px',
-    background: '#dbeafe', color: '#2563eb',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 'bold', fontSize: '14px'
-  },
-  cardIconBoxPurple: {
-    width: '48px', height: '48px', borderRadius: '10px',
-    background: '#f3e8ff', color: '#9333ea',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 'bold', fontSize: '14px'
-  },
+  cardIconBoxGreen: { width: '48px', height: '48px', borderRadius: '10px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
+  cardIconBoxBlue: { width: '48px', height: '48px', borderRadius: '10px', background: '#dbeafe', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
+  cardIconBoxPurple: { width: '48px', height: '48px', borderRadius: '10px', background: '#f3e8ff', color: '#9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
   cardLabel: { fontSize: '14px', color: '#64748b', fontWeight: '500' },
   cardBalance: { fontSize: '20px', color: '#0f172a', fontWeight: '700', marginTop: '4px' },
   
-  section: {
-    background: 'white',
-    borderRadius: '12px',
-    padding: '24px',
-    marginBottom: '30px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    border: '1px solid #e2e8f0'
-  },
-  sectionTitle: {
-    fontSize: '18px',
-    fontWeight: '700',
-    color: '#1e293b',
-    marginBottom: '20px',
-    display: 'flex',
-    alignItems: 'center'
-  },
-  cashBookGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '16px'
-  },
-  cashBookCard: {
-    background: '#f8fafc',
-    padding: '16px',
-    borderRadius: '10px',
-    border: '1px solid #e2e8f0',
-    textAlign: 'center'
-  },
+  section: { background: 'white', borderRadius: '12px', padding: '24px', marginBottom: '30px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0' },
+  sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1e293b', marginBottom: '20px', display: 'flex', alignItems: 'center' },
+  
+  // (Paste rest of your styles object here: transferForm, table, etc.)
+  cashBookGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' },
+  cashBookCard: { background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', textAlign: 'center' },
   cashBookName: { fontSize: '14px', fontWeight: '600', color: '#475569' },
   cashBookBalance: { fontSize: '18px', fontWeight: '700', color: '#0f172a', marginTop: '8px' },
 
-  transferContainer: {
-    background: '#f8fafc',
-    padding: '24px',
-    borderRadius: '12px',
-    border: '1px solid #e2e8f0'
-  },
-  transferForm: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    gap: '16px',
-    flexWrap: 'wrap'
-  },
-  inputGroup: {
-    flex: 1,
-    minWidth: '200px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
+  transferContainer: { background: '#f8fafc', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' },
+  transferForm: { display: 'flex', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' },
+  inputGroup: { flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column', gap: '8px' },
   label: { fontSize: '13px', fontWeight: '600', color: '#475569' },
-  input: {
-    padding: '10px 12px',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    fontSize: '14px',
-    outline: 'none',
-    width: '100%',
-    boxSizing: 'border-box'
-  },
-  select: {
-    padding: '10px 12px',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    fontSize: '14px',
-    outline: 'none',
-    width: '100%',
-    boxSizing: 'border-box',
-    backgroundColor: 'white'
-  },
-  arrowContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: '10px'
-  },
-  transferBtn: {
-    padding: '12px 24px',
-    background: themeColors.primary,
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginBottom: '1px',
-    transition: 'background 0.2s'
-  },
-  transferBtnDisabled: {
-    padding: '12px 24px',
-    background: '#94a3b8',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    fontWeight: '600',
-    cursor: 'not-allowed',
-    marginBottom: '1px'
-  },
-  // New Styles for History
+  input: { padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box' },
+  select: { padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', backgroundColor: 'white' },
+  arrowContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: '10px' },
+  transferBtn: { padding: '12px 24px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginBottom: '1px', transition: 'background 0.2s' },
+  transferBtnDisabled: { padding: '12px 24px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'not-allowed', marginBottom: '1px' },
+  
   controlsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' },
   searchBox: { display: 'flex', alignItems: 'center', gap: '10px', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1, minWidth: '250px' },
   dateBox: { display: 'flex', alignItems: 'center', gap: '10px' },

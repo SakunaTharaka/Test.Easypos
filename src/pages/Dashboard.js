@@ -21,6 +21,7 @@ const Items = lazy(() => import("./tabs/Items"));
 const Customers = lazy(() => import("./tabs/Customers"));
 const PriceCat = lazy(() => import("./tabs/PriceCat"));
 const Quotations = lazy(() => import("./tabs/Quotations"));
+const Costing = lazy(() => import("./tabs/Costing")); // <--- NEW IMPORT ADDED HERE
 const AddProduction = lazy(() => import("./tabs/AddProduction"));
 const ProductionBalance = lazy(() => import("./tabs/ProductionBalance"));
 const SalesIncome = lazy(() => import("./fintabs/SalesIncome"));
@@ -29,7 +30,7 @@ const DaySaleBal = lazy(() => import("./fintabs/Reconcile"));
 const Expenses = lazy(() => import("./fintabs/Expenses"));
 const Summary = lazy(() => import("./fintabs/Summary"));
 const CashBook = lazy(() => import("./fintabs/CashBook"));
-const CreditCust = lazy(() => import("./fintabs/CreditCust"));
+// Unlinked CreditCust page
 const DashboardView = lazy(() => import("./DashboardView"));
 const Invoice = lazy(() => import("./Invoice"));
 const SalesReport = lazy(() => import("./SalesReport"));
@@ -220,15 +221,15 @@ const Dashboard = () => {
       setActiveSubTab = setActiveInventoryTab;
     } else if (activeTab === "Finance") {
       subTabs = ["Sales Income", "Stock Payments"];
-      if (maintainCreditCustomers) {
-        subTabs.push("Credit Customer Cash");
-      }
+      // Removed "Credit Customer Cash" push logic here
+      
       // Added "Accounts" to the list
       subTabs.push("Reconcilation", "Expenses", "Summary", "Cash Book", "Accounts");
       activeSubTab = activeFinanceTab;
       setActiveSubTab = setActiveFinanceTab;
     } else if (activeTab === "Items & Customers") {
-      subTabs = ["Items", "Customers", "Price Categories", "Quotations"];
+      // --- ADDED COSTING HERE ---
+      subTabs = ["Items", "Customers", "Price Categories", "Quotations", "Costing"];
       activeSubTab = activeItemsCustomersTab;
       setActiveSubTab = setActiveItemsCustomersTab;
     } 
@@ -298,7 +299,7 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeFinanceTab === "Sales Income" && <SalesIncome />}
             {activeFinanceTab === "Stock Payments" && <StockPayment />}
-            {activeFinanceTab === "Credit Customer Cash" && maintainCreditCustomers && <CreditCust />}
+            {/* Removed CreditCust component rendering */}
             {activeFinanceTab === "Reconcilation" && <DaySaleBal />}
             {activeFinanceTab === "Expenses" && <Expenses />}
             {activeFinanceTab === "Summary" && <Summary />}
@@ -314,6 +315,8 @@ const Dashboard = () => {
           {activeItemsCustomersTab === "Customers" && <Customers internalUser={internalLoggedInUser} maintainCreditCustomers={maintainCreditCustomers} />}
           {activeItemsCustomersTab === "Price Categories" && <PriceCat internalUser={internalLoggedInUser} />}
           {activeItemsCustomersTab === "Quotations" && <Quotations internalUser={internalLoggedInUser} />}
+          {/* --- RENDER COSTING HERE --- */}
+          {activeItemsCustomersTab === "Costing" && <Costing internalUser={internalLoggedInUser} />}
         </div>
       );
       case "Admin": return <Admin internalUsers={internalUsers} setInternalUsers={setInternalUsers} />;

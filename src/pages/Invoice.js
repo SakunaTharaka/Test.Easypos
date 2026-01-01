@@ -777,20 +777,46 @@ const Invoice = ({ internalUser }) => {
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
   
+  // --- UPDATED SAVE FUNCTION WITH WALLET LOGIC FIX ---
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
     setIsSaving(true); setShowPaymentConfirm(false);
+    
     try {
       const today = new Date();
       const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+      
       const counterRef = doc(db, user.uid, "counters");
+      
+      // Determine which wallet document to update based on payment method
+      let walletDocId = null;
+      if (method === 'Cash') walletDocId = 'cash';
+      else if (method === 'Card') walletDocId = 'card';
+      else if (method === 'Online') walletDocId = 'online';
+      
+      // FIX: Use 4 segments (User -> wallet(doc) -> accounts(col) -> [type](doc)) to avoid "odd number of segments" error
+      const walletRef = walletDocId ? doc(db, user.uid, "wallet", "accounts", walletDocId) : null;
+
       const finalInvoiceData = await runTransaction(db, async (t) => {
+        // 1. Get Counter
         const cDoc = await t.get(counterRef);
         const nextSeq = (cDoc.exists() ? cDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
         const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
+        
+        // 2. Get Current Wallet Balance
+        let currentWalletBalance = 0;
+        if (walletRef) {
+            const wDoc = await t.get(walletRef);
+            if (wDoc.exists()) {
+                currentWalletBalance = Number(wDoc.data().balance) || 0;
+            }
+        }
+        
+        // 3. Update Counter
         t.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
         
+        // 4. Create Invoice
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, items: checkout, 
           total, deliveryCharge: Number(deliveryCharge) || 0,
@@ -801,8 +827,16 @@ const Invoice = ({ internalUser }) => {
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
-        // Return a constructed object that mimics the firestore document for immediate printing
-        // We use 'new Date()' for createdAt because serverTimestamp hasn't resolved yet
+
+        // 5. Update Wallet (Add Grand Total to existing balance)
+        if (walletRef) {
+            const newBalance = currentWalletBalance + invData.total;
+            t.set(walletRef, { 
+                balance: newBalance,
+                lastUpdated: serverTimestamp() 
+            }, { merge: true });
+        }
+        
         return { ...invData, createdAt: new Date(), invoiceNumber: newInvNum };
       });
 
@@ -811,7 +845,7 @@ const Invoice = ({ internalUser }) => {
         if (settings?.openCashDrawerWithPrint) setShowQZPrintModal(true);
         else setIsPrintingBrowser(true);
       } else { alert("Saved!"); await resetForm(); }
-    } catch (e) { alert("Save failed: " + e.message); } finally { setIsSaving(false); }
+    } catch (e) { console.error(e); alert("Save failed: " + e.message); } finally { setIsSaving(false); }
   };
   
   const handleSaveAttempt = () => {

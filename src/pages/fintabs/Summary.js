@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useContext } from "react";
 import { db, auth } from "../../firebase";
-import { collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore";
+import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -45,32 +45,34 @@ const Summary = () => {
       const startTimestamp = Timestamp.fromDate(startOfDay);
       const endTimestamp = Timestamp.fromDate(endOfDay);
 
-      const customersRef = collection(db, uid, "customers", "customer_list");
-      const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
+      // --- OPTIMIZATION START ---
+      // 1. We only want invoices that actually collected money.
+      // 2. We explicitly filter out "Credit" (unpaid) invoices here to save reads.
+      const revenueMethods = ['Cash', 'Card', 'Online', 'Credit-Repayment', 'Cheque'];
 
-      const invoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", startTimestamp), where("createdAt", "<=", endTimestamp));
+      const invoicesQuery = query(
+        collection(db, uid, "invoices", "invoice_list"),
+        where("createdAt", ">=", startTimestamp),
+        where("createdAt", "<=", endTimestamp),
+        where("paymentMethod", "in", revenueMethods) // Use 'in' operator to filter efficiently
+      );
+
       const expensesQuery = query(collection(db, uid, "user_data", "expenses"), where("createdAt", ">=", startTimestamp), where("createdAt", "<=", endTimestamp));
       const stockPaymentsQuery = query(collection(db, uid, "stock_payments", "payments"), where("paidAt", ">=", startTimestamp), where("paidAt", "<=", endTimestamp));
+      
+      // Note: If you have thousands of items, this `itemsQuery` will eventually become slow too.
+      // Ideally, you should save the 'costPrice' snapshot inside the invoice item when the invoice is created.
       const itemsQuery = query(collection(db, uid, "items", "item_list"));
       
-      const [creditCustomersSnap, invoicesSnap, expensesSnap, stockPaymentsSnap, itemsSnap] = await Promise.all([
-        getDocs(creditCustomersQuery),
+      const [invoicesSnap, expensesSnap, stockPaymentsSnap, itemsSnap] = await Promise.all([
         getDocs(invoicesQuery),
         getDocs(expensesQuery),
         getDocs(stockPaymentsQuery),
         getDocs(itemsQuery),
       ]);
 
-      const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
-      
-      const validInvoices = invoicesSnap.docs
-        .map(d => d.data())
-        .filter(inv => {
-            const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
-            const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
-            return isCreditRepayment || !isFromCreditCustomer;
-        });
-
+      // No need to fetch customers or filter manually anymore!
+      const validInvoices = invoicesSnap.docs.map(d => d.data());
       const allExpenses = expensesSnap.docs.map(d => d.data());
       const allStockPayments = stockPaymentsSnap.docs.map(d => d.data());
 
@@ -89,7 +91,9 @@ const Summary = () => {
       const totalExpenses = actualExpensesTotal + totalStockPayments; 
       
       const totalCOGS = validInvoices.reduce((sum, inv) => {
+        // Credit Repayments are paying off old debt, so they don't have new COGS attached to this transaction date
         if (inv.paymentMethod === 'Credit-Repayment') return sum;
+        
         const invoiceCOGS = inv.items.reduce((itemSum, item) => {
           const cost = itemCostMap.get(item.itemId) || 0;
           return itemSum + (cost * item.quantity);
@@ -101,13 +105,16 @@ const Summary = () => {
       const netIncome = grossProfit - totalExpenses;
       setKpiData({ totalRevenue, grossProfit, totalExpenses, netIncome });
 
-      // --- Sales Chart (Unchanged) ---
+      // --- Sales Chart ---
       const dailySales = {};
       validInvoices.forEach(inv => {
-        const date = inv.createdAt.toDate().toISOString().split('T')[0];
-        if (!dailySales[date]) dailySales[date] = 0;
-        dailySales[date] += inv.total;
+        if(inv.createdAt) {
+             const date = inv.createdAt.toDate().toISOString().split('T')[0];
+             if (!dailySales[date]) dailySales[date] = 0;
+             dailySales[date] += inv.total;
+        }
       });
+
       const labels = [];
       let currentDate = new Date(startOfDay);
       while (currentDate <= endOfDay) {
@@ -120,12 +127,12 @@ const Summary = () => {
         datasets: [{ label: 'Daily Sales', data: salesDataPoints, borderColor: '#3498db', backgroundColor: 'rgba(52, 152, 219, 0.1)', fill: true, tension: 0.1 }]
       });
 
-      // --- Expense & Stock Payment Chart (UPDATED) ---
+      // --- Expense & Stock Payment Chart ---
       const combinedExpensesForChart = {};
       
       // Aggregate regular expenses
       allExpenses.forEach(exp => {
-        const category = exp.category || 'Uncategorized Expense'; // Ensure unique name from stock payments
+        const category = exp.category || 'Uncategorized Expense';
         if (!combinedExpensesForChart[category]) combinedExpensesForChart[category] = 0;
         combinedExpensesForChart[category] += exp.amount;
       });
@@ -140,18 +147,18 @@ const Summary = () => {
         datasets: [{
           label: 'Expenses & Stock Payments',
           data: Object.values(combinedExpensesForChart),
-          // You might want to add more colors if you expect many categories + stock payments
-          backgroundColor: ['#e74c3c', '#f1c40f', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#3498db' /* Added blue for stock */],
+          backgroundColor: ['#e74c3c', '#f1c40f', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#3498db'],
           hoverOffset: 4
         }]
       });
 
     } catch (error) {
       console.error("Error fetching summary data:", error);
-      alert("Failed to fetch summary data.");
+      // NOTE: If you see "The query requires an index" in console, click the link provided in the error message!
+      alert("Failed to fetch summary data. See console for details.");
     }
     setLoading(false);
-  }, []);
+  }, []); // Removed specific dependencies to avoid infinite loops if objects change, but keep it empty if only needed on mount/date change
   
   useEffect(() => {
     fetchDashboardData(dateFrom, dateTo);
@@ -196,7 +203,6 @@ const Summary = () => {
                 <div style={styles.chartWrapper}><Line options={{ responsive: true, plugins: { legend: { display: false }}}} data={salesChartData} /></div>}
         </div>
         <div style={styles.section}>
-             {/* --- UPDATED CHART TITLE --- */}
             <h3 style={styles.chartTitle}>Expense & Stock Payment Breakdown</h3>
             {loading ? <p style={styles.loadingText}>Loading chart...</p> : 
                 <div style={styles.chartWrapper}><Doughnut options={{ responsive: true, maintainAspectRatio: false }} data={expenseChartData} /></div>}
@@ -218,7 +224,6 @@ const Summary = () => {
   );
 };
 
-// --- STYLES (Unchanged) ---
 const styles = {
   container: { padding: "24px", fontFamily: "'Inter', sans-serif" },
   title: { fontSize: "22px", marginBottom: "5px", color: "#2c3e50", fontWeight: "600" },

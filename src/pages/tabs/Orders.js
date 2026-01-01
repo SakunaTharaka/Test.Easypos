@@ -12,7 +12,8 @@ import {
   addDoc,
   orderBy,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  runTransaction 
 } from "firebase/firestore";
 import Select from "react-select";
 import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaMoneyBillWave, FaEye } from 'react-icons/fa';
@@ -120,7 +121,7 @@ const Orders = ({ internalUser }) => {
     setSelectedIndex(0);
   }, [itemInput, items, tempSelectedItem]);
 
-  // 4. Keyboard Nav (Payment Modal - Invoice Style: Left/Right)
+  // 4. Keyboard Nav
   useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
@@ -192,69 +193,88 @@ const Orders = ({ internalUser }) => {
       else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
   };
 
-  // --- SAVE ORDER (UPDATED LOGIC) ---
+  // --- SAVE ORDER ---
   const executeSaveOrder = async (paymentMethod) => {
     setIsSaving(true);
     try {
-        const today = new Date();
-        const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-        
-        const counterRef = doc(db, uid, "counters");
-        const counterDoc = await getDoc(counterRef);
-        const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
-        const newCount = currentCount + 1;
-        const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
+        await runTransaction(db, async (transaction) => {
+            const today = new Date();
+            const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+            
+            const counterRef = doc(db, uid, "counters");
+            const counterDoc = await transaction.get(counterRef);
+            const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+            const newCount = currentCount + 1;
+            const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
 
-        const subtotal = checkout.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-        const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
-        const grandTotal = subtotal + dCharge;
-        const advance = Number(advanceAmount) || 0;
+            let walletDocId = null;
+            if (paymentMethod === 'Cash') walletDocId = 'cash';
+            else if (paymentMethod === 'Card') walletDocId = 'card';
+            else if (paymentMethod === 'Online') walletDocId = 'online';
+            const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+            let currentWalletBalance = 0;
 
-        // 1. Create the ADVANCE Invoice
-        // LOGIC FIX: Total is set to Advance amount, not grand total.
-        const invoiceData = {
-            invoiceNumber: newInvNum,
-            customerId: "WALK-IN",
-            customerName: customerName || "Walk-in Customer",
-            customerTelephone: customerPhone,
-            items: checkout,
-            total: advance, // <--- Corrected: Total equals Advance
-            deliveryCharge: 0, // <--- Corrected: No delivery charge on advance invoice
-            advanceAmount: 0,
-            received: 0, 
-            createdAt: serverTimestamp(),
-            issuedBy: internalUser?.username || "Admin",
-            status: "Pending", 
-            type: "ORDER",
-            // Added remarks to show original order value context
-            remarks: `[ADVANCE] Order Total Value: ${grandTotal.toFixed(2)}. ${remarks}`,
-            relatedOrderId: null,
-            paymentMethod: paymentMethod 
-        };
+            if (walletRef) {
+                const wDoc = await transaction.get(walletRef);
+                if (wDoc.exists()) {
+                    currentWalletBalance = Number(wDoc.data().balance) || 0;
+                }
+            }
 
-        const invRef = await addDoc(collection(db, uid, "invoices", "invoice_list"), invoiceData);
+            const subtotal = checkout.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+            const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
+            const grandTotal = subtotal + dCharge;
+            const advance = Number(advanceAmount) || 0;
 
-        // 2. Create the Order Record
-        // LOGIC: Order record keeps the FULL Grand Total and calculates correct balance
-        const orderData = {
-            orderNumber: newInvNum,
-            customerName: customerName || "Walk-in",
-            customerPhone,
-            items: checkout,
-            totalAmount: grandTotal, // Keeps actual full value
-            deliveryCharge: dCharge,
-            advanceAmount: advance,
-            balance: grandTotal - advance,
-            status: "Pending",
-            createdAt: serverTimestamp(),
-            linkedInvoiceId: invRef.id,
-            deliveryDate,
-            remarks
-        };
-        const orderRef = await addDoc(collection(db, uid, "data", "orders"), orderData);
+            const invRef = doc(collection(db, uid, "invoices", "invoice_list"));
+            const orderRef = doc(collection(db, uid, "data", "orders"));
 
-        await updateDoc(invRef, { relatedOrderId: orderRef.id });
-        await updateDoc(counterRef, { [`invoiceCounters.${datePrefix}`]: newCount });
+            const invoiceData = {
+                invoiceNumber: newInvNum,
+                customerId: "WALK-IN",
+                customerName: customerName || "Walk-in Customer",
+                customerTelephone: customerPhone,
+                items: checkout,
+                total: advance, 
+                deliveryCharge: 0, 
+                advanceAmount: 0,
+                received: advance, 
+                createdAt: serverTimestamp(),
+                issuedBy: internalUser?.username || "Admin",
+                status: "Pending", 
+                type: "ORDER",
+                remarks: `[ADVANCE] Order Total Value: ${grandTotal.toFixed(2)}. ${remarks}`,
+                relatedOrderId: orderRef.id,
+                paymentMethod: paymentMethod 
+            };
+
+            const orderData = {
+                orderNumber: newInvNum,
+                customerName: customerName || "Walk-in",
+                customerPhone,
+                items: checkout,
+                totalAmount: grandTotal, 
+                deliveryCharge: dCharge,
+                advanceAmount: advance,
+                balance: grandTotal - advance,
+                status: "Pending",
+                createdAt: serverTimestamp(),
+                linkedInvoiceId: invRef.id,
+                deliveryDate,
+                remarks
+            };
+
+            transaction.set(invRef, invoiceData);
+            transaction.set(orderRef, orderData);
+            transaction.set(counterRef, { invoiceCounters: { [datePrefix]: newCount } }, { merge: true });
+
+            if (walletRef && advance > 0) {
+                 transaction.set(walletRef, { 
+                    balance: currentWalletBalance + advance,
+                    lastUpdated: serverTimestamp() 
+                }, { merge: true });
+            }
+        });
 
         resetForm();
         fetchSavedOrders();
@@ -262,41 +282,136 @@ const Orders = ({ internalUser }) => {
     finally { setIsSaving(false); setPendingAction(null); }
   };
 
+  // --- COMPLETE ORDER ---
   const executeCompleteOrder = async (order, paymentMethod) => {
       setIsSaving(true);
       try {
-          await updateDoc(doc(db, uid, "data", "orders", order.id), { status: "Completed" });
-          if(order.linkedInvoiceId) {
-             await updateDoc(doc(db, uid, "invoices", "invoice_list", order.linkedInvoiceId), { status: "Paid", received: order.advanceAmount });
-          }
-          if (order.balance > 0) {
-              const balInvoiceData = {
-                  invoiceNumber: `${order.orderNumber}_BAL`,
-                  customerName: order.customerName,
-                  items: [{ itemName: "Balance Payment", quantity: 1, price: order.balance }],
-                  total: order.balance,
-                  received: order.balance,
-                  status: "Paid",
-                  type: "ORDER",
-                  relatedOrderId: order.id,
-                  createdAt: serverTimestamp(),
-                  issuedBy: internalUser?.username || "System",
-                  paymentMethod: paymentMethod 
-              };
-              await addDoc(collection(db, uid, "invoices", "invoice_list"), balInvoiceData);
-          }
+          await runTransaction(db, async (transaction) => {
+              let walletDocId = null;
+              if (paymentMethod === 'Cash') walletDocId = 'cash';
+              else if (paymentMethod === 'Card') walletDocId = 'card';
+              else if (paymentMethod === 'Online') walletDocId = 'online';
+              const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+              let currentWalletBalance = 0;
+
+              if (walletRef) {
+                  const wDoc = await transaction.get(walletRef);
+                  if (wDoc.exists()) {
+                      currentWalletBalance = Number(wDoc.data().balance) || 0;
+                  }
+              }
+
+              const orderDocRef = doc(db, uid, "data", "orders", order.id);
+              transaction.update(orderDocRef, { status: "Completed" });
+
+              if(order.linkedInvoiceId) {
+                 const invRef = doc(db, uid, "invoices", "invoice_list", order.linkedInvoiceId);
+                 transaction.update(invRef, { status: "Paid", received: order.advanceAmount });
+              }
+
+              if (order.balance > 0) {
+                  const balInvoiceRef = doc(collection(db, uid, "invoices", "invoice_list"));
+                  const balInvoiceData = {
+                      invoiceNumber: `${order.orderNumber}_BAL`,
+                      customerName: order.customerName,
+                      items: [{ itemName: "Balance Payment", quantity: 1, price: order.balance }],
+                      total: order.balance,
+                      received: order.balance, 
+                      status: "Paid",
+                      type: "ORDER",
+                      relatedOrderId: order.id,
+                      createdAt: serverTimestamp(),
+                      issuedBy: internalUser?.username || "System",
+                      paymentMethod: paymentMethod 
+                  };
+                  transaction.set(balInvoiceRef, balInvoiceData);
+
+                  if (walletRef) {
+                      transaction.set(walletRef, { 
+                        balance: currentWalletBalance + order.balance,
+                        lastUpdated: serverTimestamp() 
+                    }, { merge: true });
+                  }
+              }
+          });
+
           fetchSavedOrders();
       } catch (err) { alert("Error completing: " + err.message); }
       finally { setIsSaving(false); setPendingAction(null); }
   };
 
+  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET) ---
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
-      if(!window.confirm("Delete this order and linked invoices?")) return;
+      if(!window.confirm("Delete this order and linked invoices? This will deduct amounts from wallet.")) return;
+      
       try {
-          await deleteDoc(doc(db, uid, "data", "orders", orderId));
-          if(linkedInvoiceId) await deleteDoc(doc(db, uid, "invoices", "invoice_list", linkedInvoiceId));
+          await runTransaction(db, async (transaction) => {
+              // 1. Get Order Data
+              const orderRef = doc(db, uid, "data", "orders", orderId);
+              const orderSnap = await transaction.get(orderRef);
+              if (!orderSnap.exists()) throw "Order not found";
+              const orderData = orderSnap.data();
+
+              // 2. Find Linked Advance Invoice
+              let advInvoiceRef = null;
+              let advInvoiceData = null;
+              if (linkedInvoiceId) {
+                  advInvoiceRef = doc(db, uid, "invoices", "invoice_list", linkedInvoiceId);
+                  const advSnap = await transaction.get(advInvoiceRef);
+                  if (advSnap.exists()) advInvoiceData = advSnap.data();
+              }
+
+              // 3. Find Potential Balance Invoice
+              let balInvoiceRef = null;
+              let balInvoiceData = null;
+              if (orderData.orderNumber) {
+                  const balInvNum = `${orderData.orderNumber}_BAL`;
+                  const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
+                  const balSnaps = await getDocs(q); 
+                  if (!balSnaps.empty) {
+                      balInvoiceRef = balSnaps.docs[0].ref;
+                      const balSnap = await transaction.get(balInvoiceRef);
+                      if (balSnap.exists()) balInvoiceData = balSnap.data();
+                  }
+              }
+
+              // 4. Helper to Deduct
+              const deductFromWallet = async (invoice) => {
+                  if (!invoice || !invoice.received || invoice.received <= 0) return;
+                  
+                  let wId = null;
+                  if (invoice.paymentMethod === 'Cash') wId = 'cash';
+                  else if (invoice.paymentMethod === 'Card') wId = 'card';
+                  else if (invoice.paymentMethod === 'Online') wId = 'online';
+
+                  if (wId) {
+                      const wRef = doc(db, uid, "wallet", "accounts", wId);
+                      const wDoc = await transaction.get(wRef);
+                      if (wDoc.exists()) {
+                          const currentBal = Number(wDoc.data().balance) || 0;
+                          transaction.set(wRef, { 
+                              balance: currentBal - Number(invoice.received),
+                              lastUpdated: serverTimestamp()
+                          }, { merge: true });
+                      }
+                  }
+              };
+
+              // 5. Execute Deductions
+              if (advInvoiceData) await deductFromWallet(advInvoiceData);
+              if (balInvoiceData) await deductFromWallet(balInvoiceData);
+
+              // 6. Delete Documents
+              transaction.delete(orderRef);
+              if (advInvoiceRef) transaction.delete(advInvoiceRef);
+              if (balInvoiceRef) transaction.delete(balInvoiceRef);
+          });
+
           fetchSavedOrders();
-      } catch(e) { alert("Error deleting."); }
+      } catch(e) { 
+          console.error(e);
+          alert("Error deleting: " + e.message); 
+      }
   };
 
   const resetForm = () => {
@@ -583,19 +698,13 @@ const styles = {
   metaRow: { display: 'flex', justifyContent: 'space-between' },
   orderActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
   actionBtnSuccess: { flex: 1, padding: '8px', background: '#dcfce7', color: themeColors.success, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px' },
-  
-  // ❗ ADDED: Action Btn Primary
   actionBtnPrimary: { flex: 1, padding: '8px', background: '#e0f2fe', color: themeColors.primary, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', fontSize: '13px' },
-  
   actionBtnDanger: { padding: '8px 12px', background: '#fee2e2', color: themeColors.danger, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  
   confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
   confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
   confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },
   confirmButton: { padding: '10px 24px', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', background: '#f8f8f8', fontWeight: '600', flex: 1 },
   confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1, boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.4)' },
-
-  // ❗ ADDED: Modal Styles
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(2px)' },
   modalContentWide: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '700px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease', overflow: 'hidden' },
   modalHeader: { padding: '16px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
@@ -611,7 +720,6 @@ const styles = {
   itemsTable: { width: '100%', borderCollapse: 'collapse' },
 };
 
-// Custom React Select Styles to match theme
 const customSelectStyles = {
   control: (provided) => ({
     ...provided,

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
-  addDoc, 
   onSnapshot, 
   query, 
   serverTimestamp,
@@ -12,14 +11,15 @@ import {
   updateDoc, 
   getDoc,  
   where,
-  getDocs 
+  getDocs,
+  runTransaction 
 } from 'firebase/firestore';
 import { FaCalendarAlt, FaCheckCircle, FaTrash, FaEye, FaSave, FaSearch } from 'react-icons/fa';
 
 const Services = ({ internalUser }) => {
   // Form state
   const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState(''); // ❗ New State
+  const [customerPhone, setCustomerPhone] = useState('');
   const [jobType, setJobType] = useState('');
   const [generalInfo, setGeneralInfo] = useState('');
   const [jobCompleteDate, setJobCompleteDate] = useState(''); 
@@ -85,7 +85,7 @@ const Services = ({ internalUser }) => {
       const lowerCaseSearch = searchTerm.toLowerCase();
       filtered = filtered.filter(job => 
         job.customerName?.toLowerCase().includes(lowerCaseSearch) ||
-        job.customerPhone?.includes(searchTerm) || // Allow search by phone
+        job.customerPhone?.includes(searchTerm) ||
         job.jobType?.toLowerCase().includes(lowerCaseSearch) ||
         job.generatedInvoiceNumber?.toLowerCase().includes(lowerCaseSearch)
       );
@@ -93,13 +93,12 @@ const Services = ({ internalUser }) => {
     setFilteredJobs(filtered);
   }, [searchTerm, allJobs, showCompletedJobs]);
 
-  // Keyboard navigation for Payment Modal (Invoice Style: Left/Right)
+  // Keyboard navigation
   useEffect(() => {
     const handlePaymentConfirmKeyDown = (e) => {
         if (!showPaymentConfirm) return;
         const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
         
-        // ❗ REVERTED: ArrowRight for next, ArrowLeft for previous
         if (e.key === 'ArrowRight') {
             setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
         }
@@ -157,64 +156,86 @@ const Services = ({ internalUser }) => {
 
   // --- SAVE JOB ---
   const executeSaveJob = async (paymentMethod) => {
-    if (!jobsCollectionRef) { setError('User not authenticated.'); return; }
+    if (!uid) { setError('User not authenticated.'); return; }
     setIsLoading(true);
     setError(null);
 
     try {
-      // 1. Generate ID
-      const now = new Date();
-      const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
-      const prefix = `SRV-${dateStr}-`;
-      const invoicesRef = collection(db, uid, "invoices", "invoice_list");
-      const q = query(invoicesRef, where("invoiceNumber", ">=", prefix), where("invoiceNumber", "<=", prefix + "\uf8ff"));
-      const snap = await getDocs(q);
-      const count = snap.size + 1;
-      const newInvoiceNumber = `${prefix}${String(count).padStart(4, '0')}`;
+      await runTransaction(db, async (transaction) => {
+        let walletDocId = null;
+        if (paymentMethod === 'Cash') walletDocId = 'cash';
+        else if (paymentMethod === 'Card') walletDocId = 'card';
+        else if (paymentMethod === 'Online') walletDocId = 'online';
 
-      const totalVal = parseFloat(totalCharge) || 0;
-      const advanceVal = parseFloat(advanceAmount) || 0;
+        const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+        let currentWalletBalance = 0;
 
-      // 2. Create "Advance" Invoice (Auto-generate generic item)
-      const invoiceData = {
-          invoiceNumber: newInvoiceNumber,
-          customerName: customerName,
-          customerTelephone: customerPhone, // ❗ Save to Invoice
-          items: [{ itemName: jobType, quantity: 1, price: totalVal }], 
-          total: advanceVal, 
-          advanceAmount: 0, 
-          received: 0, // Pending
-          deliveryCharge: 0,
-          createdAt: serverTimestamp(),
-          issuedBy: internalUser?.username || 'User',
-          status: "Pending", 
-          type: "SERVICE", 
-          remarks: `[ADVANCE] ${jobType}. Total Value: ${totalVal.toFixed(2)}`,
-          paymentMethod: paymentMethod 
-      };
+        if (walletRef) {
+            const wDoc = await transaction.get(walletRef);
+            if (wDoc.exists()) {
+                currentWalletBalance = Number(wDoc.data().balance) || 0;
+            }
+        }
 
-      const invoiceDocRef = await addDoc(invoicesRef, invoiceData);
+        const invoicesRef = collection(db, uid, "invoices", "invoice_list");
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
+        const prefix = `SRV-${dateStr}-`;
+        const q = query(invoicesRef, where("invoiceNumber", ">=", prefix), where("invoiceNumber", "<=", prefix + "\uf8ff"));
+        const snap = await getDocs(q); 
+        const count = snap.size + 1;
+        const newInvoiceNumber = `${prefix}${String(count).padStart(4, '0')}`;
 
-      // 3. Create Service Job
-      const serviceJobDocRef = await addDoc(jobsCollectionRef, {
-        customerName, 
-        customerPhone, // ❗ Save to Job Record
-        jobType, 
-        generalInfo, 
-        jobCompleteDate,
-        status: 'Pending',
-        createdAt: serverTimestamp(),
-        createdBy: internalUser?.username || 'User',
-        totalCharge: totalVal,
-        advanceAmount: advanceVal,
-        generatedInvoiceNumber: newInvoiceNumber,
-        linkedInvoiceId: invoiceDocRef.id 
+        const totalVal = parseFloat(totalCharge) || 0;
+        const advanceVal = parseFloat(advanceAmount) || 0;
+
+        const newInvoiceRef = doc(collection(db, uid, "invoices", "invoice_list"));
+        const newJobRef = doc(collection(db, uid, 'data', 'service_jobs'));
+
+        const invoiceData = {
+            invoiceNumber: newInvoiceNumber,
+            customerName: customerName,
+            customerTelephone: customerPhone,
+            items: [{ itemName: jobType, quantity: 1, price: totalVal }], 
+            total: advanceVal, 
+            advanceAmount: 0, 
+            received: advanceVal, 
+            deliveryCharge: 0,
+            createdAt: serverTimestamp(),
+            issuedBy: internalUser?.username || 'User',
+            status: "Pending", 
+            type: "SERVICE", 
+            remarks: `[ADVANCE] ${jobType}. Total Value: ${totalVal.toFixed(2)}`,
+            paymentMethod: paymentMethod,
+            relatedJobId: newJobRef.id
+        };
+
+        const jobData = {
+            customerName, 
+            customerPhone,
+            jobType, 
+            generalInfo, 
+            jobCompleteDate,
+            status: 'Pending',
+            createdAt: serverTimestamp(),
+            createdBy: internalUser?.username || 'User',
+            totalCharge: totalVal,
+            advanceAmount: advanceVal,
+            generatedInvoiceNumber: newInvoiceNumber,
+            linkedInvoiceId: newInvoiceRef.id 
+        };
+
+        transaction.set(newInvoiceRef, invoiceData);
+        transaction.set(newJobRef, jobData);
+
+        if (walletRef && advanceVal > 0) {
+            transaction.set(walletRef, { 
+                balance: currentWalletBalance + advanceVal,
+                lastUpdated: serverTimestamp() 
+            }, { merge: true });
+        }
       });
 
-      // 4. Link Invoice
-      await updateDoc(invoiceDocRef, { relatedJobId: serviceJobDocRef.id });
-
-      // Reset Form
       setCustomerName(''); setCustomerPhone(''); setJobType(''); setGeneralInfo(''); 
       setJobCompleteDate(''); setTotalCharge(''); setAdvanceAmount(''); 
     } catch (err) { console.error(err); setError('Failed to save job.'); } 
@@ -227,47 +248,72 @@ const Services = ({ internalUser }) => {
       setIsUpdating(true);
 
       try {
-          const serviceJobRef = doc(db, uid, 'data', 'service_jobs', jobToComplete.id);
-          await updateDoc(serviceJobRef, { status: 'Completed' });
+          await runTransaction(db, async (transaction) => {
+            let walletDocId = null;
+            if (paymentMethod === 'Cash') walletDocId = 'cash';
+            else if (paymentMethod === 'Card') walletDocId = 'card';
+            else if (paymentMethod === 'Online') walletDocId = 'online';
 
-          // Update Advance Invoice -> Paid
-          if (jobToComplete.linkedInvoiceId) {
-              const invoiceRef = doc(db, uid, "invoices", "invoice_list", jobToComplete.linkedInvoiceId);
-              await updateDoc(invoiceRef, { 
-                  status: "Paid",
-                  received: jobToComplete.advanceAmount
-              });
-          }
+            const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+            let currentWalletBalance = 0;
 
-          // Create BALANCE Invoice if needed
-          const balanceAmount = jobToComplete.balance;
-          if (balanceAmount > 0) {
-              const balInvoiceData = {
-                  invoiceNumber: `${jobToComplete.generatedInvoiceNumber}_BAL`,
-                  customerName: jobToComplete.customerName,
-                  customerTelephone: jobToComplete.customerPhone,
-                  items: [{ itemName: "Balance Payment", quantity: 1, price: balanceAmount }],
-                  total: balanceAmount,
-                  advanceAmount: 0,
-                  received: balanceAmount,
-                  deliveryCharge: 0,
-                  createdAt: serverTimestamp(),
-                  issuedBy: internalUser?.username || 'User',
-                  status: "Paid", 
-                  type: "SERVICE", 
-                  relatedJobId: jobToComplete.id,
-                  remarks: `Balance for: ${jobToComplete.jobType}`,
-                  paymentMethod: paymentMethod 
-              };
-              await addDoc(collection(db, uid, "invoices", "invoice_list"), balInvoiceData);
-          }
+            const serviceJobRef = doc(db, uid, 'data', 'service_jobs', jobToComplete.id);
+            const jobSnap = await transaction.get(serviceJobRef);
+            if(!jobSnap.exists()) throw "Job does not exist";
+            
+            if (walletRef) {
+                const wDoc = await transaction.get(walletRef);
+                if (wDoc.exists()) {
+                    currentWalletBalance = Number(wDoc.data().balance) || 0;
+                }
+            }
+
+            const jobData = jobSnap.data();
+            const balanceAmount = (jobData.totalCharge || 0) - (jobData.advanceAmount || 0);
+
+            transaction.update(serviceJobRef, { status: 'Completed' });
+
+            if (jobData.linkedInvoiceId) {
+                const invoiceRef = doc(db, uid, "invoices", "invoice_list", jobData.linkedInvoiceId);
+                transaction.update(invoiceRef, { status: "Paid" }); 
+            }
+
+            if (balanceAmount > 0) {
+                const balInvoiceRef = doc(collection(db, uid, "invoices", "invoice_list"));
+                const balInvoiceData = {
+                    invoiceNumber: `${jobData.generatedInvoiceNumber}_BAL`,
+                    customerName: jobData.customerName,
+                    customerTelephone: jobData.customerPhone,
+                    items: [{ itemName: "Balance Payment", quantity: 1, price: balanceAmount }],
+                    total: balanceAmount,
+                    advanceAmount: 0,
+                    received: balanceAmount, 
+                    deliveryCharge: 0,
+                    createdAt: serverTimestamp(),
+                    issuedBy: internalUser?.username || 'User',
+                    status: "Paid", 
+                    type: "SERVICE", 
+                    relatedJobId: jobToComplete.id,
+                    remarks: `Balance for: ${jobData.jobType}`,
+                    paymentMethod: paymentMethod 
+                };
+                transaction.set(balInvoiceRef, balInvoiceData);
+
+                if (walletRef) {
+                    transaction.set(walletRef, { 
+                        balance: currentWalletBalance + balanceAmount,
+                        lastUpdated: serverTimestamp() 
+                    }, { merge: true });
+                }
+            }
+          });
 
           if (selectedJob?.id === jobToComplete.id) { setIsViewModalOpen(false); setSelectedJob(null); }
       } catch (err) { console.error("Error completing job:", err); setError("Failed to complete job."); } 
       finally { setIsUpdating(false); setPendingAction(null); }
   };
 
-  // --- DELETE JOB ---
+  // --- DELETE JOB (UPDATED: DEDUCT FROM WALLET) ---
   const handleDeleteJob = (jobId) => {
     if (!uid) { setError("Authentication error."); return; }
     setJobToDelete(jobId);
@@ -275,28 +321,85 @@ const Services = ({ internalUser }) => {
   };
 
   const confirmDeleteJob = async () => {
-    if (!jobToDelete) return;
+    if (!jobToDelete || !uid) return;
     setIsDeleting(true);
+
     try {
-      const jobRef = doc(db, uid, 'data', 'service_jobs', jobToDelete);
-      const jobSnap = await getDoc(jobRef);
-      if (jobSnap.exists()) {
-          const jobData = jobSnap.data();
-          if (jobData.linkedInvoiceId) {
-              await deleteDoc(doc(db, uid, "invoices", "invoice_list", jobData.linkedInvoiceId));
-          }
-          // Delete related balance invoice if exists
-          if (jobData.generatedInvoiceNumber) {
-             const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
-             const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
-             const balSnap = await getDocs(q);
-             balSnap.forEach(async (d) => await deleteDoc(d.ref));
-          }
-      }
-      await deleteDoc(jobRef);
-      if (selectedJob?.id === jobToDelete) { setIsViewModalOpen(false); setSelectedJob(null); }
-    } catch (err) { setError("Failed to delete job."); } 
-    finally { setIsDeleting(false); setIsDeleteModalOpen(false); setJobToDelete(null); }
+        await runTransaction(db, async (transaction) => {
+            // 1. Get Job Data
+            const jobRef = doc(db, uid, 'data', 'service_jobs', jobToDelete);
+            const jobSnap = await transaction.get(jobRef);
+            if (!jobSnap.exists()) throw "Job not found";
+            const jobData = jobSnap.data();
+
+            // 2. Find Linked Advance Invoice
+            let advInvoiceRef = null;
+            let advInvoiceData = null;
+            if (jobData.linkedInvoiceId) {
+                advInvoiceRef = doc(db, uid, "invoices", "invoice_list", jobData.linkedInvoiceId);
+                const advSnap = await transaction.get(advInvoiceRef);
+                if (advSnap.exists()) advInvoiceData = advSnap.data();
+            }
+
+            // 3. Find Potential Balance Invoice
+            let balInvoiceRef = null;
+            let balInvoiceData = null;
+            if (jobData.generatedInvoiceNumber) {
+                const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
+                const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
+                const balSnaps = await getDocs(q); // Note: Queries must be done carefully outside txn if possible, or we assume single document
+                // For simplicity in this structure, we fetch docs. 
+                // Technically `getDocs` isn't transactional reading unless we pass transaction, but Firestore JS SDK `runTransaction` 
+                // doesn't support query-based reads directly easily. 
+                // WORKAROUND: We fetch the doc reference first, then transactional read.
+                if (!balSnaps.empty) {
+                    balInvoiceRef = balSnaps.docs[0].ref;
+                    const balSnap = await transaction.get(balInvoiceRef);
+                    if (balSnap.exists()) balInvoiceData = balSnap.data();
+                }
+            }
+
+            // 4. Helper to Deduct
+            const deductFromWallet = async (invoice) => {
+                if (!invoice || !invoice.received || invoice.received <= 0) return;
+                
+                let wId = null;
+                if (invoice.paymentMethod === 'Cash') wId = 'cash';
+                else if (invoice.paymentMethod === 'Card') wId = 'card';
+                else if (invoice.paymentMethod === 'Online') wId = 'online';
+
+                if (wId) {
+                    const wRef = doc(db, uid, "wallet", "accounts", wId);
+                    const wDoc = await transaction.get(wRef);
+                    if (wDoc.exists()) {
+                        const currentBal = Number(wDoc.data().balance) || 0;
+                        transaction.set(wRef, { 
+                            balance: currentBal - Number(invoice.received),
+                            lastUpdated: serverTimestamp()
+                        }, { merge: true });
+                    }
+                }
+            };
+
+            // 5. Execute Deductions
+            if (advInvoiceData) await deductFromWallet(advInvoiceData);
+            if (balInvoiceData) await deductFromWallet(balInvoiceData);
+
+            // 6. Delete Documents
+            transaction.delete(jobRef);
+            if (advInvoiceRef) transaction.delete(advInvoiceRef);
+            if (balInvoiceRef) transaction.delete(balInvoiceRef);
+        });
+
+        if (selectedJob?.id === jobToDelete) { setIsViewModalOpen(false); setSelectedJob(null); }
+    } catch (err) { 
+        console.error(err); 
+        setError("Failed to delete job. " + err.message); 
+    } finally { 
+        setIsDeleting(false); 
+        setIsDeleteModalOpen(false); 
+        setJobToDelete(null); 
+    }
   };
 
   // --- VIEW & EXTEND ---
@@ -313,7 +416,6 @@ const Services = ({ internalUser }) => {
       setIsUpdating(true);
       try { 
           await updateDoc(doc(db, uid, 'data', 'service_jobs', jobToExtend.id), { jobCompleteDate: newCompleteDate }); 
-          // Update local state if view modal is open
           if (selectedJob?.id === jobToExtend.id) {
               setSelectedJob(prev => ({...prev, jobCompleteDate: newCompleteDate}));
           }
@@ -325,7 +427,6 @@ const Services = ({ internalUser }) => {
   const formatDate = (date) => { 
       if (!date) return 'N/A'; 
       try { 
-          // Handle string or timestamp
           const d = date.toDate ? date.toDate() : new Date(date);
           return d.toLocaleString(); 
       } catch{ return 'Invalid'; }
@@ -346,13 +447,12 @@ const Services = ({ internalUser }) => {
              </div>
              <div style={styles.inputGroup}>
                 <label style={styles.label}>Phone Number</label>
-                {/* ❗ PHONE INPUT: 10 Digits Only */}
                 <input 
                     type="text" 
                     style={styles.input} 
                     value={customerPhone} 
                     onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, ''); // Remove non-digits
+                        const val = e.target.value.replace(/\D/g, ''); 
                         if (val.length <= 10) setCustomerPhone(val);
                     }}
                     placeholder="07xxxxxxxx" 
@@ -420,7 +520,6 @@ const Services = ({ internalUser }) => {
                  <div style={styles.jobCardTop}>
                     <div>
                         <span style={styles.jobCardName}>{job.customerName}</span>
-                        {/* Show Phone in Card if available */}
                         {job.customerPhone && <span style={{fontSize: 12, color: '#666'}}>{job.customerPhone}</span>}
                         <div style={styles.jobCardType}>{job.jobType}</div>
                     </div>
@@ -562,7 +661,7 @@ const Services = ({ internalUser }) => {
           <div style={styles.modalOverlay}>
               <div style={styles.modalContentSmall}>
                   <h3 style={{...styles.modalTitle, color: '#ef4444'}}>Delete Job?</h3>
-                  <p style={styles.modalText}>This will delete the job and all linked invoices. This action cannot be undone.</p>
+                  <p style={styles.modalText}>This will delete the job and all linked invoices (Advance/Balance) and deduct amounts from your wallet.</p>
                   <div style={styles.modalBtnRow}>
                       <button style={styles.btnSecondary} onClick={() => setIsDeleteModalOpen(false)}>Cancel</button>
                       <button style={styles.btnDanger} onClick={confirmDeleteJob} disabled={isDeleting}>
@@ -590,13 +689,9 @@ const themeColors = {
 
 const styles = {
   container: { padding: '24px', maxWidth: '1200px', margin: '0 auto' },
-  
-  // Card Styles
   card: { background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', border: `1px solid ${themeColors.border}`, overflow: 'hidden' },
   cardHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, background: '#f8fafc' },
   cardTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: themeColors.dark },
-  
-  // Form Styles
   formContent: { padding: '24px' },
   gridThree: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
   inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
@@ -607,16 +702,12 @@ const styles = {
   balanceValue: { fontSize: '16px', fontWeight: '700', color: themeColors.danger, padding: '10px 0' },
   errorMsg: { color: themeColors.danger, fontSize: '14px', marginTop: '10px', background: '#fee2e2', padding: '10px', borderRadius: '6px' },
   formActions: { marginTop: '20px', display: 'flex', justifyContent: 'flex-end' },
-  
-  // List Controls
   listHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' },
   listControls: { display: 'flex', gap: '15px', alignItems: 'center' },
   searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center' },
   searchIcon: { position: 'absolute', left: '10px', color: '#94a3b8' },
   searchInput: { padding: '8px 10px 8px 32px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, fontSize: '14px', width: '200px' },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#475569', cursor: 'pointer' },
-  
-  // Job Grid
   jobsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', padding: '24px' },
   jobCard: { background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', transition: 'transform 0.2s, box-shadow 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
   jobCardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -627,21 +718,15 @@ const styles = {
   jobCardDetails: { fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' },
   detailRow: { display: 'flex', justifyContent: 'space-between' },
   jobCardActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
-  
-  // Buttons
   btnPrimary: { padding: '10px 20px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
   btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   btnDanger: { padding: '8px 16px', background: themeColors.danger, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   btnInfo: { padding: '8px 16px', background: themeColors.warning, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   btnDisabled: { padding: '10px 20px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '6px', cursor: 'not-allowed' },
-  
-  // Icon Buttons
   actionBtnPrimary: { flex: 1, padding: '8px', background: '#e0f2fe', color: themeColors.primary, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
   actionBtnSuccess: { flex: 1, padding: '8px', background: '#dcfce7', color: themeColors.success, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
   actionBtnInfo: { flex: 1, padding: '8px', background: '#fef3c7', color: themeColors.warning, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
   actionBtnDanger: { flex: 1, padding: '8px', background: '#fee2e2', color: themeColors.danger, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-
-  // Modals
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(2px)' },
   modalContent: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '600px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease' },
   modalContentSmall: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '400px', padding: '24px', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' },
@@ -650,16 +735,12 @@ const styles = {
   modalBody: { padding: '24px' },
   modalText: { color: '#64748b', marginBottom: '20px' },
   closeIcon: { background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' },
-  
-  // Modal Details
   detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: '20px' },
   detailItem: { display: 'flex', flexDirection: 'column', fontSize: '14px' },
   notesBox: { background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', border: `1px solid ${themeColors.border}` },
   financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '15px' },
   modalActionsRow: { display: 'flex', justifyContent: 'flex-end', gap: '10px' },
   modalBtnRow: { display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '20px' },
-  
-  // ❗ INVOICE-STYLE POPUP STYLES
   confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
   confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
   confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },

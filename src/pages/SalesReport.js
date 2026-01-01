@@ -2,7 +2,7 @@ import React, { useEffect, useState, useContext } from "react";
 import { auth, db } from "../firebase";
 import { 
     collection, query, where, orderBy, getDocs, Timestamp, doc, deleteDoc,
-    limit, startAfter, endBefore, limitToLast
+    limit, startAfter, endBefore, limitToLast, runTransaction, serverTimestamp
 } from "firebase/firestore";
 import Select from "react-select";
 import { AiOutlineEye, AiOutlineDelete, AiOutlineLock } from "react-icons/ai";
@@ -85,11 +85,12 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
+  // --- DELETE HANDLER ---
   const handleDelete = async (invoice) => {
       const user = auth.currentUser;
       if (!user) return;
 
-      // ✅ LOCK CHECK: Prevent deletion if date is reconciled
+      // 1. Lock Check (Reconciliation)
       if (invoice.createdAt) {
           const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
           const dateStr = dateVal.toISOString().split('T')[0];
@@ -99,19 +100,69 @@ const SalesReport = ({ internalUser }) => {
           }
       }
 
-      if (window.confirm(`Delete Invoice ${invoice.invoiceNumber}?`)) {
-          try {
-              await deleteDoc(doc(db, user.uid, "invoices", "invoice_list", invoice.id));
+      if (!window.confirm(`Delete Invoice ${invoice.invoiceNumber}? This will deduct the amount from your wallet.`)) return;
 
-              if (invoice.type === 'SERVICE' && invoice.relatedJobId) {
-                  try { await deleteDoc(doc(db, user.uid, "data", "service_jobs", invoice.relatedJobId)); } catch (e) {}
-              }
-              if (invoice.type === 'ORDER' && invoice.relatedOrderId) {
-                  try { await deleteDoc(doc(db, user.uid, "data", "orders", invoice.relatedOrderId)); } catch (e) {}
+      try {
+          await runTransaction(db, async (transaction) => {
+              // 2. Get Fresh Invoice Data
+              const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoice.id);
+              const invoiceSnap = await transaction.get(invoiceRef);
+              if (!invoiceSnap.exists()) throw "Invoice does not exist.";
+              
+              const invData = invoiceSnap.data();
+
+              // 3. Identify Wallet Type
+              let walletDocId = null;
+              if (invData.paymentMethod === 'Cash') walletDocId = 'cash';
+              else if (invData.paymentMethod === 'Card') walletDocId = 'card';
+              else if (invData.paymentMethod === 'Online') walletDocId = 'online';
+
+              // 4. Determine Amount to Deduct
+              // Standard Invoices (from Invoice.js) add 'total' to wallet on creation.
+              // Service/Order Invoices add 'received' (advance) to wallet on creation.
+              let amountToDeduct = 0;
+              if (!invData.type) { 
+                  // Standard Invoice (No Type) -> Deduct TOTAL
+                  amountToDeduct = Number(invData.total) || 0;
+              } else {
+                  // Service or Order -> Deduct RECEIVED
+                  amountToDeduct = Number(invData.received) || 0;
               }
 
-              setCurrentInvoices(prev => prev.filter(i => i.id !== invoice.id));
-          } catch (err) { alert("Error deleting: " + err.message); }
+              // 5. Update Wallet (Deduct Amount)
+              if (walletDocId && amountToDeduct > 0) {
+                  const walletRef = doc(db, user.uid, "wallet", "accounts", walletDocId);
+                  const walletSnap = await transaction.get(walletRef);
+                  
+                  if (walletSnap.exists()) {
+                      const currentBalance = Number(walletSnap.data().balance) || 0;
+                      transaction.set(walletRef, {
+                          balance: currentBalance - amountToDeduct,
+                          lastUpdated: serverTimestamp()
+                      }, { merge: true });
+                  }
+              }
+
+              // 6. Delete Related Documents (If Service/Order)
+              if (invData.type === 'SERVICE' && invData.relatedJobId) {
+                  const jobRef = doc(db, user.uid, "data", "service_jobs", invData.relatedJobId);
+                  transaction.delete(jobRef);
+              }
+              if (invData.type === 'ORDER' && invData.relatedOrderId) {
+                  const orderRef = doc(db, user.uid, "data", "orders", invData.relatedOrderId);
+                  transaction.delete(orderRef);
+              }
+
+              // 7. Delete the Invoice itself
+              transaction.delete(invoiceRef);
+          });
+
+          // Update UI
+          setCurrentInvoices(prev => prev.filter(i => i.id !== invoice.id));
+
+      } catch (err) {
+          console.error(err);
+          alert("Error deleting invoice: " + err.message);
       }
   };
 

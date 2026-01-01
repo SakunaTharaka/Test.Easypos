@@ -52,7 +52,7 @@ const Settings = () => {
   
   // ✅ **1. New state for the new toggles**
   const [offerDelivery, setOfferDelivery] = useState(false);
-  const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
+  // REMOVED: const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
   const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false); // ✅ Added Sinhala toggle state
 
@@ -95,7 +95,7 @@ const Settings = () => {
           setExpenseCategories(data.expenseCategories || []);
           setAutoPrintInvoice(data.autoPrintInvoice || false);
           setOfferDelivery(data.offerDelivery || false);
-          setMaintainCreditCustomers(data.maintainCreditCustomers || false);
+          // REMOVED: setMaintainCreditCustomers(data.maintainCreditCustomers || false);
           setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
           setUseSinhalaInvoice(data.useSinhalaInvoice || false); // ✅ Load Sinhala setting
           // --- LOAD SERVICE PRICE CATEGORY ---
@@ -135,7 +135,7 @@ const Settings = () => {
             expenseCategories: [],
             autoPrintInvoice: false,
             offerDelivery: false,
-            maintainCreditCustomers: false,
+            // REMOVED: maintainCreditCustomers: false,
             openCashDrawerWithPrint: false,
             useSinhalaInvoice: false, // ✅ Default Sinhala setting
             // --- ADD TO DEFAULT SETTINGS ---
@@ -162,7 +162,7 @@ const Settings = () => {
           setExpenseCategories(defaultSettings.expenseCategories);
           setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
           setOfferDelivery(defaultSettings.offerDelivery);
-          setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
+          // REMOVED: setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
           setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
           setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice); // ✅ Set default
           // --- LOAD FROM DEFAULT SETTINGS ---
@@ -303,10 +303,7 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { offerDelivery: value });
   };
 
-  const handleMaintainCreditCustomersChange = async (value) => {
-    setMaintainCreditCustomers(value);
-    await updateDoc(getSettingsDocRef(), { maintainCreditCustomers: value });
-  };
+  // REMOVED: handleMaintainCreditCustomersChange function
 
   const handleOpenCashDrawerChange = async (value) => {
     setOpenCashDrawerWithPrint(value);
@@ -400,14 +397,7 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this if you offer delivery services for your sales.</p>
         </div>
 
-        <div style={styles.formGroup}>
-            <label style={styles.label}>Maintain Credit Customers</label>
-            <div style={styles.toggleContainer}>
-                <button onClick={() => handleMaintainCreditCustomersChange(true)} style={maintainCreditCustomers ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
-                <button onClick={() => handleMaintainCreditCustomersChange(false)} style={!maintainCreditCustomers ? styles.toggleButtonActive : styles.toggleButton}>No</button>
-            </div>
-            <p style={styles.helpText}>Enable this to manage credit sales and track customer balances.</p>
-        </div>
+        {/* REMOVED: Maintain Credit Customers Toggle */}
 
         <div style={styles.formGroup}>
             <label style={styles.label}>Open cashdrawer with print</label>
