@@ -198,7 +198,7 @@ const Orders = ({ internalUser }) => {
       else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
   };
 
-  // --- SAVE ORDER (UPDATED: Adds Advance to Daily Sales) ---
+  // --- SAVE ORDER (UPDATED: Adds Advance to Daily Sales & Payment Specific Field) ---
   const executeSaveOrder = async (paymentMethod) => {
     setIsSaving(true);
     try {
@@ -212,12 +212,15 @@ const Orders = ({ internalUser }) => {
             const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
             const newCount = currentCount + 1;
             
+            // Wallet Reads
             let walletDocId = null;
-            if (paymentMethod === 'Cash') walletDocId = 'cash';
-            else if (paymentMethod === 'Card') walletDocId = 'card';
-            else if (paymentMethod === 'Online') walletDocId = 'online';
-            const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
+            let salesMethodField = null;
+
+            if (paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+            else if (paymentMethod === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+            else if (paymentMethod === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
             
+            const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
             let currentWalletBalance = 0;
             if (walletRef) {
                 const wDoc = await transaction.get(walletRef);
@@ -231,6 +234,7 @@ const Orders = ({ internalUser }) => {
             const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
             const dailyStatsSnap = await transaction.get(dailyStatsRef);
             const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+            const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
 
             // PHASE 2: CALCULATIONS & WRITES
             const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
@@ -239,10 +243,11 @@ const Orders = ({ internalUser }) => {
             const grandTotal = subtotal + dCharge;
             const advance = Number(advanceAmount) || 0;
 
-            // Update Daily Stats (Add Advance)
+            // Update Daily Stats (Add Advance to Total AND Specific Method)
             if (advance > 0) {
                  transaction.set(dailyStatsRef, { 
                     totalSales: currentDailySales + advance,
+                    [salesMethodField]: currentMethodSales + advance,
                     date: dailyDateString,
                     lastUpdated: serverTimestamp()
                 }, { merge: true });
@@ -304,7 +309,7 @@ const Orders = ({ internalUser }) => {
     finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- COMPLETE ORDER (FIXED: ALL READS BEFORE WRITES) ---
+  // --- COMPLETE ORDER (UPDATED: Adds Balance to Daily Sales & Payment Specific Field) ---
   const executeCompleteOrder = async (order, paymentMethod) => {
       setIsSaving(true);
       try {
@@ -313,11 +318,14 @@ const Orders = ({ internalUser }) => {
               // PHASE 1: ALL READS
               // =========================================================
               
-              // 1. Read Wallet
+              // 1. Read Wallet & Determine Field
               let walletDocId = null;
-              if (paymentMethod === 'Cash') walletDocId = 'cash';
-              else if (paymentMethod === 'Card') walletDocId = 'card';
-              else if (paymentMethod === 'Online') walletDocId = 'online';
+              let salesMethodField = null;
+
+              if (paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+              else if (paymentMethod === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+              else if (paymentMethod === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
+              
               const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
               
               let currentWalletBalance = 0;
@@ -333,6 +341,7 @@ const Orders = ({ internalUser }) => {
               const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
               const dailyStatsSnap = await transaction.get(dailyStatsRef);
               const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+              const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
 
               // =========================================================
               // PHASE 2: ALL WRITES
@@ -347,9 +356,10 @@ const Orders = ({ internalUser }) => {
               }
 
               if (order.balance > 0) {
-                  // Add balance to daily stats
+                  // Add balance to daily stats (Aggregate & Specific)
                   transaction.set(dailyStatsRef, { 
                     totalSales: currentDailySales + order.balance,
+                    [salesMethodField]: currentMethodSales + order.balance,
                     date: dailyDateString,
                     lastUpdated: serverTimestamp()
                 }, { merge: true });
@@ -384,7 +394,7 @@ const Orders = ({ internalUser }) => {
       finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET & DAILY SALES) ---
+  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET & DAILY SALES SPECIFIC FIELDS) ---
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
       if(!window.confirm("Delete this order and linked invoices? This will deduct amounts from wallet.")) return;
       
@@ -419,28 +429,20 @@ const Orders = ({ internalUser }) => {
                   }
               }
 
-              // 4. Helper to Deduct (Wallet & Daily Sales)
-              // Note: Inside transaction, we must do reads before writes. 
-              // This structure is tricky because we have multiple invoices.
-              // We'll read all necessary docs first.
-
-              // We need wallet refs and daily stat refs for both invoices.
-              // For simplicity, let's assume one wallet update per transaction or read them all.
-              
-              // To properly fix "Read before Write" in this dynamic scenario (multiple unknown dates/wallets),
-              // we will collect all operations first.
-              
-              const ops = []; // { type: 'wallet'|'stats', ref: ..., amount: ... }
+              // 4. Helper to Collect Reversal Operations
+              const ops = []; // { type: 'wallet'|'stats', ref: ..., amount: ..., field: ... }
 
               const prepareReversal = async (invoice) => {
                   if (!invoice || !invoice.received || invoice.received <= 0) return;
 
-                  // Wallet Read
                   let wId = null;
-                  if (invoice.paymentMethod === 'Cash') wId = 'cash';
-                  else if (invoice.paymentMethod === 'Card') wId = 'card';
-                  else if (invoice.paymentMethod === 'Online') wId = 'online';
+                  let salesMethodField = null;
 
+                  if (invoice.paymentMethod === 'Cash') { wId = 'cash'; salesMethodField = 'totalSales_cash'; }
+                  else if (invoice.paymentMethod === 'Card') { wId = 'card'; salesMethodField = 'totalSales_card'; }
+                  else if (invoice.paymentMethod === 'Online') { wId = 'online'; salesMethodField = 'totalSales_online'; }
+
+                  // Wallet Read
                   if (wId) {
                       const wRef = doc(db, uid, "wallet", "accounts", wId);
                       const wDoc = await transaction.get(wRef); // READ
@@ -456,7 +458,18 @@ const Orders = ({ internalUser }) => {
                       const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
                       const dailyStatsSnap = await transaction.get(dailyStatsRef); // READ
                       if (dailyStatsSnap.exists()) {
-                          ops.push({ type: 'stats', ref: dailyStatsRef, currentVal: Number(dailyStatsSnap.data().totalSales) || 0, deduct: Number(invoice.received) });
+                          const data = dailyStatsSnap.data();
+                          const currentTotal = Number(data.totalSales) || 0;
+                          const currentMethod = salesMethodField ? (Number(data[salesMethodField]) || 0) : 0;
+                          
+                          ops.push({ 
+                              type: 'stats', 
+                              ref: dailyStatsRef, 
+                              currentTotal: currentTotal,
+                              currentMethod: currentMethod,
+                              methodField: salesMethodField,
+                              deduct: Number(invoice.received) 
+                          });
                       }
                   }
               };
@@ -470,7 +483,14 @@ const Orders = ({ internalUser }) => {
                   if (op.type === 'wallet') {
                       transaction.set(op.ref, { balance: op.currentVal - op.deduct, lastUpdated: serverTimestamp() }, { merge: true });
                   } else if (op.type === 'stats') {
-                      transaction.set(op.ref, { totalSales: op.currentVal - op.deduct, lastUpdated: serverTimestamp() }, { merge: true });
+                      const updateData = {
+                          totalSales: op.currentTotal - op.deduct,
+                          lastUpdated: serverTimestamp()
+                      };
+                      if(op.methodField) {
+                          updateData[op.methodField] = op.currentMethod - op.deduct;
+                      }
+                      transaction.set(op.ref, updateData, { merge: true });
                   }
               });
 

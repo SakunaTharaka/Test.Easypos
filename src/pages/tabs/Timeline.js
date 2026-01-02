@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AiOutlineShoppingCart, AiOutlineTool } from 'react-icons/ai'; 
 // --- Import Firebase ---
-import { auth, db } from '../../firebase'; // Adjust this path if your firebase.js is elsewhere
-import { collection, query, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../../firebase'; 
+import { collection, query, onSnapshot, where, Timestamp } from 'firebase/firestore';
 
 // --- Theme Colors and Constants ---
 const themeColors = {
@@ -47,7 +47,7 @@ const createEventsMap = (orders, serviceJobs) => {
                 // Handle both Firestore Timestamps and String Dates
                 const dateValue = (dateString && typeof dateString.toDate === 'function') 
                     ? dateString.toDate() 
-                    : dateString;
+                    : new Date(dateString);
 
                 const date = new Date(dateValue); 
                 
@@ -66,7 +66,7 @@ const createEventsMap = (orders, serviceJobs) => {
                     title,
                     color,
                     icon,
-                    details: item // Store full details for potential future use (tooltips etc)
+                    details: item // Store full details for potential future use
                 };
                 
                 if (eventMap.has(key)) {
@@ -137,12 +137,44 @@ const Timeline = () => {
 
     const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-    // --- Fetch Orders ---
+    // --- Calendar Logic ---
+    const today = useMemo(() => new Date(), []);
+    // Ensure we stick to the first of the current month
+    const targetDate = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
+
+    const calendarDays = useMemo(() => {
+        return getCalendarDays(targetDate);
+    }, [targetDate]);
+
+    // Calculate Query Range (Start of first grid day to End of last grid day)
+    const { startRange, endRange } = useMemo(() => {
+        if (calendarDays.length === 0) return { startRange: new Date(), endRange: new Date() };
+        
+        const start = new Date(calendarDays[0].date);
+        start.setHours(0, 0, 0, 0);
+        
+        const end = new Date(calendarDays[calendarDays.length - 1].date);
+        end.setHours(23, 59, 59, 999);
+
+        return { startRange: start, endRange: end };
+    }, [calendarDays]);
+
+    // --- Fetch Orders (Scoped) ---
     useEffect(() => {
         if (!uid) return;
 
+        // Convert Dates to Timestamps for Firestore comparison
+        const startTimestamp = Timestamp.fromDate(startRange);
+        const endTimestamp = Timestamp.fromDate(endRange);
+
         const ordersRef = collection(db, uid, "orders", "order_list");
-        const q = query(ordersRef);
+        
+        // Query: Only fetch orders within the visible calendar range
+        const q = query(
+            ordersRef,
+            where("deliveryDateTime", ">=", startTimestamp),
+            where("deliveryDateTime", "<=", endTimestamp)
+        );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -152,17 +184,26 @@ const Timeline = () => {
         });
 
         return () => unsubscribe();
-    }, [uid]);
+    }, [uid, startRange, endRange]);
 
-    // --- Fetch Services ---
+    // --- Fetch Services (Scoped) ---
     useEffect(() => {
         if (!uid) {
             setLoading(false);
             return;
         }
 
+        const startTimestamp = Timestamp.fromDate(startRange);
+        const endTimestamp = Timestamp.fromDate(endRange);
+
         const servicesRef = collection(db, uid, 'data', 'service_jobs');
-        const q = query(servicesRef);
+        
+        // Query: Only fetch services within the visible calendar range
+        const q = query(
+            servicesRef,
+            where("jobCompleteDate", ">=", startTimestamp),
+            where("jobCompleteDate", "<=", endTimestamp)
+        );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -174,22 +215,12 @@ const Timeline = () => {
         });
 
         return () => unsubscribe();
-    }, [uid]);
-
-    
-    // --- Calendar Logic ---
-    const today = useMemo(() => new Date(), []);
-    // Ensure we stick to the first of the current month
-    const targetDate = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
+    }, [uid, startRange, endRange]);
 
     // Create the map from the FETCHED data
     const eventsMap = useMemo(() => {
         return createEventsMap(fetchedOrders, fetchedServices);
     }, [fetchedOrders, fetchedServices]);
-
-    const calendarDays = useMemo(() => {
-        return getCalendarDays(targetDate);
-    }, [targetDate]);
 
     const currentMonthName = targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
@@ -272,8 +303,6 @@ const Timeline = () => {
                                             ...styles.eventItem, 
                                             borderLeft: `3px solid ${event.color}`
                                         }}>
-                                            {/* Hide Icon on very small screens if needed, keeping for now */}
-                                            {/* <event.icon size={10} style={{marginRight: '4px', color: event.color, minWidth: '10px'}} /> */}
                                             <span style={{overflow: 'hidden', textOverflow: 'ellipsis'}}>{event.title}</span>
                                         </div>
                                     ))}
@@ -294,7 +323,7 @@ const styles = {
         backgroundColor: '#fff',
         borderRadius: '8px',
         boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-        maxWidth: '1200px', // Increased width for better visibility
+        maxWidth: '1200px', 
         margin: '20px auto',
         fontFamily: "'Inter', sans-serif",
     },
@@ -332,8 +361,8 @@ const styles = {
         border: `1px solid ${themeColors.border}`,
         borderRadius: '8px',
         overflow: 'hidden',
-        backgroundColor: themeColors.border, // gap color
-        gap: '1px', // creates grid lines
+        backgroundColor: themeColors.border, 
+        gap: '1px', 
     },
     dayOfWeekHeader: {
         padding: '12px 5px',
@@ -347,7 +376,7 @@ const styles = {
     },
     calendarCell: {
         position: 'relative',
-        minHeight: '130px', // Ensure enough height for items
+        minHeight: '130px', 
         padding: '8px',
         backgroundColor: '#fff',
         transition: 'all 0.2s',
@@ -365,7 +394,7 @@ const styles = {
         justifyContent: 'flex-end',
         gap: '4px',
         marginBottom: '6px',
-        height: '6px', // reserve space
+        height: '6px', 
     },
     eventDot: {
         width: '6px',
@@ -376,8 +405,8 @@ const styles = {
         display: 'flex',
         flexDirection: 'column',
         gap: '4px',
-        overflowY: 'auto', // Allow scrolling within cell if too many events
-        flex: 1, // fill remaining space
+        overflowY: 'auto', 
+        flex: 1, 
     },
     eventItem: {
         fontSize: '10px',

@@ -85,7 +85,7 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
-  // --- DELETE HANDLER (FIXED: ALL READS BEFORE WRITES) ---
+  // --- DELETE HANDLER (UPDATED: REVERSES SPECIFIC SALES FIELDS) ---
   const handleDelete = async (invoice) => {
       const user = auth.currentUser;
       if (!user) return;
@@ -122,6 +122,7 @@ const SalesReport = ({ internalUser }) => {
               }
 
               let walletRef = null;
+              let salesMethodField = null; // Field to deduct from (totalSales_cash, etc.)
               let amountToReverseSales = 0;
               let amountToReverseCOGS = Number(invData.totalCOGS) || 0;
 
@@ -130,16 +131,16 @@ const SalesReport = ({ internalUser }) => {
                   // Standard Invoice
                   amountToReverseSales = Number(invData.total) || 0;
               } else {
-                  // Service/Order
+                  // Service/Order (Usually reversed based on received/advance amount)
                   amountToReverseSales = Number(invData.received) || 0;
               }
 
-              // Determine Wallet Reference
+              // Determine Wallet & Sales Field Logic
               if (amountToReverseSales > 0) {
                   let walletDocId = null;
-                  if (invData.paymentMethod === 'Cash') walletDocId = 'cash';
-                  else if (invData.paymentMethod === 'Card') walletDocId = 'card';
-                  else if (invData.paymentMethod === 'Online') walletDocId = 'online';
+                  if (invData.paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+                  else if (invData.paymentMethod === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+                  else if (invData.paymentMethod === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
                   
                   if (walletDocId) {
                       walletRef = doc(db, user.uid, "wallet", "accounts", walletDocId);
@@ -167,12 +168,20 @@ const SalesReport = ({ internalUser }) => {
                   const currentStats = dailyStatsSnap.data();
                   const currentSales = Number(currentStats.totalSales) || 0;
                   const currentCOGS = Number(currentStats.totalCOGS) || 0;
-
-                  transaction.set(dailyStatsRef, {
+                  
+                  const updateData = {
                       totalSales: currentSales - amountToReverseSales,
                       totalCOGS: currentCOGS - amountToReverseCOGS,
                       lastUpdated: serverTimestamp()
-                  }, { merge: true });
+                  };
+
+                  // Deduct from specific method field if it exists
+                  if (salesMethodField) {
+                      const currentMethodSales = Number(currentStats[salesMethodField]) || 0;
+                      updateData[salesMethodField] = currentMethodSales - amountToReverseSales;
+                  }
+
+                  transaction.set(dailyStatsRef, updateData, { merge: true });
               }
 
               // 5. Update Wallet
@@ -203,7 +212,7 @@ const SalesReport = ({ internalUser }) => {
 
       } catch (err) {
           console.error(err);
-          alert("Error deleting invoice: " + err.message); // If error persists, it will show exact reason
+          alert("Error deleting invoice: " + err.message); 
       }
   };
 

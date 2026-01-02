@@ -21,17 +21,14 @@ import {
   AiOutlineFilter,
   AiOutlineLoading 
 } from "react-icons/ai";
-import Select from "react-select";
+import AsyncSelect from "react-select/async";
 
 const ITEMS_PER_PAGE = 25;
 
 const StockOut = ({ internalUser }) => {
   const [stockOutList, setStockOutList] = useState([]);
-  const [availableItems, setAvailableItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  
-  // --- Race Condition Prevention ---
   const [isProcessing, setIsProcessing] = useState(false);
   
   const [form, setForm] = useState({
@@ -66,37 +63,61 @@ const StockOut = ({ internalUser }) => {
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
-  // --- REUSABLE DATA FETCHING FUNCTION ---
-  // This is now outside useEffect so we can call it when opening the modal
-  const fetchDropdownData = async () => {
+  // --- ASYNC OPTION LOADER (FIXED) ---
+  const loadDropdownOptions = async (inputValue) => {
     const user = auth.currentUser;
-    if (!user) return;
+    if (!user) return [];
     const uid = user.uid;
 
+    const itemsColRef = collection(db, uid, "items", "item_list");
+    
+    // 1. Base Constraints: Only show 'storesItem' or 'buySell' items
+    let constraints = [
+        where("type", "in", ["storesItem", "buySell"]),
+        limit(20) 
+    ];
+
+    if (inputValue) {
+        // 2. Case Sensitivity Fix:
+        // Most items are saved like "Samsung Phone" (Capitalized).
+        // If user types "sam", we convert it to "Sam" to match the DB.
+        const formattedInput = inputValue.charAt(0).toUpperCase() + inputValue.slice(1);
+
+        constraints.push(where("name", ">=", formattedInput));
+        constraints.push(where("name", "<=", formattedInput + "\uf8ff"));
+        constraints.push(orderBy("name"));
+    } else {
+        // 3. Default View: Sort by name A-Z
+        constraints.push(orderBy("name"));
+    }
+
     try {
-      const itemsColRef = collection(db, uid, "items", "item_list");
-      const q = query(itemsColRef, where("type", "in", ["storesItem", "buySell"]));
-      const itemSnap = await getDocs(q);
-      
-      const itemOptions = itemSnap.docs.map(doc => {
-          const data = doc.data();
-          return {
-              value: doc.id, 
-              label: `${data.name} (Available: ${data.qtyOnHand || 0} ${data.unit || ''})`, 
-              category: data.category || "",
-              unit: data.unit || "", 
-              type: data.type || "",
-              itemName: data.name,
-              currentAvgCost: data.averageCost 
-          };
-      });
-      setAvailableItems(itemOptions);
-    } catch(error) {
-      console.error("Error fetching available items:", error);
+        const q = query(itemsColRef, ...constraints);
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                value: doc.id, 
+                label: `${data.name} (Available: ${data.qtyOnHand || 0} ${data.unit || ''})`, 
+                category: data.category || "",
+                unit: data.unit || "", 
+                type: data.type || "",
+                itemName: data.name,
+                currentAvgCost: data.averageCost 
+            };
+        });
+    } catch (error) {
+        console.error("Error loading items:", error);
+        
+        // 4. Missing Index Handler
+        if (error.code === 'failed-precondition') {
+            alert("System Error: Missing Database Index.\n\nOpen your browser console (F12) and click the link provided by Firebase to fix this instantly.");
+        }
+        return [];
     }
   };
 
-  // --- Data Fetching ---
+  // --- Data Fetching (List View) ---
   const fetchStockOuts = async (direction = 'initial') => {
     setLoading(true);
     const user = auth.currentUser;
@@ -131,7 +152,6 @@ const StockOut = ({ internalUser }) => {
       setIsLastPage(stockData.length < ITEMS_PER_PAGE);
     } catch (error) {
       console.error("Error fetching stock out data:", error);
-      alert("Error fetching data: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -139,13 +159,10 @@ const StockOut = ({ internalUser }) => {
   
   useEffect(() => {
     fetchStockOuts('initial');
-    fetchDropdownData(); // Initial load
   }, []);
 
   // --- MODAL HANDLER ---
-  const handleOpenModal = async () => {
-      // Refresh the items list to get the latest Stock On Hand before showing the modal
-      await fetchDropdownData(); 
+  const handleOpenModal = () => {
       setShowModal(true);
   };
 
@@ -196,10 +213,10 @@ const StockOut = ({ internalUser }) => {
     }
   };
 
-  // --- SAVE Transaction (Stock Out) ---
+  // --- SAVE Transaction ---
   const handleSave = async () => {
     if (!form.item || !form.quantity || !form.receiverId || !form.receiverName) { return alert("Please fill all required fields (*)."); }
-    if (isProcessing) return; // Prevent double click
+    if (isProcessing) return; 
 
     setIsProcessing(true);
     const user = auth.currentUser;
@@ -225,9 +242,6 @@ const StockOut = ({ internalUser }) => {
           }
 
           const newQty = currentQty - requestedQty;
-          
-          // Note: Standard Stock Out does NOT change Average Cost.
-          // We simply reduce quantity. Cost per unit remains the same.
           const costAtTimeOfSale = parseFloat(itemData.averageCost) || 0;
 
           transaction.update(itemRef, { qtyOnHand: newQty });
@@ -265,10 +279,10 @@ const StockOut = ({ internalUser }) => {
     }
   };
 
-  // --- DELETE Transaction (Reverse Stock Out) ---
+  // --- DELETE Transaction ---
   const handleDelete = async (item) => {
     if (!isAdmin) return alert("Only admins can delete stock-out entries.");
-    if (isProcessing) return; // Prevent double click
+    if (isProcessing) return; 
 
     if (!window.confirm(`ROLLBACK WARNING:\n\nDeleting this record will:\n1. RESTORE ${item.quantity} ${item.unit} to inventory.\n2. Recalculate Average Cost (treating returned items at their original cost).\n\nAre you sure you want to proceed?`)) return;
     
@@ -278,17 +292,15 @@ const StockOut = ({ internalUser }) => {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // 1. Get the Stock Out Doc (to be deleted)
         const stockOutRef = doc(db, uid, "inventory", "stock_out", item.id);
         const stockOutSnap = await transaction.get(stockOutRef);
         if (!stockOutSnap.exists()) throw new Error("Record already deleted.");
         
         const data = stockOutSnap.data();
         const restoreQty = parseFloat(data.quantity);
-        const restoreCost = parseFloat(data.costAtTimeOfSale) || 0; // The cost when it left
+        const restoreCost = parseFloat(data.costAtTimeOfSale) || 0; 
         const itemId = data.itemId;
 
-        // 2. Get the Master Item
         const itemRef = doc(db, uid, "items", "item_list", itemId);
         const itemSnap = await transaction.get(itemRef);
 
@@ -297,11 +309,6 @@ const StockOut = ({ internalUser }) => {
         const masterData = itemSnap.data();
         const currentMasterQty = parseFloat(masterData.qtyOnHand) || 0;
         const currentMasterAvg = parseFloat(masterData.averageCost) || 0;
-        
-        // 3. RESTORE QTY & UPDATE AVG COST
-        // When we roll back a Stock Out, we are putting items BACK into the pool.
-        // If the Average Cost has changed since these items left, we must recalculate.
-        // Logic: (CurrentTotalValue + ReturnedValue) / NewTotalQty
         
         const newMasterQty = currentMasterQty + restoreQty;
         let newAvgCost = 0;
@@ -322,7 +329,6 @@ const StockOut = ({ internalUser }) => {
         transaction.delete(stockOutRef);
       });
 
-      // Refresh UI
       fetchStockOuts(page > 1 ? 'prev' : 'initial');
       alert("Record deleted, Stock Restored, and Average Cost updated successfully.");
 
@@ -343,10 +349,8 @@ const StockOut = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
-      {/* --- HEADER --- */}
       <div style={styles.headerContainer}><h2 style={styles.header}>Stock Out</h2><p style={styles.subHeader}>Record inventory items leaving your stock</p></div>
       
-      {/* --- CONTROLS --- */}
       <div style={styles.controlsContainer}>
           <div style={styles.searchContainer}>
             <div style={styles.searchInputContainer}>
@@ -366,34 +370,56 @@ const StockOut = ({ internalUser }) => {
           )}
           <button 
             style={{...styles.stockOutBtn, opacity: isProcessing ? 0.6 : 1}} 
-            onClick={handleOpenModal} // UPDATED: Calls handleOpenModal which refreshes data
+            onClick={handleOpenModal}
             disabled={isProcessing}
           >
             <AiOutlinePlus size={20} /> New Stock Out
           </button>
       </div>
       
-      {/* --- MODAL --- */}
-      {showModal && (<div style={styles.modalOverlay}><div style={styles.modal}><div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock Out</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div><div style={styles.formGrid}>
-        <div style={styles.formGroupFull}><label style={styles.label}>Select Item *</label><Select options={availableItems} onChange={handleItemSelect} placeholder="Search by item name..." isClearable /></div>
-        <div style={styles.formGroupFull}>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px'}}>
-                <div style={styles.formGroup}><label style={styles.label}>Category</label><input type="text" value={form.category || 'N/A'} style={styles.inputDisabled} readOnly /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Type</label><input type="text" value={form.type || 'N/A'} style={styles.inputDisabled} readOnly /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Unit</label><input type="text" value={form.unit || 'N/A'} style={styles.inputDisabled} readOnly /></div>
+      {showModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>Record New Stock Out</h3>
+                <button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button>
             </div>
+            <div style={styles.formGrid}>
+                <div style={styles.formGroupFull}>
+                    <label style={styles.label}>Select Item *</label>
+                    <AsyncSelect 
+                        // Removed cacheOptions to fix "new item not showing" issue
+                        defaultOptions 
+                        loadOptions={loadDropdownOptions} 
+                        onChange={handleItemSelect}
+                        placeholder="Type to search item..."
+                        isClearable
+                    />
+                </div>
+                <div style={styles.formGroupFull}>
+                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px'}}>
+                        <div style={styles.formGroup}><label style={styles.label}>Category</label><input type="text" value={form.category || 'N/A'} style={styles.inputDisabled} readOnly /></div>
+                        <div style={styles.formGroup}><label style={styles.label}>Type</label><input type="text" value={form.type || 'N/A'} style={styles.inputDisabled} readOnly /></div>
+                        <div style={styles.formGroup}><label style={styles.label}>Unit</label><input type="text" value={form.unit || 'N/A'} style={styles.inputDisabled} readOnly /></div>
+                    </div>
+                </div>
+                <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div>
+                <hr style={styles.hr} />
+                <div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div>
+                <div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div>
+                <div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div>
+            </div>
+            
+            <div style={styles.modalButtons}>
+                <button style={styles.cancelButton} onClick={() => setShowModal(false)} disabled={isProcessing}>Cancel</button>
+                <button style={styles.saveButton} onClick={handleSave} disabled={isProcessing}>
+                    {isProcessing ? <AiOutlineLoading className="spin-anim" /> : "Save Stock Out"}
+                </button>
+            </div>
+          </div>
         </div>
-        <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div><hr style={styles.hr} /><div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div><div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div><div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div></div>
-        
-        <div style={styles.modalButtons}>
-            <button style={styles.cancelButton} onClick={() => setShowModal(false)} disabled={isProcessing}>Cancel</button>
-            <button style={styles.saveButton} onClick={handleSave} disabled={isProcessing}>
-                {isProcessing ? <AiOutlineLoading className="spin-anim" /> : "Save Stock Out"}
-            </button>
-        </div>
-        </div></div>)}
+      )}
 
-      {/* --- TABLE --- */}
       <div style={styles.tableContainer}>
         {loading && <div style={styles.loadingOverlay}><span>Loading...</span></div>}
         <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock Out History</span></div>

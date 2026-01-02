@@ -10,11 +10,14 @@ import {
   serverTimestamp,
   runTransaction,
   orderBy,
-  Timestamp,
+  limit, 
+  startAfter, // Import startAfter
   deleteDoc,
 } from "firebase/firestore";
 import Select from "react-select";
-import { AiOutlinePlus, AiOutlineEye, AiOutlineDelete, AiOutlineSearch } from "react-icons/ai";
+import { AiOutlinePlus, AiOutlineEye, AiOutlineDelete, AiOutlineSearch, AiOutlineLeft, AiOutlineRight } from "react-icons/ai";
+
+const ITEMS_PER_PAGE = 20; // Load 20 quotations at a time
 
 // --- Reusable Quotation Viewer Modal with Print ---
 const QuotationViewerModal = ({ quotation, onClose, companyInfo }) => {
@@ -450,6 +453,12 @@ const Quotations = ({ internalUser }) => {
   const [loadingQuotations, setLoadingQuotations] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Pagination State
+  const [page, setPage] = useState(1);
+  const [lastVisible, setLastVisible] = useState(null);
+  const [pageHistory, setPageHistory] = useState([null]); // Store snapshot history for "Previous"
+  const [isLastPage, setIsLastPage] = useState(false);
+
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [showDropdown, setShowDropdown] = useState(false);
   const [viewingQuotation, setViewingQuotation] = useState(null);
@@ -527,18 +536,45 @@ const Quotations = ({ internalUser }) => {
     fetchPricedItems();
   }, [selectedCategory]);
 
-  const fetchSavedQuotations = useCallback(async () => {
+  const fetchSavedQuotations = useCallback(async (direction = 'initial') => {
     const user = auth.currentUser;
     if (!user) return;
     setLoadingQuotations(true);
+    
     try {
       const qtnColRef = collection(db, user.uid, "quotations", "quotation_list");
-      const snap = await getDocs(query(qtnColRef, orderBy("createdAt", "desc")));
-      setSavedQuotations(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      
+      let q = query(qtnColRef, orderBy("createdAt", "desc"), limit(ITEMS_PER_PAGE));
+
+      if (direction === 'next' && lastVisible) {
+          q = query(qtnColRef, orderBy("createdAt", "desc"), startAfter(lastVisible), limit(ITEMS_PER_PAGE));
+      } else if (direction === 'prev' && page > 1) {
+          // Retrieve the snapshot to start after from our history stack
+          const prevPageStart = pageHistory[page - 2];
+          q = query(qtnColRef, orderBy("createdAt", "desc"), startAfter(prevPageStart), limit(ITEMS_PER_PAGE));
+      }
+
+      const snap = await getDocs(q);
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      setSavedQuotations(data);
+      
+      // Update pagination state
+      if (data.length > 0) {
+          setLastVisible(snap.docs[snap.docs.length - 1]);
+          if (direction === 'next') {
+              setPageHistory(prev => [...prev, snap.docs[0]]); // Push FIRST doc of this page to history
+          }
+      }
+      
+      setIsLastPage(data.length < ITEMS_PER_PAGE);
+
     } catch (err) { console.error("Error fetching saved quotations:", err); }
     setLoadingQuotations(false);
-  }, []);
-  useEffect(() => { fetchSavedQuotations(); }, [fetchSavedQuotations]);
+  }, [lastVisible, page, pageHistory]); // Dependencies for pagination
+
+  // Initial Fetch
+  useEffect(() => { fetchSavedQuotations('initial'); }, []);
 
   useEffect(() => {
     if (!itemInput.trim() || !selectedCategory) {
@@ -603,7 +639,10 @@ const Quotations = ({ internalUser }) => {
       alert("Quotation saved successfully!");
       setQuotationItems([]); setSelectedCategory(null); setItemInput(""); setDisplayPrice(""); setQtyInput(1); setSelectedItemData(null);
       setRequestingPerson(""); setDetails("");
-      await fetchProvisionalQuotationNumber(); await fetchSavedQuotations();
+      // Refresh list to top
+      setPage(1); setLastVisible(null); setPageHistory([null]);
+      await fetchProvisionalQuotationNumber(); 
+      await fetchSavedQuotations('initial');
     } catch (error) { alert("Failed to save quotation: " + error.message); }
     finally { setIsSaving(false); }
   };
@@ -615,13 +654,17 @@ const Quotations = ({ internalUser }) => {
           const qtnDocRef = doc(db, user.uid, "quotations", "quotation_list", quotationId);
           await deleteDoc(qtnDocRef);
           alert("Quotation deleted successfully.");
-          await fetchSavedQuotations();
+          fetchSavedQuotations(page === 1 ? 'initial' : 'prev'); // Refresh
       } catch (error) {
           console.error("Error deleting quotation:", error);
           alert("Failed to delete quotation: " + error.message);
       }
   };
 
+  const handleNextPage = () => { if (!isLastPage) { setPage(p => p + 1); fetchSavedQuotations('next'); } };
+  const handlePrevPage = () => { if (page > 1) { setPageHistory(prev => { const n = [...prev]; n.pop(); return n; }); setPage(p => p - 1); fetchSavedQuotations('prev'); } };
+
+  // Client-side search within the FETCHED page
   const filteredSavedQuotations = savedQuotations.filter(qtn => {
       if (!savedSearchTerm.trim()) return true;
       const term = savedSearchTerm.toLowerCase();
@@ -705,10 +748,10 @@ const Quotations = ({ internalUser }) => {
         <h3 style={styles.title}>Saved Quotations</h3>
         <div style={{ position: "relative", marginBottom: '16px' }}>
             <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
-            <input type="text" placeholder="Search by QTN # or Name/Company..." value={savedSearchTerm} onChange={(e) => setSavedSearchTerm(e.target.value)} style={{ width: "100%", padding: "8px 8px 8px 34px", borderRadius: 4, border: "1px solid #ddd", boxSizing: 'border-box' }} />
+            <input type="text" placeholder="Search current page..." value={savedSearchTerm} onChange={(e) => setSavedSearchTerm(e.target.value)} style={{ width: "100%", padding: "8px 8px 8px 34px", borderRadius: 4, border: "1px solid #ddd", boxSizing: 'border-box' }} />
         </div>
 
-         <div style={{...styles.tableContainer, height: 'calc(100% - 100px)'}}>
+         <div style={{...styles.tableContainer, height: 'calc(100% - 150px)'}}>
             <table style={{...styles.table, tableLayout: 'fixed'}}>
                 <thead>
                     <tr>
@@ -746,6 +789,12 @@ const Quotations = ({ internalUser }) => {
                 </tbody>
             </table>
          </div>
+         {/* PAGINATION CONTROLS */}
+         <div style={styles.paginationControls}>
+             <button onClick={handlePrevPage} disabled={page === 1} style={{...styles.pageButton, opacity: page === 1 ? 0.5 : 1}}><AiOutlineLeft /> Prev</button>
+             <span style={styles.pageInfo}>Page {page}</span>
+             <button onClick={handleNextPage} disabled={isLastPage} style={{...styles.pageButton, opacity: isLastPage ? 0.5 : 1}}>Next <AiOutlineRight /></button>
+         </div>
       </div>
     </div>
   );
@@ -782,6 +831,9 @@ const styles = {
     savingOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, fontSize: '18px', fontWeight: '600' },
     viewButton: { background: '#6b7280', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
     deleteButtonSmall: { background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+    paginationControls: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '10px 0', borderTop: '1px solid #e5e7eb' },
+    pageButton: { display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', border: '1px solid #d1d5db', backgroundColor: 'white', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', color: '#374151' },
+    pageInfo: { fontSize: '14px', color: '#6b7280', fontWeight: '500' },
 };
 
 export default Quotations;

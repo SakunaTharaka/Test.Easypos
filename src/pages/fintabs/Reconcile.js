@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { db, auth } from '../../firebase';
-import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp, orderBy, limit, startAfter, endBefore, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp, orderBy, limit, startAfter, endBefore } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
 import { AiOutlineLock, AiOutlineUnlock, AiOutlineEye, AiOutlinePrinter, AiOutlineLeft, AiOutlineRight } from 'react-icons/ai';
 
@@ -62,7 +62,6 @@ const ReconciliationReportModal = ({ report, onClose }) => {
                                                         <td>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</td>
                                                         <td>{item.details || item.customerName || item.receiverName || 'N/A'}</td>
                                                         <td>{item.issuedBy || item.createdBy || item.paidBy}</td>
-                                                        {/* ✅ FIXED: Added || 0 fallback to prevent crash */}
                                                         <td>Rs. {(item.total || item.amount || 0).toFixed(2)}</td>
                                                     </tr>
                                                 ))}
@@ -86,14 +85,16 @@ const Reconcile = () => {
     const [summaryData, setSummaryData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [isReconciling, setIsReconciling] = useState(false);
+    
+    // History State
     const [reconciliationHistory, setReconciliationHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
-    
-    // Pagination state
-    const [lastVisible, setLastVisible] = useState(null);
-    const [firstVisible, setFirstVisible] = useState(null);
     const [historyPage, setHistoryPage] = useState(1);
     const [hasNextPage, setHasNextPage] = useState(false);
+    
+    // Pagination Refs (Use Refs to avoid dependency loops/blinking)
+    const lastVisibleRef = useRef(null);
+    const firstVisibleRef = useRef(null);
     
     const REPORTS_PER_PAGE = 40;
     const [showReportModal, setShowReportModal] = useState(false);
@@ -118,7 +119,7 @@ const Reconcile = () => {
         const endOfDay = new Date(date); endOfDay.setHours(23, 59, 59, 999);
         
         try {
-            // ✅ 1. Check for the latest reconciliation on this date
+            // 1. Check for the latest reconciliation on this date
             const historyRef = collection(db, uid, 'user_data', 'reconciliation_history');
             const latestHistoryQuery = query(
                 historyRef,
@@ -136,17 +137,12 @@ const Reconcile = () => {
                 const lastReport = historySnap.docs[0].data();
                 if (lastReport.reconciledAt) {
                     queryStartTime = lastReport.reconciledAt.toDate();
-                    queryOperator = '>'; // Strictly greater than
+                    queryOperator = '>'; 
                 }
             }
 
-            const customersRef = collection(db, uid, "customers", "customer_list");
-            const creditCustomersQuery = query(customersRef, where("isCreditCustomer", "==", true));
-
-            // ✅ 2. Fetch Transactions using the calculated Start Time and Operator
-            const [creditCustomersSnap, invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
-                getDocs(creditCustomersQuery),
-                
+            // 2. Fetch Transactions (NO Credit Customer Filtering)
+            const [invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
                 getDocs(query(
                     collection(db, uid, 'invoices', 'invoice_list'), 
                     where('createdAt', queryOperator, queryStartTime), 
@@ -166,29 +162,21 @@ const Reconcile = () => {
                 ))
             ]);
 
-            const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
-            
-            const validInvoices = invoicesSnap.docs
-              .map(d => d.data())
-              .filter(inv => {
-                  const isCreditRepayment = inv.paymentMethod === 'Credit-Repayment';
-                  const isFromCreditCustomer = creditCustomerIds.has(inv.customerId);
-                  return isCreditRepayment || !isFromCreditCustomer;
-              });
-
+            const allInvoices = invoicesSnap.docs.map(d => d.data());
             const allExpenses = expensesSnap.docs.map(d => d.data());
             const allStockPayments = stockPaymentsSnap.docs.map(d => d.data());
             
-            const cashSalesList = validInvoices.filter(i => i.paymentMethod === 'Cash' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Cash'));
-            const cardSalesList = validInvoices.filter(i => i.paymentMethod === 'Card' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Card'));
-            const onlineSalesList = validInvoices.filter(i => i.paymentMethod === 'Online' || (i.paymentMethod === 'Credit-Repayment' && i.method === 'Online'));
+            // Simplified categorization by payment method
+            const cashSalesList = allInvoices.filter(i => i.paymentMethod === 'Cash');
+            const cardSalesList = allInvoices.filter(i => i.paymentMethod === 'Card');
+            const onlineSalesList = allInvoices.filter(i => i.paymentMethod === 'Online');
 
             setSummaryData({
-                cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + (i.total || 0), 0) },
-                onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + (i.total || 0), 0) },
-                cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + (i.total || 0), 0) },
-                expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + (e.amount || 0), 0) },
-                stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + (p.amount || 0), 0) },
+                cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
+                onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
+                cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
+                expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0) },
+                stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0) },
             });
         } catch (error) {
             console.error("Error fetching summary data:", error);
@@ -208,10 +196,11 @@ const Reconcile = () => {
             orderBy('reconciledAt', 'desc')
         ];
 
-        if (direction === 'next' && lastVisible) {
-            q = query(historyColRef, ...baseQuery, startAfter(lastVisible), limit(REPORTS_PER_PAGE));
-        } else if (direction === 'prev' && firstVisible) {
-             q = query(historyColRef, ...baseQuery, endBefore(firstVisible), limit(REPORTS_PER_PAGE));
+        // Use Refs for cursors to prevent dependency loops
+        if (direction === 'next' && lastVisibleRef.current) {
+            q = query(historyColRef, ...baseQuery, startAfter(lastVisibleRef.current), limit(REPORTS_PER_PAGE));
+        } else if (direction === 'prev' && firstVisibleRef.current) {
+             q = query(historyColRef, ...baseQuery, endBefore(firstVisibleRef.current), limit(REPORTS_PER_PAGE));
         } else {
             q = query(historyColRef, ...baseQuery, limit(REPORTS_PER_PAGE));
         }
@@ -221,13 +210,15 @@ const Reconcile = () => {
             const historyData = docSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
             if (!docSnap.empty) {
-                setFirstVisible(docSnap.docs[0]);
-                setLastVisible(docSnap.docs[docSnap.docs.length - 1]);
+                firstVisibleRef.current = docSnap.docs[0];
+                lastVisibleRef.current = docSnap.docs[docSnap.docs.length - 1];
                 setHasNextPage(historyData.length === REPORTS_PER_PAGE);
                 setReconciliationHistory(historyData);
             } else {
                  if (direction === 'initial') {
                     setReconciliationHistory([]);
+                    firstVisibleRef.current = null;
+                    lastVisibleRef.current = null;
                  }
                  setHasNextPage(false);
             }
@@ -236,20 +227,18 @@ const Reconcile = () => {
         } finally {
             setHistoryLoading(false);
         }
-    }, [lastVisible, firstVisible]);
+    }, []);
 
-    // Use effect to trigger fetching when date changes
     useEffect(() => {
-        // Reset pagination state when date changes
+        // Reset state on date change
         setHistoryPage(1);
-        setLastVisible(null);
-        setFirstVisible(null);
+        lastVisibleRef.current = null;
+        firstVisibleRef.current = null;
         setHasNextPage(false);
         
         fetchSummaryData(selectedDate);
         fetchHistory(selectedDate, 'initial');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedDate]);
+    }, [selectedDate, fetchSummaryData, fetchHistory]);
 
     const handlePageChange = (direction) => {
         if (direction === 'next') {
@@ -284,7 +273,6 @@ const Reconcile = () => {
             }
             await refreshBalances();
             alert("Reconciliation report saved successfully!");
-            // Re-fetch to update UI
             fetchSummaryData(selectedDate);
             fetchHistory(selectedDate, 'initial');
         } catch (error) {
@@ -297,15 +285,13 @@ const Reconcile = () => {
     
     const renderSummarySection = (title, items, total) => (
         <div style={styles.summaryCard}>
-            {/* ✅ FIXED: Fallback for total to prevent crash */}
             <h3 style={styles.summaryTitle}>{title} - Total: Rs. {(total || 0).toFixed(2)}</h3>
             {items.length > 0 ? (
                 <ul style={styles.summaryList}>
                     {items.map((item, idx) => (
                         <li key={idx} style={styles.summaryListItem}>
                           <span>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</span>
-                          {/* ✅ FIXED: Added || 0 fallback */}
-                          <span>Rs. {(item.total || item.amount || 0).toFixed(2)}</span>
+                          <span>Rs. {(Number(item.total) || Number(item.amount) || 0).toFixed(2)}</span>
                           <span style={{color: '#6c757d'}}>by {item.issuedBy || item.createdBy || item.paidBy}</span>
                         </li>
                     ))}
@@ -371,7 +357,6 @@ const Reconcile = () => {
                             : reconciliationHistory.length > 0 ? reconciliationHistory.map(rec => (
                                 <tr key={rec.id}>
                                     <td style={styles.td}>{rec.reconciledAt?.toDate().toLocaleString()}</td>
-                                    {/* ✅ FIXED: Added || 0 fallbacks for history display too */}
                                     <td style={styles.td}>Rs. {(rec.summary.cashSales.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.cardSales.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.expenses.total || 0).toFixed(2)}</td>

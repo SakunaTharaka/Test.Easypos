@@ -593,9 +593,11 @@ const Invoice = ({ internalUser }) => {
       const counterRef = doc(db, user.uid, "counters");
       
       let walletDocId = null;
-      if (method === 'Cash') walletDocId = 'cash';
-      else if (method === 'Card') walletDocId = 'card';
-      else if (method === 'Online') walletDocId = 'online';
+      let salesMethodField = null;
+
+      if (method === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+      else if (method === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+      else if (method === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
       
       const walletRef = walletDocId ? doc(db, user.uid, "wallet", "accounts", walletDocId) : null;
 
@@ -620,11 +622,12 @@ const Invoice = ({ internalUser }) => {
              }
         }
 
-        // 2. Read Daily Stats (COGS & Sales)
+        // 2. Read Daily Stats (COGS & Sales & Specific Method)
         const dailyStatsSnap = await t.get(dailyStatsRef);
         const currentDailyCOGS = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalCOGS) || 0) : 0;
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
-        
+        const currentMethodSales = (dailyStatsSnap.exists() && salesMethodField) ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
+
         // 3. Read Counter
         const cDoc = await t.get(counterRef);
         const nextSeq = (cDoc.exists() ? cDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
@@ -640,16 +643,22 @@ const Invoice = ({ internalUser }) => {
 
         // --- ALL WRITES AFTER ---
         
-        // 1. Update Daily Stats (Sales & COGS)
+        // 1. Update Daily Stats (Sales & COGS & Method Sales)
         const newDailyCOGS = currentDailyCOGS + invoiceTotalCOGS;
         const newDailySales = currentDailySales + total; // Add current invoice total to daily sales
-
-        t.set(dailyStatsRef, { 
+        
+        const statsUpdate = {
             totalCOGS: newDailyCOGS,
             totalSales: newDailySales,
             date: dailyDateString,
             lastUpdated: serverTimestamp()
-        }, { merge: true });
+        };
+
+        if (salesMethodField) {
+            statsUpdate[salesMethodField] = currentMethodSales + total;
+        }
+
+        t.set(dailyStatsRef, statsUpdate, { merge: true });
 
         // 2. Update Counter
         t.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
@@ -659,8 +668,8 @@ const Invoice = ({ internalUser }) => {
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, items: checkout, 
           total, deliveryCharge: Number(deliveryCharge) || 0,
-          received: selectedCustomer.isCreditCustomer ? 0 : (Number(receivedAmount) || 0),
-          balance: selectedCustomer.isCreditCustomer ? total : balance,
+          received: Number(receivedAmount) || 0,
+          balance: balance,
           createdAt: serverTimestamp(), invoiceNumber: newInvNum, issuedBy: internalUser?.username || "Admin", 
           shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
           totalCOGS: invoiceTotalCOGS // Save COGS to invoice for future deletion logic
@@ -691,8 +700,10 @@ const Invoice = ({ internalUser }) => {
   const handleSaveAttempt = () => {
     if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
     if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
-    if (selectedCustomer.isCreditCustomer) executeSaveInvoice('Credit');
-    else { setConfirmPaymentMethod('Cash'); setShowPaymentConfirm(true); }
+    
+    // Default to cash confirm, no credit check logic
+    setConfirmPaymentMethod('Cash'); 
+    setShowPaymentConfirm(true);
   };
 
   useEffect(() => {
@@ -764,7 +775,7 @@ const Invoice = ({ internalUser }) => {
             </div>
             <div style={styles.paymentSection}>
                 <label style={styles.label}>AMOUNT RECEIVED (F2)</label>
-                <input ref={receivedAmountRef} type="number" value={selectedCustomer?.isCreditCustomer ? '' : receivedAmount} onChange={e => setReceivedAmount(e.target.value)} placeholder={selectedCustomer?.isCreditCustomer ? 'CREDIT SALE' : '0.00'} style={{...styles.input, ...styles.amountInput, ...(amountReceivedMode ? styles.activeInput : {})}} disabled={selectedCustomer?.isCreditCustomer} />
+                <input ref={receivedAmountRef} type="number" value={receivedAmount} onChange={e => setReceivedAmount(e.target.value)} placeholder="0.00" style={{...styles.input, ...styles.amountInput, ...(amountReceivedMode ? styles.activeInput : {})}} />
             </div>
             <div style={styles.balanceRow}><span>BALANCE</span><span style={{color: displayBalance >= 0 ? '#10b981' : '#ef4444'}}>Rs. {displayBalance.toFixed(2)}</span></div>
             <button onClick={handleSaveAttempt} disabled={isSaveDisabled || isSaving} style={{...styles.saveButton, ...((isSaveDisabled || isSaving) ? styles.saveButtonDisabled : {})}}>{isSaving ? 'SAVING...' : 'SAVE INVOICE (ALT+S)'}</button>

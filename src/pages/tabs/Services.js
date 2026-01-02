@@ -6,6 +6,8 @@ import {
   query, 
   serverTimestamp,
   orderBy,
+  limit, 
+  startAfter,
   doc, 
   deleteDoc, 
   updateDoc, 
@@ -14,7 +16,7 @@ import {
   getDocs,
   runTransaction 
 } from 'firebase/firestore';
-import { FaCalendarAlt, FaCheckCircle, FaTrash, FaEye, FaSave, FaSearch } from 'react-icons/fa';
+import { FaCalendarAlt, FaCheckCircle, FaTrash, FaEye, FaSave, FaSearch, FaArrowDown } from 'react-icons/fa';
 
 const Services = ({ internalUser }) => {
   // Form state
@@ -45,6 +47,11 @@ const Services = ({ internalUser }) => {
   const [jobsLoading, setJobsLoading] = useState(true);
   const [showCompletedJobs, setShowCompletedJobs] = useState(false); 
 
+  // Pagination State
+  const [lastVisible, setLastVisible] = useState(null);
+  const [loadMoreLoading, setLoadMoreLoading] = useState(false);
+  const JOBS_PER_PAGE = 50; 
+
   // Modal state
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null); 
@@ -64,20 +71,64 @@ const Services = ({ internalUser }) => {
     return collection(db, uid, 'data', 'service_jobs');
   }, [uid]);
 
-  // Load Jobs
+  // --- Load Initial Jobs (With Limit) ---
   useEffect(() => {
     if (!jobsCollectionRef) { setJobsLoading(false); return; }
     setJobsLoading(true);
-    const q = query(jobsCollectionRef, orderBy('createdAt', 'desc'));
+    
+    // Safety Limit: Only fetch the most recent 50 jobs initially
+    const q = query(
+        jobsCollectionRef, 
+        orderBy('createdAt', 'desc'),
+        limit(JOBS_PER_PAGE)
+    );
+    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const jobsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAllJobs(jobsData);
+      
+      // Store the last document for pagination
+      if (snapshot.docs.length > 0) {
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+      }
+      
       setJobsLoading(false);
-    }, (err) => { setError("Failed to load jobs."); setJobsLoading(false); });
+    }, (err) => { 
+        console.error(err);
+        setError("Failed to load jobs."); 
+        setJobsLoading(false); 
+    });
     return () => unsubscribe();
   }, [jobsCollectionRef]); 
 
-  // Filter Jobs
+  // --- Load More Jobs (Pagination) ---
+  const handleLoadMore = async () => {
+    if (!lastVisible || !uid) return;
+    setLoadMoreLoading(true);
+
+    try {
+        const q = query(
+            jobsCollectionRef,
+            orderBy('createdAt', 'desc'),
+            startAfter(lastVisible),
+            limit(JOBS_PER_PAGE)
+        );
+
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+            const newJobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setAllJobs(prev => [...prev, ...newJobs]);
+            setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        }
+    } catch (err) {
+        console.error("Error loading more jobs:", err);
+    } finally {
+        setLoadMoreLoading(false);
+    }
+  };
+
+  // Filter Jobs (Client-side)
   useEffect(() => {
     let filtered = allJobs;
     if (!showCompletedJobs) filtered = filtered.filter(job => job.status !== 'Completed');
@@ -159,7 +210,7 @@ const Services = ({ internalUser }) => {
       }
   };
 
-  // --- SAVE JOB (UPDATED: Adds to Daily Sales) ---
+  // --- SAVE JOB ---
   const executeSaveJob = async (paymentMethod) => {
     if (!uid) { setError('User not authenticated.'); return; }
     setIsLoading(true);
@@ -168,9 +219,11 @@ const Services = ({ internalUser }) => {
     try {
       await runTransaction(db, async (transaction) => {
         let walletDocId = null;
-        if (paymentMethod === 'Cash') walletDocId = 'cash';
-        else if (paymentMethod === 'Card') walletDocId = 'card';
-        else if (paymentMethod === 'Online') walletDocId = 'online';
+        let salesMethodField = null;
+
+        if (paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+        else if (paymentMethod === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+        else if (paymentMethod === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
 
         const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
         let currentWalletBalance = 0;
@@ -199,11 +252,13 @@ const Services = ({ internalUser }) => {
         const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
         const dailyStatsSnap = await transaction.get(dailyStatsRef);
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+        const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
         
         // Update Daily Stats (Add Advance)
         if (advanceVal > 0) {
             transaction.set(dailyStatsRef, { 
                 totalSales: currentDailySales + advanceVal,
+                [salesMethodField]: currentMethodSales + advanceVal,
                 date: dailyDateString,
                 lastUpdated: serverTimestamp()
             }, { merge: true });
@@ -262,7 +317,7 @@ const Services = ({ internalUser }) => {
     finally { setIsLoading(false); setPendingAction(null); }
   };
 
-  // --- COMPLETE JOB (UPDATED: Adds Balance to Daily Sales) ---
+  // --- COMPLETE JOB ---
   const executeCompleteJob = async (jobToComplete, paymentMethod) => {
       if (!uid) return;
       setIsUpdating(true);
@@ -270,9 +325,11 @@ const Services = ({ internalUser }) => {
       try {
           await runTransaction(db, async (transaction) => {
             let walletDocId = null;
-            if (paymentMethod === 'Cash') walletDocId = 'cash';
-            else if (paymentMethod === 'Card') walletDocId = 'card';
-            else if (paymentMethod === 'Online') walletDocId = 'online';
+            let salesMethodField = null;
+
+            if (paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
+            else if (paymentMethod === 'Card') { walletDocId = 'card'; salesMethodField = 'totalSales_card'; }
+            else if (paymentMethod === 'Online') { walletDocId = 'online'; salesMethodField = 'totalSales_online'; }
 
             const walletRef = walletDocId ? doc(db, uid, "wallet", "accounts", walletDocId) : null;
             let currentWalletBalance = 0;
@@ -296,10 +353,12 @@ const Services = ({ internalUser }) => {
             const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
             const dailyStatsSnap = await transaction.get(dailyStatsRef);
             const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
+            const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
             
             if (balanceAmount > 0) {
                  transaction.set(dailyStatsRef, { 
                     totalSales: currentDailySales + balanceAmount,
+                    [salesMethodField]: currentMethodSales + balanceAmount,
                     date: dailyDateString,
                     lastUpdated: serverTimestamp()
                 }, { merge: true });
@@ -347,7 +406,7 @@ const Services = ({ internalUser }) => {
       finally { setIsUpdating(false); setPendingAction(null); }
   };
 
-  // --- DELETE JOB (UPDATED: DEDUCT FROM WALLET & DAILY SALES) ---
+  // --- DELETE JOB ---
   const handleDeleteJob = (jobId) => {
     if (!uid) { setError("Authentication error."); return; }
     setJobToDelete(jobId);
@@ -381,12 +440,6 @@ const Services = ({ internalUser }) => {
             if (jobData.generatedInvoiceNumber) {
                 const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
                 const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
-                // Note: Need query results. In transaction, usually we must fetch doc refs first.
-                // Assuming unique invoice numbers, we query outside/before or use a known ID structure.
-                // Since `runTransaction` doesn't support query directly, we do the query first (non-transactional read of ID)
-                // However, inside `runTransaction` we should ideally read everything.
-                // For simplicity here, we assume we fetch the doc snapshot via query first (outside transaction block is risky).
-                // Correction: We'll use the query result to get REF, then transaction.get(REF).
                 const balSnaps = await getDocs(q);
                 if (!balSnaps.empty) {
                     balInvoiceRef = balSnaps.docs[0].ref;
@@ -399,12 +452,14 @@ const Services = ({ internalUser }) => {
             const reverseFinancials = async (invoice) => {
                 if (!invoice || !invoice.received || invoice.received <= 0) return;
                 
-                // A. Wallet Deduction
                 let wId = null;
-                if (invoice.paymentMethod === 'Cash') wId = 'cash';
-                else if (invoice.paymentMethod === 'Card') wId = 'card';
-                else if (invoice.paymentMethod === 'Online') wId = 'online';
+                let salesMethodField = null;
 
+                if (invoice.paymentMethod === 'Cash') { wId = 'cash'; salesMethodField = 'totalSales_cash'; }
+                else if (invoice.paymentMethod === 'Card') { wId = 'card'; salesMethodField = 'totalSales_card'; }
+                else if (invoice.paymentMethod === 'Online') { wId = 'online'; salesMethodField = 'totalSales_online'; }
+
+                // A. Wallet Deduction
                 if (wId) {
                     const wRef = doc(db, uid, "wallet", "accounts", wId);
                     const wDoc = await transaction.get(wRef);
@@ -420,16 +475,24 @@ const Services = ({ internalUser }) => {
                 // B. Daily Sales Reversal
                 if (invoice.createdAt) {
                     const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
-                    const dailyDateString = getSriLankaDate(dateVal); // Use helper for consistency
+                    const dailyDateString = getSriLankaDate(dateVal);
                     const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
                     const dailyStatsSnap = await transaction.get(dailyStatsRef);
                     
                     if (dailyStatsSnap.exists()) {
                         const currentSales = Number(dailyStatsSnap.data().totalSales) || 0;
-                        transaction.set(dailyStatsRef, {
+                        const currentMethodSales = salesMethodField ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
+                        
+                        const updateData = {
                             totalSales: currentSales - Number(invoice.received),
                             lastUpdated: serverTimestamp()
-                        }, { merge: true });
+                        };
+                        
+                        if (salesMethodField) {
+                            updateData[salesMethodField] = currentMethodSales - Number(invoice.received);
+                        }
+
+                        transaction.set(dailyStatsRef, updateData, { merge: true });
                     }
                 }
             };
@@ -469,6 +532,8 @@ const Services = ({ internalUser }) => {
       setIsUpdating(true);
       try { 
           await updateDoc(doc(db, uid, 'data', 'service_jobs', jobToExtend.id), { jobCompleteDate: newCompleteDate }); 
+          // Optimistically update local state so we don't need a re-fetch
+          setAllJobs(prev => prev.map(j => j.id === jobToExtend.id ? {...j, jobCompleteDate: newCompleteDate} : j));
           if (selectedJob?.id === jobToExtend.id) {
               setSelectedJob(prev => ({...prev, jobCompleteDate: newCompleteDate}));
           }
@@ -558,7 +623,7 @@ const Services = ({ internalUser }) => {
             <div style={styles.listControls}>
                 <div style={styles.searchWrapper}>
                     <FaSearch style={styles.searchIcon}/>
-                    <input type="text" style={styles.searchInput} placeholder="Search jobs/phone..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                    <input type="text" style={styles.searchInput} placeholder="Search loaded jobs..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                 </div>
                 <label style={styles.checkboxLabel}>
                     <input type="checkbox" checked={showCompletedJobs} onChange={(e) => setShowCompletedJobs(e.target.checked)} /> 
@@ -611,6 +676,15 @@ const Services = ({ internalUser }) => {
               </div>
             ))}
         </div>
+
+        {/* --- LOAD MORE BUTTON --- */}
+        {filteredJobs.length > 0 && !searchTerm && (
+            <div style={{padding: '20px', display: 'flex', justifyContent: 'center', borderTop: `1px solid ${themeColors.border}`}}>
+                <button onClick={handleLoadMore} disabled={loadMoreLoading} style={styles.btnSecondary}>
+                    {loadMoreLoading ? 'Loading...' : <><FaArrowDown style={{marginRight: 8}} /> Load Older Jobs</>}
+                </button>
+            </div>
+        )}
       </div>
 
       {/* --- MODALS --- */}
@@ -772,7 +846,7 @@ const styles = {
   detailRow: { display: 'flex', justifyContent: 'space-between' },
   jobCardActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
   btnPrimary: { padding: '10px 20px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
-  btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
+  btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
   btnDanger: { padding: '8px 16px', background: themeColors.danger, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   btnInfo: { padding: '8px 16px', background: themeColors.warning, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   btnDisabled: { padding: '10px 20px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '6px', cursor: 'not-allowed' },
@@ -799,6 +873,8 @@ const styles = {
   confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },
   confirmButton: { padding: '10px 24px', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', background: '#f8f8f8', fontWeight: '600', flex: 1 },
   confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1, boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.4)' },
+  loadingText: { textAlign: 'center', padding: '20px', color: '#666' },
+  noJobsText: { textAlign: 'center', padding: '20px', color: '#666' },
 };
 
 export default Services;
