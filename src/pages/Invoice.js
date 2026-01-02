@@ -246,6 +246,16 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
+      {/* ✅ ADDED ORDER NUMBER DISPLAY (CONDITIONAL) */}
+      {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
+        <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
+            <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
+            <div style={{fontSize: '3em', fontWeight: '900', lineHeight: '1'}}>
+                {String(invoice.dailyOrderNumber).padStart(2, '0')}
+            </div>
+        </div>
+      )}
+
       {isServiceOrder ? (
           <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
             <p><strong>Terms:</strong> Please bring this receipt when collecting your item. Items not collected within 30 days may be disposed of.</p>
@@ -580,7 +590,7 @@ const Invoice = ({ internalUser }) => {
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
   
-  // --- UPDATED SAVE FUNCTION WITH ALL READS BEFORE WRITES ---
+  // --- UPDATED SAVE FUNCTION WITH ORDER NUMBER LOGIC ---
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
@@ -601,14 +611,14 @@ const Invoice = ({ internalUser }) => {
       
       const walletRef = walletDocId ? doc(db, user.uid, "wallet", "accounts", walletDocId) : null;
 
-      // 1. Prepare Daily Stats Ref (Daily Sales + COGS)
+      // 1. Prepare Daily Stats Ref
       const dailyDateString = getSriLankaDate(); 
       const dailyStatsRef = doc(db, user.uid, "daily_stats", "entries", dailyDateString);
 
       const finalInvoiceData = await runTransaction(db, async (t) => {
         // --- ALL READS FIRST ---
 
-        // 1. Read Item Costs for COGS
+        // 1. Read Item Costs
         let invoiceTotalCOGS = 0;
         for (const item of checkout) {
              if (item.itemId) {
@@ -622,15 +632,19 @@ const Invoice = ({ internalUser }) => {
              }
         }
 
-        // 2. Read Daily Stats (COGS & Sales & Specific Method)
+        // 2. Read Daily Stats
         const dailyStatsSnap = await t.get(dailyStatsRef);
         const currentDailyCOGS = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalCOGS) || 0) : 0;
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
         const currentMethodSales = (dailyStatsSnap.exists() && salesMethodField) ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
 
-        // 3. Read Counter
+        // 3. Read Counter (Invoice & Daily Order)
         const cDoc = await t.get(counterRef);
         const nextSeq = (cDoc.exists() ? cDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
+        
+        // ✅ DAILY ORDER NUMBER LOGIC (Resets daily because datePrefix changes)
+        const currentDailyOrderSeq = (cDoc.exists() ? cDoc.data().dailyOrderCounters?.[datePrefix] || 0 : 0);
+        const nextDailyOrderSeq = currentDailyOrderSeq + 1;
         
         // 4. Read Wallet
         let currentWalletBalance = 0;
@@ -643,9 +657,9 @@ const Invoice = ({ internalUser }) => {
 
         // --- ALL WRITES AFTER ---
         
-        // 1. Update Daily Stats (Sales & COGS & Method Sales)
+        // 1. Update Daily Stats
         const newDailyCOGS = currentDailyCOGS + invoiceTotalCOGS;
-        const newDailySales = currentDailySales + total; // Add current invoice total to daily sales
+        const newDailySales = currentDailySales + total; 
         
         const statsUpdate = {
             totalCOGS: newDailyCOGS,
@@ -660,8 +674,11 @@ const Invoice = ({ internalUser }) => {
 
         t.set(dailyStatsRef, statsUpdate, { merge: true });
 
-        // 2. Update Counter
-        t.set(counterRef, { invoiceCounters: { [datePrefix]: nextSeq } }, { merge: true });
+        // 2. Update Counters (Invoice & Daily Order)
+        t.set(counterRef, { 
+            invoiceCounters: { [datePrefix]: nextSeq },
+            dailyOrderCounters: { [datePrefix]: nextDailyOrderSeq } // ✅ Saves daily order count
+        }, { merge: true });
         
         // 3. Create Invoice
         const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
@@ -672,7 +689,8 @@ const Invoice = ({ internalUser }) => {
           balance: balance,
           createdAt: serverTimestamp(), invoiceNumber: newInvNum, issuedBy: internalUser?.username || "Admin", 
           shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
-          totalCOGS: invoiceTotalCOGS // Save COGS to invoice for future deletion logic
+          totalCOGS: invoiceTotalCOGS,
+          dailyOrderNumber: nextDailyOrderSeq // ✅ Save the Order Number to the Invoice
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);

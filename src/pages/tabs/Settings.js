@@ -52,9 +52,9 @@ const Settings = () => {
   
   // ✅ **1. New state for the new toggles**
   const [offerDelivery, setOfferDelivery] = useState(false);
-  // REMOVED: const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
-  const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false); // ✅ Added Sinhala toggle state
+  const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false);
+  const [showOrderNo, setShowOrderNo] = useState(false); // ✅ New State for Order Number
 
   // --- NEW STATE FOR SERVICE & ORDERS ---
   const [priceCategories, setPriceCategories] = useState([]);
@@ -95,9 +95,9 @@ const Settings = () => {
           setExpenseCategories(data.expenseCategories || []);
           setAutoPrintInvoice(data.autoPrintInvoice || false);
           setOfferDelivery(data.offerDelivery || false);
-          // REMOVED: setMaintainCreditCustomers(data.maintainCreditCustomers || false);
           setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
-          setUseSinhalaInvoice(data.useSinhalaInvoice || false); // ✅ Load Sinhala setting
+          setUseSinhalaInvoice(data.useSinhalaInvoice || false); 
+          setShowOrderNo(data.showOrderNo || false); // ✅ Load saved setting
           // --- LOAD SERVICE PRICE CATEGORY ---
           setServicePriceCategory(data.serviceJobPriceCategory || "");
 
@@ -135,9 +135,9 @@ const Settings = () => {
             expenseCategories: [],
             autoPrintInvoice: false,
             offerDelivery: false,
-            // REMOVED: maintainCreditCustomers: false,
             openCashDrawerWithPrint: false,
-            useSinhalaInvoice: false, // ✅ Default Sinhala setting
+            useSinhalaInvoice: false,
+            showOrderNo: false, // ✅ Set default
             // --- ADD TO DEFAULT SETTINGS ---
             serviceJobPriceCategory: "",
           };
@@ -162,9 +162,9 @@ const Settings = () => {
           setExpenseCategories(defaultSettings.expenseCategories);
           setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
           setOfferDelivery(defaultSettings.offerDelivery);
-          // REMOVED: setMaintainCreditCustomers(defaultSettings.maintainCreditCustomers);
           setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
-          setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice); // ✅ Set default
+          setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice);
+          setShowOrderNo(defaultSettings.showOrderNo); // ✅ Set default state
           // --- LOAD FROM DEFAULT SETTINGS ---
           setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
         }
@@ -297,26 +297,27 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { autoPrintInvoice: value });
   };
 
-  // ✅ **4. Handlers for the new toggles**
   const handleOfferDeliveryChange = async (value) => {
     setOfferDelivery(value);
     await updateDoc(getSettingsDocRef(), { offerDelivery: value });
   };
-
-  // REMOVED: handleMaintainCreditCustomersChange function
 
   const handleOpenCashDrawerChange = async (value) => {
     setOpenCashDrawerWithPrint(value);
     await updateDoc(getSettingsDocRef(), { openCashDrawerWithPrint: value });
   };
   
-  // ✅ Handler for Sinhala Invoice Toggle
   const handleUseSinhalaInvoiceChange = async (value) => {
     setUseSinhalaInvoice(value);
     await updateDoc(getSettingsDocRef(), { useSinhalaInvoice: value });
   };
 
-  // --- NEW HANDLER FOR SERVICE PRICE CATEGORY ---
+  // ✅ Handler for Order Number Toggle
+  const handleShowOrderNoChange = async (value) => {
+    setShowOrderNo(value);
+    await updateDoc(getSettingsDocRef(), { showOrderNo: value });
+  };
+
   const handleServicePriceCategoryChange = async (value) => {
     setServicePriceCategory(value);
     await updateDoc(getSettingsDocRef(), { serviceJobPriceCategory: value });
@@ -387,7 +388,6 @@ const Settings = () => {
             <p style={styles.helpText}>If set to 'Yes', the print dialog will open automatically after an invoice is saved.</p>
         </div>
 
-        {/* ✅ **5. Add the new JSX for the toggles** */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Offer Delivery Facility</label>
             <div style={styles.toggleContainer}>
@@ -396,8 +396,6 @@ const Settings = () => {
             </div>
             <p style={styles.helpText}>Enable this if you offer delivery services for your sales.</p>
         </div>
-
-        {/* REMOVED: Maintain Credit Customers Toggle */}
 
         <div style={styles.formGroup}>
             <label style={styles.label}>Open cashdrawer with print</label>
@@ -408,7 +406,6 @@ const Settings = () => {
             <p style={styles.helpText}>If set to 'Yes', a command to open the cash drawer will be sent with the print job.</p>
         </div>
         
-        {/* ✅ **Added Sinhala Invoice Toggle** */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Use Sinhala format in invoices</label>
             <div style={styles.toggleContainer}>
@@ -416,6 +413,16 @@ const Settings = () => {
                 <button onClick={() => handleUseSinhalaInvoiceChange(false)} style={!useSinhalaInvoice ? styles.toggleButtonActive : styles.toggleButton}>No</button>
             </div>
             <p style={styles.helpText}>Enable this to print invoices using the Sinhala language format.</p>
+        </div>
+        
+        {/* ✅ **Added Order Number Toggle** */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Add Order Number to Invoice</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleShowOrderNoChange(true)} style={showOrderNo ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleShowOrderNoChange(false)} style={!showOrderNo ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to display the Order Number on your printed invoices.</p>
         </div>
       </div>
 

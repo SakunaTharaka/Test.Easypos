@@ -270,6 +270,16 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
+      {/* ✅ ADDED ORDER NUMBER DISPLAY (CONDITIONAL) */}
+      {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
+        <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
+            <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
+            <div style={{fontSize: '3em', fontWeight: '900', lineHeight: '1'}}>
+                {String(invoice.dailyOrderNumber).padStart(2, '0')}
+            </div>
+        </div>
+      )}
+
       {/* Footer Disclaimer */}
       {isServiceOrder ? (
           <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
