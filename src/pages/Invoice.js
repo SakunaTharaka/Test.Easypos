@@ -90,6 +90,7 @@ const styles = {
 
 // --- COMPONENTS ---
 
+// 1. PrintableLayout (Centered Header)
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderDetails }) => {
   if (!invoice || (!Array.isArray(invoice.items) && !serviceJob && !orderDetails)) {
     return null;
@@ -129,50 +130,55 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
   return (
     <div style={styles.invoiceBox}>
-      <div className="invoice-header-section">
-        <div className="company-details">
+      {/* --- HEADER SECTION (Centered) --- */}
+      <div className="invoice-header-section" style={{ textAlign: 'center' }}>
+        <div className="company-details" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             {companyInfo?.companyLogo && (
             <img 
                 src={companyInfo.companyLogo} 
-                style={styles.logo} 
+                style={{ ...styles.logo, display: 'block', margin: '0 auto 10px auto' }} 
                 alt="Company Logo" 
                 onLoad={onImageLoad}
-                onError={onImageLoad}
+                onError={onImageLoad} // Handle error as loaded to prevent hanging
             />
             )}
-            <h1 style={styles.companyNameText}>{companyInfo?.companyName || "Your Company"}</h1>
-            <p style={styles.headerText}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
-            {companyInfo?.phone && <p style={styles.headerText}>{companyInfo.phone}</p>}
+            <h1 style={{ ...styles.companyNameText, textAlign: 'center', width: '100%' }}>{companyInfo?.companyName || "Your Company"}</h1>
+            <p style={{ ...styles.headerText, textAlign: 'center', width: '100%' }}>{companyInfo?.companyAddress || "123 Main St, City"}</p>
+            {companyInfo?.phone && <p style={{ ...styles.headerText, textAlign: 'center', width: '100%' }}>{companyInfo.phone}</p>}
         </div>
         
-        <div className="invoice-meta-details">
-            <h3 style={{marginTop:0, borderBottom: '2px solid #000', paddingBottom: 5}}>
+        <div className="invoice-meta-details" style={{ textAlign: 'center', marginTop: '10px' }}>
+            <h3 style={{ marginTop: 0, borderBottom: '2px solid #000', paddingBottom: 5, textAlign: 'center' }}>
                 {isServiceOrder ? "SERVICE ORDER" : isOrder ? "CUSTOMER ORDER" : "INVOICE"}
             </h3>
-            <p><strong>{isServiceOrder || isOrder ? "Order #:" : "Invoice #:"}</strong> {invoice.invoiceNumber}</p>
-            <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
-            <p><strong>Customer:</strong> {invoice.customerName}</p>
-            {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
-            {isOrder && orderDetails && orderDetails.deliveryDate && (
-                 <p style={{marginTop: 5, fontWeight: 'bold'}}>
-                    <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
-                 </p>
-            )}
-            {isServiceOrder && serviceJob && (
-                <div style={{marginTop: 10, padding: 8, background: '#f9f9f9', border: '1px dashed #ccc', textAlign: 'left'}}>
-                    <p style={{fontSize: '1.1em'}}><strong>Type:</strong> {serviceJob.jobType}</p>
-                    <p><strong>Est. Date:</strong> {formatDate(serviceJob.jobCompleteDate)}</p>
-                    {serviceJob.generalInfo && (
-                        <p style={{marginTop: 5, whiteSpace: 'pre-wrap', fontSize: '0.9em'}}>
-                            <strong>Notes:</strong> {serviceJob.generalInfo}
-                        </p>
-                    )}
-                </div>
-            )}
-            <p style={{marginTop: 5, fontSize: '0.85em', color: '#555'}}><strong>Issued By:</strong> {invoice.issuedBy}</p>
+            {/* Centered Container for Details */}
+            <div style={{ textAlign: 'left', display: 'inline-block', width: 'auto', minWidth: '200px' }}>
+                <p><strong>{isServiceOrder || isOrder ? "Order #:" : "Invoice #:"}</strong> {invoice.invoiceNumber}</p>
+                <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
+                <p><strong>Customer:</strong> {invoice.customerName}</p>
+                {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
+                {isOrder && orderDetails && orderDetails.deliveryDate && (
+                    <p style={{marginTop: 5, fontWeight: 'bold'}}>
+                        <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
+                    </p>
+                )}
+                {isServiceOrder && serviceJob && (
+                    <div style={{marginTop: 10, padding: 8, background: '#f9f9f9', border: '1px dashed #ccc', textAlign: 'left'}}>
+                        <p style={{fontSize: '1.1em'}}><strong>Type:</strong> {serviceJob.jobType}</p>
+                        <p><strong>Est. Date:</strong> {formatDate(serviceJob.jobCompleteDate)}</p>
+                        {serviceJob.generalInfo && (
+                            <p style={{marginTop: 5, whiteSpace: 'pre-wrap', fontSize: '0.9em'}}>
+                                <strong>Notes:</strong> {serviceJob.generalInfo}
+                            </p>
+                        )}
+                    </div>
+                )}
+                <p style={{marginTop: 5, fontSize: '0.85em', color: '#555'}}><strong>Issued By:</strong> {invoice.issuedBy}</p>
+            </div>
         </div>
       </div>
       
+      {/* --- ITEMS SECTION --- */}
       <div className={isServiceOrder ? "no-print" : ""}>
           {isServiceOrder && <h4 style={{marginTop: 20, marginBottom: 5, color: '#444'}}>Billing Details (Office View)</h4>}
           <table style={styles.itemsTable}>
@@ -210,6 +216,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           </table>
       </div>
 
+      {/* --- FOOTER SECTION --- */}
       <div className="invoice-footer-section">
         <div style={styles.totalsContainer}>
             <div style={styles.totals}>
@@ -246,7 +253,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
-      {/* ✅ ADDED ORDER NUMBER DISPLAY (CONDITIONAL) */}
+      {/* ORDER NO DISPLAY */}
       {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
         <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
             <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
@@ -268,69 +275,110 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   );
 };
 
-// 2. BrowserPrintComponent
+// 2. BrowserPrintComponent (UPDATED: USING IFRAME TO PREVENT BLANK PAGES)
 const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
+    const [mountNode, setMountNode] = useState(null);
+    const iframeRef = useRef(null);
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
-    const isPrintReady = invoice && (isImageLoaded || !companyInfo?.companyLogo);
-    const [portalNode, setPortalNode] = useState(null);
 
     useEffect(() => {
-        const node = document.createElement('div');
-        node.className = 'print-portal-root';
-        document.body.appendChild(node);
-        setPortalNode(node);
-        return () => { if (document.body.contains(node)) document.body.removeChild(node); }
+        // 1. Create invisible iframe
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.top = '-10000px'; // Hide off-screen
+        iframe.style.left = '-10000px';
+        iframe.style.width = '1px';
+        iframe.style.height = '1px';
+        document.body.appendChild(iframe);
+        iframeRef.current = iframe;
+
+        // 2. Open document and write base HTML
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write('<html><head><title>Print Invoice</title></head><body><div id="print-mount"></div></body></html>');
+        doc.close();
+
+        // 3. Inject print-specific styles to ensure clean print
+        const style = doc.createElement('style');
+        style.textContent = `
+            @page { size: auto; margin: 5mm; } 
+            body { margin: 0; padding: 0; font-family: sans-serif; background: white; }
+            /* Ensure the print container is fully visible */
+            #print-mount { width: 100%; overflow: visible; }
+        `;
+        doc.head.appendChild(style);
+
+        setMountNode(doc.getElementById('print-mount'));
+
+        // Cleanup: Remove iframe when component unmounts
+        return () => {
+            if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+            }
+        };
     }, []);
 
+    // Trigger Print when content and images are ready
     useEffect(() => {
-        if (!portalNode) return;
-        const style = document.createElement('style');
-        style.innerHTML = `
-            .print-portal-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.6); z-index: 99999; display: flex; align-items: center; justify-content: center; }
-            .print-area-wrapper-screen { background: white; width: 80mm; max-height: 90vh; overflow-y: auto; box-shadow: 0 0 20px rgba(0,0,0,0.5); font-family: 'Inter', sans-serif; }
-            .invoice-header-section { text-align: center; }
-            .invoice-meta-details { text-align: center; margin-top: 10px; }
-            .company-details { text-align: center; }
-            .totalsContainer { width: 100%; }
-            .totals { padding-top: 10px; }
-            @media print {
-                body > *:not(.print-portal-root) { display: none !important; }
-                html, body { margin: 0 !important; padding: 0 !important; height: 100% !important; overflow: visible !important; background: #fff !important; }
-                .print-portal-root { position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: auto !important; background: white !important; display: block !important; margin: 0 !important; padding: 0 !important; z-index: 99999 !important; visibility: visible !important; }
-                .print-area-wrapper-screen { width: 100% !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: white !important; display: block !important; }
-                .no-print { display: none !important; }
-                @page { size: auto; margin: 0mm; }
-                table { width: 100%; border-collapse: collapse; }
-                .invoice-header-section, .company-details, .invoice-meta-details { text-align: center; }
-                .invoice-footer-section { margin-top: 20px;}
-            }
-        `;
-        document.head.appendChild(style);
-        return () => document.head.removeChild(style);
-    }, [portalNode]);
-
-    useEffect(() => {
-        if (isPrintReady && portalNode) {
-            const timer = setTimeout(() => window.print(), 800);
+        if (mountNode && isImageLoaded && iframeRef.current) {
+            // Small timeout to allow React Portal to render fully
+            const timer = setTimeout(() => {
+                const win = iframeRef.current.contentWindow;
+                if (win) {
+                    win.focus();
+                    win.print();
+                }
+            }, 600); 
             return () => clearTimeout(timer);
         }
-    }, [isPrintReady, portalNode]);
+    }, [mountNode, isImageLoaded]);
 
+    // Listen for the 'afterprint' event to close the preview
     useEffect(() => {
-        const handleAfterPrint = () => onPrintFinished();
-        const handleKeyDown = (e) => { if (e.key === 'Escape') { e.preventDefault(); onPrintFinished(); } };
-        window.addEventListener('afterprint', handleAfterPrint);
-        window.addEventListener('keydown', handleKeyDown);
-        return () => { window.removeEventListener('afterprint', handleAfterPrint); window.removeEventListener('keydown', handleKeyDown); };
-    }, [onPrintFinished]);
+        if (!iframeRef.current) return;
+        const win = iframeRef.current.contentWindow;
+        
+        const handleAfterPrint = () => {
+            onPrintFinished();
+        };
+        
+        // 'afterprint' fires when the print dialog is closed (printed or cancelled)
+        win.addEventListener('afterprint', handleAfterPrint);
+        return () => win.removeEventListener('afterprint', handleAfterPrint);
+    }, [mountNode, onPrintFinished]);
 
-    if (!portalNode) return null;
+    return (
+        <>
+            {/* 1. Visible Overlay for the Main Window (So user knows what's happening) */}
+            <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                background: 'rgba(0,0,0,0.7)', zIndex: 99999,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                color: 'white', fontFamily: 'sans-serif'
+            }}>
+                <div style={{ marginBottom: '20px', fontSize: '18px', fontWeight: 'bold' }}>Preparing Print Preview...</div>
+                <div style={{ fontSize: '14px', marginBottom: '20px', color: '#ccc' }}>If the print dialog doesn't appear, check your popup blocker.</div>
+                <button 
+                    onClick={onPrintFinished}
+                    style={{
+                        padding: '10px 20px', background: '#e74c3c', color: 'white', 
+                        border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold'
+                    }}
+                >
+                    Close
+                </button>
+            </div>
 
-    return ReactDOM.createPortal(
-        <div className="print-area-wrapper-screen">
-             <div className="no-print" style={{ textAlign: 'center', padding: '10px', background: '#333', color: '#fff', fontSize: '12px' }}>{isPrintReady ? 'Printing... (Press ESC to close)' : 'Loading preview...'}</div>
-            {invoice ? <PrintableLayout invoice={invoice} companyInfo={companyInfo} onImageLoad={() => setIsImageLoaded(true)} /> : <p>Loading...</p>}
-        </div>, portalNode
+            {/* 2. Content Portaled into the Hidden Iframe */}
+            {mountNode && ReactDOM.createPortal(
+                <PrintableLayout 
+                    invoice={invoice} 
+                    companyInfo={companyInfo} 
+                    onImageLoad={() => setIsImageLoaded(true)}
+                />,
+                mountNode
+            )}
+        </>
     );
 };
 
