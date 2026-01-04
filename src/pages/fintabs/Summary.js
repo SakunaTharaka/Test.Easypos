@@ -175,7 +175,7 @@ const Summary = () => {
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>📑 Finance Summary</h2>
+      <h2 style={styles.title}> Finance Summary</h2>
       <p style={styles.subHeader}>Real-time Profit & Loss Statement (Data sourced from Daily Stats & Expenses).</p>
 
       <div style={styles.section}>
