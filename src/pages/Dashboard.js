@@ -112,11 +112,35 @@ const Dashboard = () => {
         setIsAnnouncementActive(false);
       }
 
-      // User Info
+      // User Info & Security Checks
       try {
         const userInfoRefOnboarding = doc(db, "Userinfo", uid);
         const userDocSnap = await getDoc(userInfoRefOnboarding);
-        if (!userDocSnap.exists() || !userDocSnap.data().status) {
+        
+        if (!userDocSnap.exists()) {
+            navigate("/user-details");
+            return;
+        }
+
+        const userData = userDocSnap.data();
+
+        // ---------------------------------------------------------
+        // 🔒 SECURITY CHECK: TRIAL EXPIRATION
+        // ---------------------------------------------------------
+        const trialEndDate = userData.trialEndDate?.toDate();
+        if (trialEndDate) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Normalize to start of day
+            
+            // If expired, BLOCK ACCESS and redirect to billing
+            if (today > trialEndDate) {
+                navigate("/billing");
+                return; // Stop executing dashboard logic
+            }
+        }
+        // ---------------------------------------------------------
+
+        if (!userData.status) {
             navigate("/user-details");
             return;
         }
