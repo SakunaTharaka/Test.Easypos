@@ -2,8 +2,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
-  addDoc, 
-  getDocs, // We rely on this now instead of onSnapshot
+  getDocs, 
   serverTimestamp,
   query,
   orderBy,
@@ -14,7 +13,7 @@ import {
   runTransaction 
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
-import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload } from 'react-icons/ai'; // Added AiOutlineReload
+import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload } from 'react-icons/ai'; 
 
 const Accounts = () => {
   const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
@@ -47,7 +46,7 @@ const Accounts = () => {
 
   const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-  // --- 1. REPLACED: Manual Fetch instead of Real-time Listener ---
+  // --- Fetch Wallets ---
   const fetchWalletBalances = async () => {
     if (!uid) return;
     setLoading(true);
@@ -70,14 +69,12 @@ const Accounts = () => {
     }
   };
 
-  // Initial Fetch on Mount
   useEffect(() => {
     fetchWalletBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
-
-  // --- 2. Fetch History on Change ---
+  // --- Fetch History ---
   useEffect(() => {
     if(!uid) return;
     fetchHistory();
@@ -85,7 +82,6 @@ const Accounts = () => {
   }, [uid, currentPage, filterDate]); 
 
   const fetchHistory = async () => {
-      // ... (Existing history logic remains unchanged) ...
       setHistoryLoading(true);
       try {
           let q = collection(db, uid, "finance", "transfers");
@@ -135,23 +131,45 @@ const Accounts = () => {
       return options;
   };
 
-  // --- 3. Handle Transfer ---
+  // --- Handle Transfer / Deposit / Withdrawal ---
   const handleTransfer = async (e) => {
     e.preventDefault();
-    // ... (Validation logic remains unchanged) ...
     if (!uid) return;
+    
+    // --- 🛑 VALIDATION: PREVENT DEPOSIT -> WITHDRAWAL ---
+    if (transferFromId === 'DEPOSIT_CASH' && transferToId === 'WITHDRAWAL_CASH') {
+        return alert("Operation Not Allowed: You cannot select 'Deposit to Business' and 'Withdrawal Cash' at the same time. Please select a valid internal account.");
+    }
+
     if (!transferFromId || !transferToId || !transferAmount) return alert("Please select Source, Destination, and Amount.");
     if (transferFromId === transferToId) return alert("Source and Destination cannot be the same.");
+    
     const amt = parseFloat(transferAmount);
     if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
 
     const allOptions = getAllOptions();
-    const transferFrom = allOptions.find(o => o.value === transferFromId);
-    const transferTo = allOptions.find(o => o.value === transferToId);
+    
+    // Resolve Objects
+    let transferFrom = null;
+    let transferTo = null;
+
+    // 1. Resolve Source
+    if (transferFromId === 'DEPOSIT_CASH') {
+        transferFrom = { value: 'DEPOSIT_CASH', label: 'Deposit to Business', type: 'EXTERNAL_SOURCE' };
+    } else {
+        transferFrom = allOptions.find(o => o.value === transferFromId);
+    }
+
+    // 2. Resolve Destination
+    if (transferToId === 'WITHDRAWAL_CASH') {
+        transferTo = { value: 'WITHDRAWAL_CASH', label: 'Withdrawal Cash', type: 'EXTERNAL_DEST' };
+    } else {
+        transferTo = allOptions.find(o => o.value === transferToId);
+    }
 
     if (!transferFrom || !transferTo) return alert("Invalid account selection.");
 
-    // Pre-check for CashBooks
+    // Pre-check for CashBooks (Only if NOT a deposit)
     if (transferFrom.type === 'CASHBOOK') {
         const currentBalance = cashBookBalances[transferFrom.value] || 0;
         if (currentBalance < amt) return alert(`Insufficient funds in ${transferFrom.label}.`);
@@ -161,32 +179,63 @@ const Accounts = () => {
     try {
         await runTransaction(db, async (transaction) => {
             const timestamp = serverTimestamp();
-            let sourceWalletRef = null;
+            
+            // --- SOURCE LOGIC ---
             let currentSourceBalance = 0;
-            let destWalletRef = null;
-            let currentDestBalance = 0;
+            let sourceWalletRef = null;
 
-            // Check Source Wallet
             if (transferFrom.type === 'WALLET') {
                 sourceWalletRef = doc(db, uid, "wallet", "accounts", transferFrom.walletId);
                 const sDoc = await transaction.get(sourceWalletRef);
                 if (!sDoc.exists()) throw "Source wallet not found.";
                 currentSourceBalance = Number(sDoc.data().balance) || 0;
                 if (currentSourceBalance < amt) throw `Insufficient funds in ${transferFrom.label}.`;
+                
+                // Deduct
+                transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
+            } 
+            else if (transferFrom.type === 'CASHBOOK') {
+                // Cashbook balance is calculated, so we just add an EXPENSE record to reduce it
+                const expRef = doc(collection(db, uid, 'user_data', 'expenses'));
+                transaction.set(expRef, {
+                    expenseId: `TRF-${Date.now()}`,
+                    category: transferTo.type === 'EXTERNAL_DEST' ? 'Withdrawal' : 'Internal Transfer',
+                    amount: amt,
+                    details: transferTo.type === 'EXTERNAL_DEST' ? `Withdrawal: ${transferDesc}` : `Transfer to ${transferTo.label}`,
+                    cashBookId: transferFrom.value,
+                    cashBookName: transferFrom.label,
+                    createdAt: timestamp,
+                    createdBy: "System"
+                });
             }
+            // If EXTERNAL_SOURCE (Deposit), we do nothing to the source.
 
-            // Check Dest Wallet
+            // --- DESTINATION LOGIC ---
+            let currentDestBalance = 0;
+            let destWalletRef = null;
+
             if (transferTo.type === 'WALLET') {
                 destWalletRef = doc(db, uid, "wallet", "accounts", transferTo.walletId);
                 const dDoc = await transaction.get(destWalletRef);
                 if (dDoc.exists()) currentDestBalance = Number(dDoc.data().balance) || 0;
+                
+                // Add
+                transaction.set(destWalletRef, { balance: currentDestBalance + amt, lastUpdated: timestamp }, { merge: true });
             }
+            else if (transferTo.type === 'CASHBOOK') {
+                // Add Entry to CashBook
+                const entryRef = doc(collection(db, uid, 'cash_book_entries', 'entry_list'));
+                transaction.set(entryRef, {
+                    amount: amt,
+                    details: transferFrom.type === 'EXTERNAL_SOURCE' ? `Deposit: ${transferDesc}` : `Transfer from ${transferFrom.label}`,
+                    cashBookId: transferTo.value,
+                    createdAt: timestamp,
+                    addedBy: "System"
+                });
+            }
+            // If EXTERNAL_DEST (Withdrawal), we do nothing to the destination.
 
-            // Write Phase
-            if (sourceWalletRef) transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
-            if (destWalletRef) transaction.set(destWalletRef, { balance: currentDestBalance + amt, lastUpdated: timestamp }, { merge: true });
-
-            // Create Log
+            // --- LOG TRANSACTION ---
             const transferRef = doc(collection(db, uid, "finance", "transfers"));
             transaction.set(transferRef, {
                 fromId: transferFrom.value,
@@ -194,62 +243,34 @@ const Accounts = () => {
                 toId: transferTo.value,
                 toLabel: transferTo.label,
                 amount: amt,
-                description: transferDesc,
+                description: transferDesc || (transferFrom.type === 'EXTERNAL_SOURCE' ? 'Deposit' : 'Transfer'),
                 createdAt: timestamp,
                 createdBy: "Admin"
             });
-
-            // Handle CashBooks
-            if (transferFrom.type === 'CASHBOOK') {
-                const expRef = doc(collection(db, uid, 'user_data', 'expenses'));
-                transaction.set(expRef, {
-                    expenseId: `TRF-${Date.now()}`,
-                    category: 'Internal Transfer',
-                    amount: amt,
-                    details: `Transfer to ${transferTo.label}`,
-                    cashBookId: transferFrom.value,
-                    cashBookName: transferFrom.label,
-                    createdAt: timestamp,
-                    createdBy: "System"
-                });
-            }
-
-            if (transferTo.type === 'CASHBOOK') {
-                const entryRef = doc(collection(db, uid, 'cash_book_entries', 'entry_list'));
-                transaction.set(entryRef, {
-                    amount: amt,
-                    details: `Transfer from ${transferFrom.label}`,
-                    cashBookId: transferTo.value,
-                    createdAt: timestamp,
-                    addedBy: "System"
-                });
-            }
         });
         
-        alert("Transfer Successful!");
+        alert("Transaction Successful!");
         setTransferAmount('');
         setTransferDesc('');
         setTransferFromId('');
         setTransferToId('');
         
-        // --- CRITICAL UPDATE: Refresh Data Manually ---
-        await refreshBalances(); // Context (Cash Books)
-        fetchWalletBalances();   // Local (Wallets) - replaces the real-time listener update
+        await refreshBalances(); 
+        fetchWalletBalances();   
         
         setCurrentPage(1);
         setPageCursors([null]);
         fetchHistory();     
 
     } catch (error) {
-        console.error("Transfer failed:", error);
+        console.error("Transaction failed:", error);
         const msg = typeof error === 'string' ? error : (error.message || "Unknown error");
-        alert("Transfer failed: " + msg);
+        alert("Transaction failed: " + msg);
     } finally {
         setIsTransferring(false);
     }
   };
 
-  // ... (Displayed History filtering remains the same) ...
   const displayedHistory = history.filter(item => {
       if (!searchTerm) return true;
       const lower = searchTerm.toLowerCase();
@@ -306,11 +327,7 @@ const Accounts = () => {
           </div>
       </div>
       
-      {/* ... (Rest of UI: Cash Books, Transfer Form, History Table remains identical) ... */}
-      
-      {/* Only showing Section 3 & 4 placeholder for brevity as they don't change logic-wise, 
-          but you would keep the full JSX here in your actual file. */}
-      
+      {/* --- SECTION 2: CASH BOOKS --- */}
       <div style={styles.section}>
           <h3 style={styles.sectionTitle}>Cash Books</h3>
           <div style={styles.cashBookGrid}>
@@ -323,20 +340,23 @@ const Accounts = () => {
           </div>
       </div>
 
+      {/* --- SECTION 3: TRANSFER / DEPOSIT / WITHDRAW --- */}
       <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>Transfer Money</h3>
+          <h3 style={styles.sectionTitle}>Manage Funds</h3>
           <div style={styles.transferContainer}>
               <form onSubmit={handleTransfer} style={styles.transferForm}>
-                 {/* ... (Keep your form inputs exactly as they were) ... */}
-                 
+                  
                   <div style={styles.inputGroup}>
-                      <label style={styles.label}>From Account</label>
+                      <label style={styles.label}>From (Source)</label>
                       <select 
                           style={styles.select}
                           value={transferFromId} 
                           onChange={(e) => setTransferFromId(e.target.value)}
                       >
                           <option value="">Select Source...</option>
+                          {/* ✅ ADDED DEPOSIT OPTION HERE */}
+                          <option value="DEPOSIT_CASH" style={{fontWeight: 'bold', color: '#16a34a'}}>➕ Deposit to Business</option>
+                          
                           <optgroup label="Sales Buckets">
                               <option value="SALES_CASH">Cash from Sale</option>
                               <option value="SALES_CARD">Card Payment Bank</option>
@@ -349,21 +369,22 @@ const Accounts = () => {
                           </optgroup>
                       </select>
                   </div>
-                  
-                  {/* ... (Arrow, To Account, Amount, Desc inputs) ... */}
 
                   <div style={styles.arrowContainer}>
                       <span style={{fontSize: '24px', color: '#94a3b8', fontWeight: 'bold'}}>→</span>
                   </div>
 
                   <div style={styles.inputGroup}>
-                      <label style={styles.label}>To Account</label>
+                      <label style={styles.label}>To (Destination)</label>
                       <select 
                           style={styles.select}
                           value={transferToId} 
                           onChange={(e) => setTransferToId(e.target.value)}
                       >
                           <option value="">Select Destination...</option>
+                          {/* ✅ ADDED WITHDRAWAL OPTION HERE */}
+                          <option value="WITHDRAWAL_CASH" style={{fontWeight: 'bold', color: '#ef4444'}}>➖ Withdrawal Cash</option>
+                          
                           <optgroup label="Sales Buckets">
                               <option value="SALES_CASH">Cash from Sale</option>
                               <option value="SALES_CARD">Card Payment Bank</option>
@@ -395,12 +416,13 @@ const Accounts = () => {
                   </div>
 
                   <button type="submit" style={isTransferring ? styles.transferBtnDisabled : styles.transferBtn} disabled={isTransferring}>
-                      {isTransferring ? 'Processing...' : 'Transfer Funds'}
+                      {isTransferring ? 'Processing...' : 'Execute Transaction'}
                   </button>
               </form>
           </div>
       </div>
       
+      {/* --- SECTION 4: HISTORY --- */}
       <div style={styles.section}>
           <h3 style={styles.sectionTitle}>Transaction History</h3>
           <div style={styles.controlsRow}>
@@ -451,7 +473,6 @@ const Accounts = () => {
           </div>
       </div>
 
-      {/* Basic Spin Animation for Refresh Icon */}
       <style>{`
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -470,7 +491,6 @@ const themeColors = {
 };
 
 const styles = {
-  // ... (Keep all existing styles) ...
   container: {
     padding: '24px',
     fontFamily: "'Inter', sans-serif",
@@ -499,7 +519,6 @@ const styles = {
     cursor: 'pointer',
     transition: 'all 0.2s'
   },
-  // ... (Include your existing styles here: gridContainer, accountCard, etc.) ...
   gridContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -525,7 +544,6 @@ const styles = {
   section: { background: 'white', borderRadius: '12px', padding: '24px', marginBottom: '30px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0' },
   sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1e293b', marginBottom: '20px', display: 'flex', alignItems: 'center' },
   
-  // (Paste rest of your styles object here: transferForm, table, etc.)
   cashBookGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' },
   cashBookCard: { background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', textAlign: 'center' },
   cashBookName: { fontSize: '14px', fontWeight: '600', color: '#475569' },
