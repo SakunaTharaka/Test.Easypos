@@ -1,52 +1,45 @@
 import React, { useState, useEffect } from "react";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
-// ✅ Import icons for modals
 import { 
   FaTimes, FaStore, FaUsers, FaBoxOpen, FaCog, FaPrint, 
-  FaEnvelope, FaPhone, FaCheckCircle, FaStar 
+  FaEnvelope, FaPhone, FaCheckCircle, FaStar, FaArrowRight, FaShieldAlt, FaChartLine 
 } from 'react-icons/fa';
 
 const Home = () => {
   const navigate = useNavigate();
   const [isLoaded, setIsLoaded] = useState(false);
-  const [hoveredButton, setHoveredButton] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
-  // State for hidden admin button
+  // Admin Shortcut State
   const [keySequence, setKeySequence] = useState('');
   const [isAdminButtonVisible, setIsAdminButtonVisible] = useState(false);
   const SECRET_CODE = 'admin';
 
-  // ✅ State for modals
-  const [activeModal, setActiveModal] = useState(null); // 'features', 'pricing', 'contact'
+  // Modal State
+  const [activeModal, setActiveModal] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   useEffect(() => {
-    // Trigger animations after component mounts
+    // Initial Load Animation
     setTimeout(() => setIsLoaded(true), 100);
 
-    // Mouse movement for subtle parallax effect
+    // Mouse Parallax Logic
     const handleMouseMove = (e) => {
+      // Calibrate sensitivity for smoother effect
       setMousePosition({
-        x: (e.clientX - window.innerWidth / 2) / 50,
-        y: (e.clientY - window.innerHeight / 2) / 50,
+        x: (e.clientX - window.innerWidth / 2) / 40,
+        y: (e.clientY - window.innerHeight / 2) / 40,
       });
     };
     
-    // Keydown listener for the secret shortcut
+    // Secret Admin Shortcut
     const handleKeyDown = (e) => {
-      // Don't track keys if a modal is open
       if (activeModal) return;
-
       const newSequence = keySequence + e.key;
-      // Keep the sequence from getting too long and check if it ends with the code
       const trimmedSequence = newSequence.slice(-SECRET_CODE.length);
       setKeySequence(trimmedSequence);
-
-      if (trimmedSequence === SECRET_CODE) {
-        setIsAdminButtonVisible(true);
-      }
+      if (trimmedSequence === SECRET_CODE) setIsAdminButtonVisible(true);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -56,156 +49,117 @@ const Home = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  // ✅ Added activeModal to dependencies
   }, [keySequence, activeModal]);
 
-  const openLogin = () => {
-    if (auth.currentUser) {
-      navigate("/dashboard");
-    } else {
-      window.open("/login", "_blank");
-    }
-  };
+  // Navigation Handlers
+  const openLogin = () => auth.currentUser ? navigate("/dashboard") : window.open("/login", "_blank");
+  const openSignup = () => auth.currentUser ? navigate("/dashboard") : window.open("/signup", "_blank");
+  const openMasterAdmin = () => navigate("/master-admin");
 
-  const openSignup = () => {
-    if (auth.currentUser) {
-      navigate("/dashboard");
-    } else {
-      window.open("/signup", "_blank");
-    }
-  };
-
-  const openMasterAdmin = () => {
-    navigate("/master-admin");
-  };
-
-  // ✅ Functions to control modals
+  // Modal Handlers
   const openModal = (modalName) => {
     setActiveModal(modalName);
-    setTimeout(() => setIsModalVisible(true), 10); // Start animation
+    setTimeout(() => setIsModalVisible(true), 50);
   };
 
   const closeModal = () => {
     setIsModalVisible(false);
-    setTimeout(() => setActiveModal(null), 300); // Wait for animation to finish
+    setTimeout(() => setActiveModal(null), 300);
   };
 
-  // ✅ Function to render modal content
+  // --- Modal Content Renderer ---
   const renderModalContent = () => {
     switch (activeModal) {
       case 'features':
         return (
-          <>
-            <h2 style={styles.modalTitle}>Features</h2>
-            <div style={styles.featuresGrid}>
-              
-              <div style={styles.featureGroup}>
-                <h3 style={styles.featureGroupTitle}><FaStore style={{ marginRight: 8 }} /> Inventory Management</h3>
+          <div className="modal-inner">
+            <h2 className="modal-title">Powerful Features</h2>
+            <p className="modal-subtitle">Everything you need to run your business effectively.</p>
+            <div className="features-grid">
+              <div className="feature-group">
+                <h3><FaStore className="icon-blue" /> Inventory Control</h3>
                 <ul>
-                  <li style={styles.featureItem}>Add, edit, and delete items</li>
-                  <li style={styles.featureItem}>Assign unique SKUs and Categories</li>
-                  <li style={styles.featureItem}>Manage item types: Buy/Sell, Raw Materials, and Finished Products</li>
-                  <li style={styles.featureItem}>Auto-generate unique Product IDs (PID)</li>
-                  <li style={styles.featureItem}>Fast, case-insensitive item search</li>
-                  <li style={styles.featureItem}>Pagination for large item lists</li>
+                  <li>Add, edit, and categorize items effortlessly</li>
+                  <li>Auto-generate SKUs and Product IDs</li>
+                  <li>Manage Raw Materials vs. Finished Goods</li>
+                  <li>Lightning-fast item search</li>
                 </ul>
               </div>
-
-              <div style={styles.featureGroup}>
-                <h3 style={styles.featureGroupTitle}><FaUsers style={{ marginRight: 8 }} /> Customer Management</h3>
+              <div className="feature-group">
+                <h3><FaUsers className="icon-green" /> CRM Tools</h3>
                 <ul>
-                  <li style={styles.featureItem}>Full customer database (Add/Edit/Delete)</li>
-                  <li style={styles.featureItem}>Assign customers to custom Price Categories</li>
-                  <li style={styles.featureItem}>Manage Credit Customers with overdue day limits</li>
-                  <li style={styles.featureItem}>Track edits and user history</li>
+                  <li>Comprehensive Customer Database</li>
+                  <li>Custom Price Categories per client</li>
+                  <li>Credit Management & Overdue Limits</li>
+                  <li>Purchase history tracking</li>
                 </ul>
               </div>
-              
-              <div style={styles.featureGroup}>
-                <h3 style={styles.featureGroupTitle}><FaCog style={{ marginRight: 8 }} /> System & Admin</h3>
+              <div className="feature-group">
+                <h3><FaCog className="icon-purple" /> Admin & Security</h3>
                 <ul>
-                  <li style={styles.featureItem}>Role-based permissions (Admin vs. User)</li>
-                  <li style={styles.featureItem}>Secure Master Admin Panel with secret shortcut</li>
-                  <li style={styles.featureItem}>Internal user tracking for all actions</li>
+                  <li>Role-based access control (Admin/User)</li>
+                  <li>Activity Logging & Audit Trails</li>
+                  <li>Secure Master Admin shortcut</li>
                 </ul>
               </div>
-
-              <div style={styles.featureGroup}>
-                <h3 style={styles.featureGroupTitle}><FaPrint style={{ marginRight: 8 }} /> Printing & Integration</h3>
+              <div className="feature-group">
+                <h3><FaPrint className="icon-orange" /> Hardware</h3>
                 <ul>
-                  <li style={styles.featureItem}>Support for direct receipt and label printing via QZ Tray</li>
+                  <li>Seamless integration with QZ Tray</li>
+                  <li>Direct Thermal Receipt Printing</li>
+                  <li>Barcode Label generation</li>
                 </ul>
               </div>
-
             </div>
-          </>
+          </div>
         );
       case 'pricing':
         return (
-          <>
-            <h2 style={styles.modalTitle}>Choose Your Plan</h2>
-            <div style={styles.pricingGrid}>
-              <div style={styles.pricingCard}>
-                <h3 style={styles.pricingCardTitle}>Monthly</h3>
-                <div style={styles.pricingCardPrice}>
-                  <span style={styles.pricingCardCurrency}>LKR</span>
-                  1,800
-                  <span style={styles.pricingCardTerm}>/ month</span>
+          <div className="modal-inner">
+            <h2 className="modal-title">Simple, Transparent Pricing</h2>
+            <div className="pricing-grid">
+              <div className="pricing-card">
+                <h3>Monthly</h3>
+                <div className="price">
+                  <span className="currency">LKR</span>1,800<span className="term">/mo</span>
                 </div>
-                <p style={styles.pricingCardDesc}>Perfect for getting started. Pay as you go.</p>
-                <button 
-                  style={{...styles.button, ...styles.loginButton, width: '100%'}}
-                  onClick={() => openModal('contact')}
-                >
-                  Contact Us
-                </button>
+                <p>Great for startups. Cancel anytime.</p>
+                <button className="btn-outline" onClick={() => openModal('contact')}>Contact Sales</button>
               </div>
-
-              <div style={{...styles.pricingCard, ...styles.pricingCardFeatured}}>
-                <div style={styles.featuredBadge}><FaStar style={{ marginRight: 5 }} /> Best Value</div>
-                <h3 style={styles.pricingCardTitle}>Yearly</h3>
-                <div style={styles.pricingCardPrice}>
-                  <span style={styles.pricingCardCurrency}>LKR</span>
-                  19,000
-                  <span style={styles.pricingCardTerm}>/ year</span>
+              <div className="pricing-card featured">
+                <div className="badge"><FaStar /> Best Value</div>
+                <h3>Yearly</h3>
+                <div className="price">
+                  <span className="currency">LKR</span>20,000<span className="term">/yr</span>
                 </div>
-                <p style={styles.pricingCardDesc}>Save over 10% with our annual plan.</p>
-                <button 
-                  style={{...styles.button, ...styles.signupButton, width: '100%'}}
-                  onClick={() => openModal('contact')}
-                >
-                  Contact Us
-                </button>
+                <p>Save ~7% with annual billing.</p>
+                <button className="btn-primary full-width" onClick={() => openModal('contact')}>Get Started</button>
               </div>
             </div>
-          </>
+          </div>
         );
       case 'contact':
         return (
-          <>
-            <h2 style={styles.modalTitle}>Get in Touch</h2>
-            <p style={styles.contactSubtitle}>We'd love to hear from you! Reach out with any questions.</p>
-            <div style={styles.contactGroup}>
-              <div style={styles.contactItem}>
-                <FaEnvelope style={{ ...styles.contactIcon, color: '#6366f1' }} />
+          <div className="modal-inner">
+            <h2 className="modal-title">Contact Support</h2>
+            <p className="modal-subtitle">We are here to help you set up.</p>
+            <div className="contact-container">
+              <a href="mailto:sakuna.wayne.easyerp@gmail.com" className="contact-card">
+                <div className="contact-icon email"><FaEnvelope /></div>
                 <div>
-                  <h4 style={styles.contactItemTitle}>Email</h4>
-                  <a href="mailto:sakuna.wayne.easyerp@gmail.com" style={styles.contactItemLink}>
-                    sakuna.wayne.easyerp@gmail.com
-                  </a>
+                  <h4>Email Us</h4>
+                  <span>sakuna.wayne.easyerp@gmail.com</span>
                 </div>
-              </div>
-              <div style={styles.contactItem}>
-                <FaPhone style={{ ...styles.contactIcon, color: '#10b981' }} />
+              </a>
+              <a href="tel:0787223407" className="contact-card">
+                <div className="contact-icon phone"><FaPhone /></div>
                 <div>
-                  <h4 style={styles.contactItemTitle}>Phone</h4>
-                  <a href="tel:0787223407" style={styles.contactItemLink}>
-                    078 722 3407
-                  </a>
+                  <h4>Call Us</h4>
+                  <span>078 722 3407</span>
                 </div>
-              </div>
+              </a>
             </div>
-          </>
+          </div>
         );
       default:
         return null;
@@ -213,884 +167,489 @@ const Home = () => {
   };
 
   return (
-    <>
-      {/* Animated Background Elements */}
-      <div style={styles.backgroundAnimation}>
-        <div style={{
-          ...styles.floatingShape1,
-          transform: `translate(${mousePosition.x}px, ${mousePosition.y}px)`
-        }}></div>
-        <div style={{
-          ...styles.floatingShape2,
-          transform: `translate(${-mousePosition.x * 0.5}px, ${-mousePosition.y * 0.5}px)`
-        }}></div>
-        <div style={{
-          ...styles.floatingShape3,
-          transform: `translate(${mousePosition.x * 0.3}px, ${mousePosition.y * 0.3}px)`
-        }}></div>
-        <div style={styles.gridPattern}></div>
+    <div className="home-container">
+      {/* Dynamic Background */}
+      <div className="background-wrapper">
+        <div className="grid-pattern"></div>
+        <div 
+          className="blob blob-1"
+          style={{ transform: `translate(${mousePosition.x}px, ${mousePosition.y}px)` }}
+        ></div>
+        <div 
+          className="blob blob-2"
+          style={{ transform: `translate(${-mousePosition.x * 0.8}px, ${-mousePosition.y * 0.8}px)` }}
+        ></div>
+        <div 
+          className="blob blob-3"
+          style={{ transform: `translate(${mousePosition.x * 0.5}px, ${mousePosition.y * 0.5}px)` }}
+        ></div>
       </div>
 
-      {/* Header */}
-      <header style={styles.header}>
-        <div style={{
-          ...styles.headerContent,
-          transform: isLoaded ? 'translateY(0)' : 'translateY(-50px)',
-          opacity: isLoaded ? 1 : 0,
-          transition: 'all 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
-        }}>
-          <div style={styles.logo}>
-            <div style={styles.logoIcon}></div>
-            <h1 style={styles.headerTitle}>EasyPOS.lk</h1>
+      {/* Navbar */}
+      <header className={`navbar ${isLoaded ? 'loaded' : ''}`}>
+        <div className="nav-content">
+          <div className="logo-section">
+            <div className="logo-icon"></div>
+            <h1>EasyPOS<span className="highlight">.lk</span></h1>
           </div>
-          <div style={styles.headerRight}>
-            <nav style={styles.nav}>
-              {/* --- UPDATED NAV LINKS --- */}
-              <span onClick={() => openModal('features')} style={styles.navLink}>Features</span>
-              <span onClick={() => openModal('pricing')} style={styles.navLink}>Pricing</span>
-              <span onClick={() => openModal('contact')} style={styles.navLink}>Contact</span>
-              <a 
-                href="https://qz.io/download/" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                style={styles.navLink}
-              >
-                Download QZ Tray
-              </a>
-            </nav>
-          </div>
+          <nav className="nav-links">
+            <span onClick={() => openModal('features')}>Features</span>
+            <span onClick={() => openModal('pricing')}>Pricing</span>
+            <span onClick={() => openModal('contact')}>Contact</span>
+            <a href="https://qz.io/download/" target="_blank" rel="noopener noreferrer" className="nav-download">
+              QZ Tray
+            </a>
+          </nav>
         </div>
       </header>
 
       {/* Hero Section */}
-      <div style={styles.container}>
-        <div style={styles.heroContent}>
-          <div style={{
-            ...styles.titleContainer,
-            transform: isLoaded ? 'translateY(0) scale(1)' : 'translateY(50px) scale(0.95)',
-            opacity: isLoaded ? 1 : 0,
-            transition: 'all 1.2s cubic-bezier(0.4, 0, 0.2, 1) 0.2s'
-          }}>
-            <h1 style={styles.title}>
-              <span style={styles.titleLine1}>Simple ERP & POS System</span>
-              <span style={styles.titleLine2}>for Modern Business</span>
-            </h1>
-            
-            <div style={styles.titleUnderline}></div>
-          </div>
-          
-          <p style={{
-            ...styles.subtitle,
-            transform: isLoaded ? 'translateY(0)' : 'translateY(30px)',
-            opacity: isLoaded ? 1 : 0,
-            transition: 'all 1s cubic-bezier(0.4, 0, 0.2, 1) 0.6s'
-          }}>
-            Streamline your sales process with our intuitive point-of-sale solution. 
-            Manage inventory, track sales, and grow your business with confidence.
+      <main className="hero-section">
+        <div className={`hero-content ${isLoaded ? 'loaded' : ''}`}>
+          <div className="hero-badge">New Version 2.0 Available</div>
+          <h1 className="hero-title">
+            <span className="block-reveal">Smart ERP & POS</span>
+            <span className="block-reveal gradient-text">for Growing Businesses</span>
+          </h1>
+          <p className="hero-subtitle">
+            Streamline your inventory, manage customers, and track sales in real-time. 
+            The all-in-one solution designed for Sri Lankan retailers.
           </p>
           
-          <div style={{
-            ...styles.buttonGroup,
-            transform: isLoaded ? 'translateY(0)' : 'translateY(40px)',
-            opacity: isLoaded ? 1 : 0,
-            transition: 'all 1s cubic-bezier(0.4, 0, 0.2, 1) 1s'
-          }}>
-            <button 
-              style={{
-                ...styles.button,
-                ...styles.loginButton,
-                transform: hoveredButton === 'login' 
-                  ? 'translateY(-8px) scale(1.02)' 
-                  : 'translateY(0) scale(1)',
-                boxShadow: hoveredButton === 'login' 
-                  ? '0 20px 40px rgba(99, 102, 241, 0.3)' 
-                  : '0 10px 30px rgba(99, 102, 241, 0.2)'
-              }}
-              onClick={openLogin}
-              onMouseEnter={() => setHoveredButton('login')}
-              onMouseLeave={() => setHoveredButton(null)}
-            >
-              <span style={styles.buttonContent}>
-                <span style={styles.buttonText}>Login</span>
-                <div style={{
-                  ...styles.buttonArrow,
-                  transform: hoveredButton === 'login' ? 'translateX(5px)' : 'translateX(0)'
-                }}>→</div>
-              </span>
-              <div style={{
-                ...styles.buttonRipple,
-                transform: hoveredButton === 'login' ? 'scale(1)' : 'scale(0)'
-              }}></div>
+          <div className="cta-group">
+            <button className="btn-primary" onClick={openSignup}>
+              Get Started <FaArrowRight className="arrow-icon" />
             </button>
-            
-            <button 
-              style={{
-                ...styles.button,
-                ...styles.signupButton,
-                transform: hoveredButton === 'signup' 
-                  ? 'translateY(-8px) scale(1.02)' 
-                  : 'translateY(0) scale(1)',
-                boxShadow: hoveredButton === 'signup' 
-                  ? '0 20px 40px rgba(16, 185, 129, 0.3)' 
-                  : '0 10px 30px rgba(16, 185, 129, 0.2)'
-              }}
-              onClick={openSignup}
-              onMouseEnter={() => setHoveredButton('signup')}
-              onMouseLeave={() => setHoveredButton(null)}
-            >
-              <span style={styles.buttonContent}>
-                <span style={styles.buttonText}>Get Started</span>
-                <div style={{
-                  ...styles.buttonArrow,
-                  transform: hoveredButton === 'signup' ? 'translateX(5px)' : 'translateX(0)'
-                }}>→</div>
-              </span>
-              <div style={{
-                ...styles.buttonRipple,
-                transform: hoveredButton === 'signup' ? 'scale(1)' : 'scale(0)'
-              }}></div>
+            <button className="btn-secondary" onClick={openLogin}>
+              Login
             </button>
           </div>
         </div>
 
-        {/* Features Preview */}
-        <div style={{
-          ...styles.featuresPreview,
-          transform: isLoaded ? 'translateY(0)' : 'translateY(60px)',
-          opacity: isLoaded ? 1 : 0,
-          transition: 'all 1.2s cubic-bezier(0.4, 0, 0.2, 1) 1.4s'
-        }}>
-          <div style={styles.featureCard}>
-            <div style={styles.featureIconContainer}>
-              <div style={{...styles.featureIcon, ...styles.salesIcon}}></div>
-            </div>
-            <h3 style={styles.featureTitle}>Real-Time Analytics</h3>
-            <p style={styles.featureDesc}>Monitor your sales performance with live data and comprehensive reports</p>
+        {/* Feature Cards Preview */}
+        <div className={`features-preview ${isLoaded ? 'loaded' : ''}`}>
+          <div className="preview-card" onClick={() => openModal('features')}>
+            <div className="card-icon icon-blue"><FaChartLine /></div>
+            <h3>Real-Time Analytics</h3>
+            <p>Monitor performance with live data dashboards.</p>
           </div>
-          
-          <div style={styles.featureCard}>
-            <div style={styles.featureIconContainer}>
-              <div style={{...styles.featureIcon, ...styles.inventoryIcon}}></div>
-            </div>
-            <h3 style={styles.featureTitle}>Smart Inventory</h3>
-            <p style={styles.featureDesc}>Automated stock tracking with intelligent alerts and reorder suggestions</p>
+          <div className="preview-card" onClick={() => openModal('features')}>
+            <div className="card-icon icon-green"><FaBoxOpen /></div>
+            <h3>Smart Inventory</h3>
+            <p>Automated tracking and low-stock alerts.</p>
           </div>
-          
-          <div style={styles.featureCard}>
-            <div style={styles.featureIconContainer}>
-              <div style={{...styles.featureIcon, ...styles.cloudIcon}}></div>
-            </div>
-            <h3 style={styles.featureTitle}>Cloud Security</h3>
-            <p style={styles.featureDesc}>Access your data securely from anywhere with enterprise-grade protection</p>
+          <div className="preview-card" onClick={() => openModal('features')}>
+            <div className="card-icon icon-purple"><FaShieldAlt /></div>
+            <h3>Cloud Security</h3>
+            <p>Enterprise-grade encryption for your data.</p>
           </div>
         </div>
-      </div>
+      </main>
 
       {/* Footer */}
-      <footer style={styles.footer}>
-        <div style={{
-          ...styles.footerContent,
-          transform: isLoaded ? 'translateY(0)' : 'translateY(30px)',
-          opacity: isLoaded ? 1 : 0,
-          transition: 'all 1s cubic-bezier(0.4, 0, 0.2, 1) 1.8s'
-        }}>
-          <div style={styles.footerTop}>
-            <div style={styles.footerLogo}>
-              <div style={styles.footerLogoIcon}></div>
-              <span>EasyPOS.lk</span>
-            </div>
-            <p style={styles.footerTagline}>Simplifying business operations, one transaction at a time.</p>
-          </div>
-          <div style={styles.footerBottom}>
-            <p>© 2025 EasyPOS.lk | All Rights Reserved</p>
-
+      <footer className={`footer ${isLoaded ? 'loaded' : ''}`}>
+        <div className="footer-content">
+          <p>© 2025 EasyPOS.lk | Built for Performance</p>
+          <div className="footer-links">
             {isAdminButtonVisible && (
-              <button onClick={openMasterAdmin} style={styles.adminButton}>
-                Master Admin Panel
-              </button>
+              <button onClick={openMasterAdmin} className="admin-btn">Master Admin</button>
             )}
-            <p>Contact: <a href="mailto:sakuna.wayne.easyerp@gmail.com" style={styles.footerLink}>sakuna.wayne.easyerp@gmail.com</a></p>
+            <a href="mailto:sakuna.wayne.easyerp@gmail.com">Support</a>
           </div>
         </div>
       </footer>
 
-      {/* ✅ MODAL CONTAINER */}
+      {/* Modal Overlay */}
       {activeModal && (
         <div 
-          style={{...styles.modalOverlay, opacity: isModalVisible ? 1 : 0}} 
+          className={`modal-overlay ${isModalVisible ? 'visible' : ''}`} 
           onClick={closeModal}
         >
           <div 
-            style={{
-              ...styles.modalContent, 
-              opacity: isModalVisible ? 1 : 0, 
-              transform: isModalVisible ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(20px)'
-            }}
-            onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
+            className={`modal-box ${isModalVisible ? 'visible' : ''}`}
+            onClick={(e) => e.stopPropagation()}
           >
-            <button style={styles.closeButton} onClick={closeModal}>
-              <FaTimes />
-            </button>
+            <button className="modal-close" onClick={closeModal}><FaTimes /></button>
             {renderModalContent()}
           </div>
         </div>
       )}
-    </>
+
+      {/* INJECTED CSS STYLES */}
+      <style>{`
+        /* --- GLOBAL RESET & FONTS --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        :root {
+          --primary: #6366f1;
+          --primary-dark: #4f46e5;
+          --secondary: #ec4899;
+          --success: #10b981;
+          --bg-light: #f9fafb;
+          --text-main: #111827;
+          --text-muted: #6b7280;
+        }
+
+        body {
+          margin: 0;
+          font-family: 'Inter', sans-serif;
+          color: var(--text-main);
+          background: #ffffff;
+          overflow-x: hidden;
+        }
+
+        /* --- BACKGROUND ANIMATIONS --- */
+        .home-container {
+          min-height: 100vh;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .background-wrapper {
+          position: fixed;
+          top: 0; left: 0; width: 100%; height: 100%;
+          z-index: -1;
+          overflow: hidden;
+          background: #fafafa;
+        }
+
+        .grid-pattern {
+          position: absolute;
+          width: 100%; height: 100%;
+          background-image: linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+          background-size: 50px 50px;
+        }
+
+        .blob {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(80px);
+          opacity: 0.6;
+          transition: transform 0.2s ease-out;
+        }
+
+        .blob-1 {
+          top: -10%; left: -10%; width: 500px; height: 500px;
+          background: rgba(99, 102, 241, 0.3);
+          animation: float 20s infinite alternate;
+        }
+
+        .blob-2 {
+          bottom: 10%; right: -5%; width: 400px; height: 400px;
+          background: rgba(236, 72, 153, 0.2);
+          animation: float 15s infinite alternate-reverse;
+        }
+
+        .blob-3 {
+          top: 40%; left: 30%; width: 300px; height: 300px;
+          background: rgba(16, 185, 129, 0.2);
+          animation: pulse 10s infinite;
+        }
+
+        @keyframes float { 0% { transform: translate(0,0); } 100% { transform: translate(30px, 50px); } }
+        @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 0.7; } 100% { opacity: 0.4; } }
+
+        /* --- NAVBAR --- */
+        .navbar {
+          position: fixed;
+          top: 0; left: 0; right: 0;
+          padding: 20px 0;
+          background: rgba(255, 255, 255, 0.8);
+          backdrop-filter: blur(12px);
+          border-bottom: 1px solid rgba(0,0,0,0.05);
+          z-index: 1000;
+          transform: translateY(-100%);
+          transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .navbar.loaded { transform: translateY(0); }
+
+        .nav-content {
+          max-width: 1200px;
+          margin: 0 auto;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0 24px;
+        }
+
+        .logo-section { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+        .logo-icon {
+          width: 32px; height: 32px;
+          background: linear-gradient(135deg, var(--primary), #8b5cf6);
+          border-radius: 8px;
+        }
+        .logo-section h1 { font-size: 1.5rem; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
+        .highlight { color: var(--primary); }
+
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links span {
+          cursor: pointer; font-weight: 500; color: var(--text-muted);
+          transition: color 0.2s;
+        }
+        .nav-links span:hover { color: var(--primary); }
+        .nav-download {
+          color: var(--primary); font-weight: 600; text-decoration: none;
+          padding: 8px 16px; background: rgba(99, 102, 241, 0.1); border-radius: 20px;
+          transition: all 0.2s;
+        }
+        .nav-download:hover { background: var(--primary); color: white; }
+
+        /* --- HERO --- */
+        .hero-section {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 140px 20px 60px;
+          text-align: center;
+        }
+
+        .hero-content {
+          max-width: 900px;
+          opacity: 0; transform: translateY(30px);
+          transition: all 1s ease-out 0.2s;
+        }
+        .hero-content.loaded { opacity: 1; transform: translateY(0); }
+
+        .hero-badge {
+          display: inline-block;
+          padding: 6px 16px;
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 50px;
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: var(--primary);
+          margin-bottom: 24px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .hero-title {
+          font-size: 4.5rem;
+          font-weight: 800;
+          line-height: 1.1;
+          margin-bottom: 24px;
+          letter-spacing: -1px;
+        }
+        .block-reveal { display: block; }
+        .gradient-text {
+          background: linear-gradient(135deg, var(--primary) 0%, #ec4899 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+
+        .hero-subtitle {
+          font-size: 1.25rem;
+          color: var(--text-muted);
+          max-width: 600px;
+          margin: 0 auto 40px;
+          line-height: 1.6;
+        }
+
+        .cta-group { display: flex; gap: 16px; justify-content: center; }
+
+        .btn-primary, .btn-secondary {
+          padding: 14px 32px;
+          font-size: 1rem;
+          font-weight: 600;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          border: none;
+          display: flex; align-items: center; gap: 8px;
+        }
+
+        .btn-primary {
+          background: var(--text-main);
+          color: white;
+          box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+        }
+        .btn-primary:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+          background: #000;
+        }
+
+        .btn-secondary {
+          background: white;
+          color: var(--text-main);
+          border: 1px solid #e5e7eb;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        .btn-secondary:hover {
+          transform: translateY(-2px);
+          border-color: #d1d5db;
+        }
+
+        /* --- FEATURE CARDS --- */
+        .features-preview {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 30px;
+          margin-top: 80px;
+          width: 100%;
+          max-width: 1000px;
+          opacity: 0;
+          transform: translateY(40px);
+          transition: all 1s ease-out 0.6s;
+        }
+        .features-preview.loaded { opacity: 1; transform: translateY(0); }
+
+        .preview-card {
+          background: rgba(255, 255, 255, 0.7);
+          backdrop-filter: blur(10px);
+          padding: 30px;
+          border-radius: 20px;
+          border: 1px solid rgba(255,255,255,0.8);
+          box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+          transition: all 0.3s ease;
+          cursor: pointer;
+          text-align: left;
+        }
+        .preview-card:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+          background: white;
+        }
+        .preview-card h3 { font-size: 1.25rem; margin: 16px 0 8px; font-weight: 700; }
+        .preview-card p { font-size: 0.95rem; color: var(--text-muted); line-height: 1.5; margin: 0; }
+
+        .card-icon {
+          width: 48px; height: 48px;
+          border-radius: 12px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 1.2rem;
+        }
+        .icon-blue { background: rgba(99, 102, 241, 0.1); color: var(--primary); }
+        .icon-green { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .icon-purple { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+        .icon-orange { background: rgba(249, 115, 22, 0.1); color: #f97316; }
+
+        /* --- MODAL SYSTEM --- */
+        .modal-overlay {
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.4);
+          backdrop-filter: blur(5px);
+          z-index: 2000;
+          display: flex; align-items: center; justify-content: center;
+          opacity: 0; transition: opacity 0.3s ease;
+          padding: 20px;
+        }
+        .modal-overlay.visible { opacity: 1; }
+
+        .modal-box {
+          background: white;
+          width: 100%; max-width: 800px;
+          max-height: 90vh;
+          overflow-y: auto;
+          border-radius: 24px;
+          padding: 40px;
+          position: relative;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+          transform: scale(0.95) translateY(20px);
+          transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .modal-box.visible { transform: scale(1) translateY(0); }
+
+        .modal-close {
+          position: absolute; top: 20px; right: 20px;
+          width: 36px; height: 36px;
+          border-radius: 50%; border: none; background: #f3f4f6;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; color: var(--text-muted);
+          transition: 0.2s;
+        }
+        .modal-close:hover { background: #e5e7eb; color: var(--text-main); }
+
+        .modal-title { font-size: 2rem; margin: 0 0 8px; text-align: center; }
+        .modal-subtitle { text-align: center; color: var(--text-muted); margin-bottom: 40px; }
+
+        /* Features Modal */
+        .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+        .feature-group { background: #f9fafb; padding: 24px; border-radius: 16px; }
+        .feature-group h3 { display: flex; align-items: center; gap: 10px; margin-top: 0; }
+        .feature-group ul { list-style: none; padding: 0; margin: 0; color: var(--text-muted); }
+        .feature-group li { padding: 4px 0; font-size: 0.95rem; display: flex; align-items: center; }
+        .feature-group li:before { content: "•"; color: var(--primary); margin-right: 8px; }
+
+        /* Pricing Modal */
+        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
+        .pricing-card {
+          border: 1px solid #e5e7eb; border-radius: 16px; padding: 32px;
+          text-align: center; transition: 0.3s;
+        }
+        .pricing-card.featured {
+          border: 2px solid var(--primary); background: rgba(99, 102, 241, 0.02);
+          transform: scale(1.05); position: relative;
+        }
+        .badge {
+          position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+          background: var(--primary); color: white; padding: 4px 12px;
+          border-radius: 12px; font-size: 0.8rem; font-weight: 600;
+          display: flex; align-items: center; gap: 5px;
+        }
+        .price { font-size: 2.5rem; font-weight: 800; margin: 16px 0; }
+        .currency { font-size: 1rem; font-weight: 600; vertical-align: super; margin-right: 4px; }
+        .term { font-size: 1rem; color: var(--text-muted); font-weight: 400; }
+        .btn-outline {
+          width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--primary);
+          background: none; color: var(--primary); font-weight: 600; cursor: pointer;
+          margin-top: 16px; transition: 0.2s;
+        }
+        .btn-outline:hover { background: rgba(99, 102, 241, 0.1); }
+        .full-width { width: 100%; justify-content: center; margin-top: 16px; }
+
+        /* Contact Modal */
+        .contact-container { display: flex; flex-direction: column; gap: 20px; }
+        .contact-card {
+          display: flex; align-items: center; gap: 20px;
+          padding: 24px; background: #f9fafb; border-radius: 12px;
+          text-decoration: none; color: inherit; transition: 0.2s;
+          border: 1px solid transparent;
+        }
+        .contact-card:hover { border-color: var(--primary); background: white; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .contact-icon {
+          width: 48px; height: 48px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center; font-size: 1.2rem;
+        }
+        .contact-icon.email { background: #e0e7ff; color: var(--primary); }
+        .contact-icon.phone { background: #d1fae5; color: var(--success); }
+
+        /* --- FOOTER --- */
+        .footer { padding: 40px 0; border-top: 1px solid #f3f4f6; margin-top: auto; width: 100%; opacity: 0; transition: 1s; }
+        .footer.loaded { opacity: 1; }
+        .footer-content {
+          max-width: 1200px; margin: 0 auto; padding: 0 24px;
+          display: flex; justify-content: space-between; align-items: center;
+          color: var(--text-muted); font-size: 0.9rem;
+        }
+        .footer-links { display: flex; align-items: center; gap: 20px; }
+        .footer-links a { color: var(--text-muted); text-decoration: none; transition: 0.2s; }
+        .footer-links a:hover { color: var(--primary); }
+        .admin-btn {
+          padding: 6px 12px; border: 1px solid #d1d5db; background: transparent;
+          border-radius: 6px; cursor: pointer; font-size: 0.8rem; color: #4b5563;
+        }
+
+        /* --- RESPONSIVE --- */
+        @media (max-width: 768px) {
+          .hero-title { font-size: 2.5rem; }
+          .hero-subtitle { font-size: 1rem; }
+          .features-preview { grid-template-columns: 1fr; }
+          .pricing-card.featured { transform: scale(1); }
+          .nav-links span { display: none; } /* Hide text links on mobile, keep CTA if needed */
+          .nav-download { display: block; }
+          .cta-group { flex-direction: column; width: 100%; }
+          .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+          .modal-box { padding: 24px; }
+          .footer-content { flex-direction: column; gap: 16px; }
+        }
+      `}</style>
+    </div>
   );
 };
-
-const styles = {
-  // ... (All previous styles are unchanged)
-  
-  // Background Animation
-  backgroundAnimation: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    zIndex: -1,
-    overflow: 'hidden',
-  },
-  
-  gridPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    backgroundImage: `
-      linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px)
-    `,
-    backgroundSize: '60px 60px',
-    animation: 'gridFloat 20s ease-in-out infinite',
-  },
-
-  floatingShape1: {
-    position: 'absolute',
-    top: '15%',
-    left: '10%',
-    width: '200px',
-    height: '200px',
-    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.05))',
-    borderRadius: '30% 70% 70% 30% / 30% 30% 70% 70%',
-    animation: 'morphFloat 8s ease-in-out infinite',
-    transition: 'transform 0.1s ease-out',
-  },
-
-  floatingShape2: {
-    position: 'absolute',
-    top: '60%',
-    right: '15%',
-    width: '150px',
-    height: '150px',
-    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.05))',
-    borderRadius: '63% 37% 54% 46% / 55% 48% 52% 45%',
-    animation: 'morphFloat 10s ease-in-out infinite reverse',
-    transition: 'transform 0.1s ease-out',
-  },
-
-  floatingShape3: {
-    position: 'absolute',
-    bottom: '20%',
-    left: '60%',
-    width: '100px',
-    height: '100px',
-    background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(219, 39, 119, 0.05))',
-    borderRadius: '40% 60% 60% 40% / 60% 30% 70% 40%',
-    animation: 'morphFloat 12s ease-in-out infinite',
-    transition: 'transform 0.1s ease-out',
-  },
-
-  // Header
-  header: {
-    background: 'rgba(255, 255, 255, 0.95)',
-    backdropFilter: 'blur(20px)',
-    borderBottom: '1px solid rgba(0, 0, 0, 0.05)',
-    padding: '20px 0',
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-  },
-
-  headerContent: {
-    maxWidth: '1200px',
-    margin: '0 auto',
-    padding: '0 50px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  
-  headerRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '40px',
-  },
-
-  logo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-
-  logoIcon: {
-    width: '32px',
-    height: '32px',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    borderRadius: '8px',
-  },
-
-  headerTitle: {
-    fontSize: '24px',
-    fontWeight: '700',
-    color: '#1f2937',
-    margin: 0,
-  },
-
-  nav: {
-    display: 'flex',
-    gap: '40px',
-  },
-
-  navLink: {
-    color: '#6b7280',
-    fontWeight: '500',
-    fontSize: '16px',
-    textDecoration: 'none',
-    transition: 'color 0.3s ease',
-    cursor: 'pointer', // ✅ Added cursor pointer
-  },
-
-  // Main Container
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    background: 'linear-gradient(135deg, #fafafa 0%, #f9fafb 100%)',
-    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-    paddingTop: '120px',
-    paddingBottom: '80px',
-    position: 'relative',
-  },
-
-  heroContent: {
-    textAlign: 'center',
-    maxWidth: '900px',
-    padding: '0 20px',
-    marginBottom: '100px',
-  },
-
-  titleContainer: {
-    marginBottom: '30px',
-    position: 'relative',
-  },
-
-  title: {
-    fontSize: '4rem',
-    fontWeight: '800',
-    lineHeight: '1.1',
-    color: '#111827',
-    margin: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-
-  titleLine1: {
-    display: 'block',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    backgroundClip: 'text',
-    animation: 'titleGlow 3s ease-in-out infinite alternate',
-  },
-
-  titleLine2: {
-    display: 'block',
-    color: '#374151',
-  },
-
-  titleUnderline: {
-    width: '100px',
-    height: '4px',
-    background: 'linear-gradient(90deg, #6366f1, #8b5cf6)',
-    margin: '20px auto 0',
-    borderRadius: '2px',
-    animation: 'underlineExpand 2s ease-out 1.5s both',
-  },
-
-  subtitle: {
-    fontSize: '1.25rem',
-    lineHeight: '1.7',
-    color: '#6b7280',
-    fontWeight: '400',
-    maxWidth: '600px',
-    margin: '0 auto 50px',
-  },
-
-  buttonGroup: {
-    display: 'flex',
-    gap: '20px',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-  },
-
-  button: {
-    padding: '16px 32px',
-    fontSize: '16px',
-    fontWeight: '600',
-    border: 'none',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    position: 'relative',
-    overflow: 'hidden',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    minWidth: '160px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  buttonContent: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    position: 'relative',
-    zIndex: 2,
-  },
-
-  buttonText: {
-    transition: 'all 0.3s ease',
-  },
-
-  buttonArrow: {
-    fontSize: '16px',
-    transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-
-  buttonRipple: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: '100%',
-    height: '100%',
-    background: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: '50%',
-    transform: 'translate(-50%, -50%) scale(0)',
-    transition: 'transform 0.6s ease',
-    zIndex: 1,
-  },
-
-  loginButton: {
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    color: '#ffffff',
-  },
-
-  signupButton: {
-    background: 'linear-gradient(135deg, #10b981, #059669)',
-    color: '#ffffff',
-  },
-
-  featuresPreview: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '30px',
-    maxWidth: '1000px',
-    padding: '0 20px',
-    width: '100%',
-  },
-
-  featureCard: {
-    background: 'rgba(255, 255, 255, 0.8)',
-    backdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255, 255, 255, 0.3)',
-    borderRadius: '20px',
-    padding: '40px 30px',
-    textAlign: 'center',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    cursor: 'pointer',
-    position: 'relative',
-  },
-
-  featureIconContainer: {
-    width: '60px',
-    height: '60px',
-    margin: '0 auto 20px',
-    borderRadius: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-
-  featureIcon: {
-    width: '24px',
-    height: '24px',
-    borderRadius: '4px',
-    position: 'relative',
-  },
-
-  salesIcon: {
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-  },
-
-  inventoryIcon: {
-    background: 'linear-gradient(135deg, #10b981, #059669)',
-  },
-
-  cloudIcon: {
-    background: 'linear-gradient(135deg, #ec4899, #db2777)',
-  },
-
-  featureTitle: {
-    color: '#111827',
-    fontSize: '1.25rem',
-    fontWeight: '700',
-    marginBottom: '12px',
-    margin: '0 0 12px 0',
-  },
-
-  featureDesc: {
-    color: '#6b7280',
-    fontSize: '0.95rem',
-    lineHeight: '1.6',
-    margin: 0,
-  },
-
-  footer: {
-    background: 'rgba(249, 250, 251, 0.8)',
-    backdropFilter: 'blur(20px)',
-    borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-    padding: '60px 20px 40px',
-  },
-
-  footerContent: {
-    maxWidth: '1200px',
-    margin: '0 auto',
-    textAlign: 'center',
-  },
-
-  footerTop: {
-    marginBottom: '40px',
-  },
-
-  footerLogo: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '12px',
-    marginBottom: '16px',
-    fontSize: '20px',
-    fontWeight: '700',
-    color: '#111827',
-  },
-
-  footerLogoIcon: {
-    width: '24px',
-    height: '24px',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    borderRadius: '6px',
-  },
-
-  footerTagline: {
-    color: '#6b7280',
-    fontSize: '16px',
-    margin: 0,
-  },
-
-  footerBottom: {
-    paddingTop: '30px',
-    borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '20px',
-    color: '#6b7280'
-  },
-  
-  adminButton: {
-    padding: '8px 16px',
-    fontSize: '14px',
-    border: '1px solid #d1d5db',
-    borderRadius: '8px',
-    backgroundColor: '#f9fafb',
-    color: '#4b5563',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  },
-
-  footerLink: {
-    color: '#6366f1',
-    fontWeight: '500',
-    textDecoration: 'none',
-    transition: 'color 0.3s ease',
-  },
-
-  // ✅ --- NEW MODAL STYLES ---
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0, 0, 0, 0.5)',
-    backdropFilter: 'blur(8px)',
-    zIndex: 2000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px',
-    transition: 'opacity 0.3s ease',
-  },
-
-  modalContent: {
-    background: '#ffffff',
-    borderRadius: '16px',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1)',
-    padding: '40px',
-    width: '100%',
-    maxWidth: '800px', // Wider for features
-    maxHeight: '90vh',
-    overflowY: 'auto',
-    position: 'relative',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-  },
-
-  closeButton: {
-    position: 'absolute',
-    top: '20px',
-    right: '20px',
-    background: '#f3f4f6',
-    border: 'none',
-    borderRadius: '50%',
-    width: '32px',
-    height: '32px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    color: '#6b7280',
-    fontSize: '16px',
-    transition: 'all 0.2s ease',
-  },
-
-  modalTitle: {
-    fontSize: '2rem',
-    fontWeight: '700',
-    color: '#111827',
-    margin: '0 0 30px 0',
-    textAlign: 'center',
-  },
-
-  // Features Modal Styles
-  featuresGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-    gap: '24px',
-  },
-  
-  featureGroup: {
-    background: '#f9fafb',
-    borderRadius: '12px',
-    padding: '24px',
-    border: '1px solid #f3f4f6',
-  },
-
-  featureGroupTitle: {
-    fontSize: '1.25rem',
-    fontWeight: '600',
-    color: '#374151',
-    margin: '0 0 16px 0',
-    display: 'flex',
-    alignItems: 'center',
-  },
-
-  featureItem: {
-    color: '#6b7280',
-    fontSize: '1rem',
-    lineHeight: '1.6',
-    marginBottom: '10px',
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '8px',
-  },
-
-  // Pricing Modal Styles
-  pricingGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '30px',
-    marginTop: '20px',
-    alignItems: 'center',
-  },
-
-  pricingCard: {
-    background: '#ffffff',
-    borderRadius: '16px',
-    padding: '32px',
-    border: '1px solid #e5e7eb',
-    textAlign: 'center',
-    transition: 'all 0.3s ease',
-    position: 'relative',
-  },
-
-  pricingCardFeatured: {
-    border: '2px solid #6366f1',
-    transform: 'scale(1.05)',
-  },
-
-  featuredBadge: {
-    position: 'absolute',
-    top: '-15px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    color: '#fff',
-    padding: '6px 16px',
-    borderRadius: '20px',
-    fontSize: '14px',
-    fontWeight: '600',
-  },
-
-  pricingCardTitle: {
-    fontSize: '1.5rem',
-    fontWeight: '600',
-    color: '#374151',
-    margin: '0 0 16px 0',
-  },
-
-  pricingCardPrice: {
-    fontSize: '2.5rem',
-    fontWeight: '800',
-    color: '#111827',
-    margin: '0 0 16px 0',
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-  },
-
-  pricingCardCurrency: {
-    fontSize: '1.25rem',
-    fontWeight: '600',
-    color: '#6b7280',
-    marginRight: '8px',
-  },
-
-  pricingCardTerm: {
-    fontSize: '1rem',
-    fontWeight: '500',
-    color: '#6b7280',
-    marginLeft: '8px',
-  },
-
-  pricingCardDesc: {
-    fontSize: '1rem',
-    color: '#6b7280',
-    margin: '0 0 24px 0',
-  },
-
-  // Contact Modal Styles
-  contactSubtitle: {
-    textAlign: 'center',
-    color: '#6b7280',
-    fontSize: '1.1rem',
-    margin: '-20px 0 30px 0',
-  },
-  
-  contactGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '24px',
-  },
-
-  contactItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '20px',
-    background: '#f9fafb',
-    padding: '24px',
-    borderRadius: '12px',
-    border: '1px solid #f3f4f6',
-  },
-
-  contactIcon: {
-    fontSize: '24px',
-    width: '48px',
-    height: '48px',
-    padding: '12px',
-    borderRadius: '50%',
-    background: 'rgba(99, 102, 241, 0.1)',
-    flexShrink: 0,
-  },
-  
-  contactItemTitle: {
-    margin: '0 0 4px 0',
-    color: '#374151',
-    fontSize: '1.1rem',
-    fontWeight: '600',
-  },
-
-  contactItemLink: {
-    color: '#6366f1',
-    fontSize: '1.1rem',
-    fontWeight: '500',
-    textDecoration: 'none',
-  },
-};
-
-const styleSheet = document.createElement("style");
-styleSheet.innerText = `
-  @keyframes morphFloat {
-    0%, 100% { 
-      transform: translateY(0px) rotate(0deg);
-      border-radius: 63% 37% 54% 46% / 55% 48% 52% 45%;
-    }
-    25% {
-      border-radius: 40% 60% 60% 40% / 60% 30% 70% 40%;
-    }
-    50% { 
-      transform: translateY(-20px) rotate(2deg);
-      border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
-    }
-    75% {
-      border-radius: 58% 42% 75% 25% / 76% 46% 54% 24%;
-    }
-  }
-
-  @keyframes gridFloat {
-    0%, 100% { transform: translate(0, 0); }
-    50% { transform: translate(10px, -10px); }
-  }
-
-  @keyframes titleGlow {
-    0% { filter: brightness(1); }
-    100% { filter: brightness(1.1); }
-  }
-
-  @keyframes underlineExpand {
-    0% { width: 0; }
-    100% { width: 100px; }
-  }
-
-  /* ✅ Custom scrollbar for modal */
-  .modalContent::-webkit-scrollbar {
-    width: 6px;
-  }
-  .modalContent::-webkit-scrollbar-thumb {
-    background-color: #d1d5db;
-    border-radius: 3px;
-  }
-  .modalContent::-webkit-scrollbar-track {
-    background-color: #f9fafb;
-  }
-`;
-document.head.appendChild(styleSheet);
 
 export default Home;
