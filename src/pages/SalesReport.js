@@ -85,7 +85,7 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
-  // --- DELETE HANDLER (UPDATED: REVERSES SPECIFIC SALES FIELDS) ---
+  // --- DELETE HANDLER (UPDATED: REVERSES SPECIFIC SALES FIELDS AND INVOICE COUNT) ---
   const handleDelete = async (invoice) => {
       const user = auth.currentUser;
       if (!user) return;
@@ -168,10 +168,12 @@ const SalesReport = ({ internalUser }) => {
                   const currentStats = dailyStatsSnap.data();
                   const currentSales = Number(currentStats.totalSales) || 0;
                   const currentCOGS = Number(currentStats.totalCOGS) || 0;
+                  const currentInvoiceCount = Number(currentStats.invoiceCount) || 0;
                   
                   const updateData = {
                       totalSales: currentSales - amountToReverseSales,
                       totalCOGS: currentCOGS - amountToReverseCOGS,
+                      invoiceCount: Math.max(0, currentInvoiceCount - 1), // ✅ Decrement Invoice Count
                       lastUpdated: serverTimestamp()
                   };
 

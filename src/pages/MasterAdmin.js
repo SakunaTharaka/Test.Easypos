@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, query, where, doc, updateDoc, Timestamp, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { FaSearch, FaSync, FaUsers, FaBullhorn, FaToggleOn, FaToggleOff, FaTools, FaKey } from 'react-icons/fa';
+import { 
+  collection, getDocs, query, where, doc, updateDoc, Timestamp, 
+  getDoc, setDoc, serverTimestamp, limit, startAfter, orderBy, endBefore, limitToLast 
+} from 'firebase/firestore';
+import { FaSearch, FaSync, FaUsers, FaBullhorn, FaToggleOn, FaToggleOff, FaTools, FaKey, FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 
 const MasterAdmin = () => {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -14,6 +17,13 @@ const MasterAdmin = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isExtending, setIsExtending] = useState(false);
+
+  // Pagination State
+  const [lastVisible, setLastVisible] = useState(null);
+  const [firstVisible, setFirstVisible] = useState(null); // Keep track for 'Previous' button
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  const [isNextAvailable, setIsNextAvailable] = useState(true);
 
   const [announcement, setAnnouncement] = useState({ message: '', isEnabled: false });
   const [isUpdatingAnn, setIsUpdatingAnn] = useState(false);
@@ -145,6 +155,11 @@ const MasterAdmin = () => {
     setLoading(true);
     setSelectedUser(null);
     setUsers([]);
+    setPage(1);
+    setLastVisible(null);
+    setFirstVisible(null);
+    setIsNextAvailable(false); // Disable pagination for search results usually
+
     try {
       const usersRef = collection(db, 'Userinfo');
       let q;
@@ -157,7 +172,8 @@ const MasterAdmin = () => {
         const searchTerm = searchQuery.trim();
         q = query(usersRef, 
             where(searchType, '>=', searchTerm), 
-            where(searchType, '<=', searchTerm + '\uf8ff')
+            where(searchType, '<=', searchTerm + '\uf8ff'),
+            limit(PAGE_SIZE) // Limit search results too just in case
         );
         const querySnapshot = await getDocs(q);
         const foundUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -170,22 +186,95 @@ const MasterAdmin = () => {
     }
   };
 
+  // --- PAGINATION LOGIC ---
+
   const handleShowAll = async () => {
     setLoading(true);
     setSelectedUser(null);
     setUsers([]);
+    setPage(1);
     try {
       const usersRef = collection(db, 'Userinfo');
-      const querySnapshot = await getDocs(usersRef);
+      // Order by is crucial for consistent pagination
+      const q = query(usersRef, orderBy('companyName'), limit(PAGE_SIZE));
+      
+      const querySnapshot = await getDocs(q);
       const allUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      setFirstVisible(querySnapshot.docs[0]);
       setUsers(allUsers);
+      setIsNextAvailable(querySnapshot.docs.length === PAGE_SIZE);
+
     } catch (err) {
       alert(`An error occurred while fetching users: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleNextPage = async () => {
+    if (!lastVisible) return;
+    setLoading(true);
+    try {
+      const usersRef = collection(db, 'Userinfo');
+      const q = query(
+          usersRef, 
+          orderBy('companyName'), 
+          startAfter(lastVisible), 
+          limit(PAGE_SIZE)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+          const nextUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setUsers(nextUsers);
+          setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+          setFirstVisible(querySnapshot.docs[0]);
+          setPage(prev => prev + 1);
+          setIsNextAvailable(querySnapshot.docs.length === PAGE_SIZE);
+      } else {
+          setIsNextAvailable(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error fetching next page.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrevPage = async () => {
+    if (!firstVisible || page === 1) return;
+    setLoading(true);
+    try {
+      const usersRef = collection(db, 'Userinfo');
+      const q = query(
+          usersRef, 
+          orderBy('companyName'), 
+          endBefore(firstVisible), 
+          limitToLast(PAGE_SIZE)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+          const prevUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setUsers(prevUsers);
+          setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+          setFirstVisible(querySnapshot.docs[0]);
+          setPage(prev => prev - 1);
+          setIsNextAvailable(true);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error fetching previous page.");
+    } finally {
+      setLoading(false);
+    }
+  };
   
+  // --- END PAGINATION LOGIC ---
+
   const handleExtendTrial = async (days) => {
     if (!selectedUser || isExtending) return;
     setIsExtending(true);
@@ -193,32 +282,20 @@ const MasterAdmin = () => {
         const userRef = doc(db, "Userinfo", selectedUser.id);
         
         // ✅ **START: CRITICAL 100% TRUSTABLE DATE LOGIC**
-        
-        // 1. Get today's date and normalize it to the start of the day (midnight) for accurate, time-agnostic comparison.
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Set time to 00:00:00 in local timezone
-
-        // 2. Get the user's current trial end date from Firestore and normalize it as well.
+        today.setHours(0, 0, 0, 0); 
         const currentEndDate = selectedUser.trialEndDate.toDate();
-        currentEndDate.setHours(0, 0, 0, 0); // Set time to 00:00:00 in local timezone
+        currentEndDate.setHours(0, 0, 0, 0); 
 
         let baseDate;
-
-        // 3. Determine the correct base date according to your critical rules.
         if (currentEndDate > today) {
-            // SCENARIO 1: Trial is still active (ends in the future).
-            // Extend from their EXISTING end date to "top up" their time.
             baseDate = selectedUser.trialEndDate.toDate();
         } else {
-            // SCENARIO 2 & 3: Trial is expired or ends today.
-            // Extend from TODAY to give them a fresh period.
             baseDate = new Date();
         }
 
-        // 4. Calculate the new end date by adding the specified days to the determined base date.
         const newEndDate = new Date(baseDate);
         newEndDate.setDate(baseDate.getDate() + days);
-
         // ✅ **END: CRITICAL 100% TRUSTABLE DATE LOGIC**
 
         await updateDoc(userRef, {
@@ -228,11 +305,14 @@ const MasterAdmin = () => {
         const updatedDoc = await getDoc(userRef);
         setSelectedUser({ id: updatedDoc.id, ...updatedDoc.data() });
 
+        // Update the user in the local list so the table updates immediately
+        setUsers(prevUsers => prevUsers.map(u => u.id === selectedUser.id ? { ...u, trialEndDate: Timestamp.fromDate(newEndDate) } : u));
+
         alert(`Trial successfully extended to ${newEndDate.toLocaleDateString('en-LK')}!`);
     } catch (err) {
         alert(`Failed to extend trial: ${err.message}`);
     } finally {
-        setTimeout(() => setIsExtending(false), 1000); // Prevent double-clicks
+        setTimeout(() => setIsExtending(false), 1000); 
     }
   };
 
@@ -359,9 +439,18 @@ const MasterAdmin = () => {
 
       <div style={styles.resultsContainer}>
         <div style={styles.userList}>
-          <h2 style={styles.subHeader}>Search Results ({users.length})</h2>
-          {loading && <p>Searching...</p>}
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+            <h2 style={styles.subHeader}>Users ({users.length})</h2>
+            <div style={styles.paginationControls}>
+                <button onClick={handlePrevPage} disabled={page === 1 || loading} style={page === 1 || loading ? styles.pageBtnDisabled : styles.pageBtn}><FaChevronLeft /></button>
+                <span style={{fontWeight: 'bold'}}>Page {page}</span>
+                <button onClick={handleNextPage} disabled={!isNextAvailable || loading} style={!isNextAvailable || loading ? styles.pageBtnDisabled : styles.pageBtn}><FaChevronRight /></button>
+            </div>
+          </div>
+          
+          {loading && <p>Loading...</p>}
           {!loading && users.length === 0 && <p>No users found. Try the 'Show All' button to see all registered users.</p>}
+          
           <table style={styles.table}>
             <thead>
               <tr>
@@ -380,7 +469,7 @@ const MasterAdmin = () => {
                     onClick={() => setSelectedUser(user)} 
                     style={selectedUser?.id === user.id ? { ...styles.tr, ...styles.trSelected } : styles.tr}
                   >
-                    <td style={styles.td}>{user.companyName}</td>
+                    <td style={styles.td}>{user.companyName || "N/A"}</td>
                     <td style={styles.td}>{user.email}</td>
                     <td style={styles.td}>{user.phone}</td>
                     <td style={{...styles.td, color: daysLeftInfo.color, fontWeight: 'bold' }}>
@@ -448,7 +537,7 @@ const styles = {
     resultsContainer: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' },
     userList: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', overflowX: 'auto' },
     userDetails: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
-    table: { width: '100%', borderCollapse: 'collapse' },
+    table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
     th: { textAlign: 'left', padding: '12px', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' },
     td: { padding: '12px', borderBottom: '1px solid #e5e7eb' },
     tr: { cursor: 'pointer', transition: 'background-color 0.2s' },
@@ -456,7 +545,9 @@ const styles = {
     trialDate: { fontWeight: 'bold', fontSize: '1.1em', backgroundColor: '#fef3c7', padding: '12px', borderRadius: '6px', marginTop: '20px' },
     buttonGroup: { display: 'flex', gap: '12px', marginTop: '20px' },
     errorText: { color: '#ef4444', marginTop: '12px' },
+    paginationControls: { display: 'flex', alignItems: 'center', gap: '10px' },
+    pageBtn: { padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+    pageBtnDisabled: { padding: '8px 12px', border: '1px solid #eee', borderRadius: '4px', background: '#f9f9f9', color: '#ccc', cursor: 'not-allowed', display: 'flex', alignItems: 'center' },
 };
 
 export default MasterAdmin;
-

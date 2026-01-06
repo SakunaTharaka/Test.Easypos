@@ -21,7 +21,7 @@ const Items = lazy(() => import("./tabs/Items"));
 const Customers = lazy(() => import("./tabs/Customers"));
 const PriceCat = lazy(() => import("./tabs/PriceCat"));
 const Quotations = lazy(() => import("./tabs/Quotations"));
-const Costing = lazy(() => import("./tabs/Costing")); // <--- NEW IMPORT ADDED HERE
+const Costing = lazy(() => import("./tabs/Costing")); 
 const AddProduction = lazy(() => import("./tabs/AddProduction"));
 const ProductionBalance = lazy(() => import("./tabs/ProductionBalance"));
 const SalesIncome = lazy(() => import("./fintabs/SalesIncome"));
@@ -51,7 +51,8 @@ const Dashboard = () => {
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showPopup, setShowPopup] = useState(false);
-  const [activeTab, setActiveTab] = useState("Invoicing"); // Default changed to Invoicing since Dashboard might be hidden
+  // 1. CHANGED DEFAULT TO DASHBOARD
+  const [activeTab, setActiveTab] = useState("Dashboard"); 
   const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order");
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
   const [activeServiceTab, setActiveServiceTab] = useState("Services"); 
@@ -235,9 +236,8 @@ const Dashboard = () => {
     if (internalLoggedInUser?.isAdmin) return true;
 
     // If user is NOT Admin, hide these specific tabs
-    // Note: I included "Dashboard" in restricted because it wasn't in your allowed list. 
-    // If you want them to see the Dashboard charts, remove "Dashboard" from this list.
-    const restrictedTabs = ["Dashboard", "Finance", "Admin", "Settings"];
+    // 2. REMOVED "Dashboard" FROM RESTRICTED LIST SO EVERYONE CAN SEE IT
+    const restrictedTabs = ["Finance", "Admin", "Settings"];
     
     // Only return tabs that are NOT in the restricted list
     return !restrictedTabs.includes(tab);
@@ -304,7 +304,8 @@ const Dashboard = () => {
     if (!auth.currentUser && !loading) { return <p style={styles.accessDenied}>Please log in to continue.</p>; }
     
     // Safety check for direct component access
-    if ((activeTab === "Finance" || activeTab === "Admin" || activeTab === "Settings" || activeTab === "Dashboard") && !internalLoggedInUser?.isAdmin) { 
+    // 3. REMOVED "Dashboard" FROM CHECK SO IT DOESN'T REDIRECT NON-ADMINS
+    if ((activeTab === "Finance" || activeTab === "Admin" || activeTab === "Settings") && !internalLoggedInUser?.isAdmin) { 
         // Fallback to Invoicing if they somehow land on a restricted tab
         if(activeTab !== "Invoicing") setActiveTab("Invoicing");
         return null;

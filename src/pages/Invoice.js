@@ -638,7 +638,7 @@ const Invoice = ({ internalUser }) => {
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
   
-  // --- UPDATED SAVE FUNCTION WITH ORDER NUMBER LOGIC ---
+  // --- UPDATED SAVE FUNCTION WITH ORDER NUMBER & DAILY INVOICE COUNT ---
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
@@ -685,6 +685,8 @@ const Invoice = ({ internalUser }) => {
         const currentDailyCOGS = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalCOGS) || 0) : 0;
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
         const currentMethodSales = (dailyStatsSnap.exists() && salesMethodField) ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
+        // ✅ Read current invoice count for the day
+        const currentInvoiceCount = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().invoiceCount) || 0) : 0;
 
         // 3. Read Counter (Invoice & Daily Order)
         const cDoc = await t.get(counterRef);
@@ -712,6 +714,7 @@ const Invoice = ({ internalUser }) => {
         const statsUpdate = {
             totalCOGS: newDailyCOGS,
             totalSales: newDailySales,
+            invoiceCount: currentInvoiceCount + 1, // ✅ Increment daily invoice count
             date: dailyDateString,
             lastUpdated: serverTimestamp()
         };

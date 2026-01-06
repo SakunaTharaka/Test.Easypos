@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
-// 庁 Removed onSnapshot, it's no longer used
 import { collection, query, where, getDocs, Timestamp, doc, getDoc } from "firebase/firestore";
-import { FaDollarSign, FaUserPlus, FaFileInvoice, FaExclamationTriangle, FaUserClock, FaRegTimesCircle } from "react-icons/fa";
+import { FaDollarSign, FaUserPlus, FaFileInvoice, FaExclamationTriangle } from "react-icons/fa";
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler
@@ -21,8 +20,44 @@ const DashboardView = ({ internalUser }) => {
   const [loading, setLoading] = useState(true);
   const [globalAnnouncement, setGlobalAnnouncement] = useState(null);
   const [salesChartData, setSalesChartData] = useState({ labels: [], datasets: [] });
-  const [overdueCustomers, setOverdueCustomers] = useState([]);
+  
+  // Time and Greeting State
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [greeting, setGreeting] = useState("");
+  const [subGreeting, setSubGreeting] = useState("");
 
+  // Helper: Get Sri Lanka Date String for Doc ID
+  const getSriLankaDate = () => {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+  };
+
+  // 1. Clock & Greeting Effect
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+
+    const hour = new Date().getHours();
+    const user = internalUser?.username || "Admin";
+    let mainGreet = "Hello";
+    
+    if (hour < 12) mainGreet = "Good Morning";
+    else if (hour < 17) mainGreet = "Good Afternoon";
+    else mainGreet = "Good Evening";
+
+    setGreeting(`${mainGreet}, ${user}!`);
+
+    const phrases = [
+      "Ready to make today count?",
+      "Here's what's happening today.",
+      "Hope you're having a productive day!",
+      "Let's get some work done.",
+      "Your business overview is ready."
+    ];
+    setSubGreeting(phrases[Math.floor(Math.random() * phrases.length)]);
+
+    return () => clearInterval(timer);
+  }, [internalUser]);
+
+  // 2. Data Fetching Effect
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) {
@@ -35,43 +70,51 @@ const DashboardView = ({ internalUser }) => {
       try {
         const uid = user.uid;
         
-        // --- Concurrently fetch all dashboard data ---
+        // --- A. Fetch Today's Stats from daily_stats (Optimized) ---
+        const todayDateStr = getSriLankaDate();
+        const dailyStatsRef = doc(db, uid, "daily_stats", "entries", todayDateStr);
+        
+        // --- B. Fetch New Customers (Today) ---
         const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
         const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-        const todayInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(todayStart)), where("createdAt", "<=", Timestamp.fromDate(todayEnd)));
         const todayCustomersQuery = query(collection(db, uid, "customers", "customer_list"), where("createdAt", ">=", Timestamp.fromDate(todayStart)), where("createdAt", "<=", Timestamp.fromDate(todayEnd)));
+
+        // --- C. Fetch Settings & Announcements ---
         const settingsRef = doc(db, uid, "settings");
-        
-        // 庁 FIX: Replaced onSnapshot with getDoc for announcement
         const announcementRef = doc(db, 'global_settings', 'announcement');
 
-        const [invoicesSnap, customersSnap, settingsSnap, announcementSnap] = await Promise.all([
-            getDocs(todayInvoicesQuery),
+        // Execute Critical Reads
+        const [dailyStatsSnap, customersSnap, settingsSnap, announcementSnap] = await Promise.all([
+            getDoc(dailyStatsRef),
             getDocs(todayCustomersQuery),
             getDoc(settingsRef),
-            getDoc(announcementRef) // 庁 Fetch announcement once
+            getDoc(announcementRef)
         ]);
         
-        // ... (KPI calculation logic remains the same) ...
+        // 1. Process Key Stats
         let totalSales = 0;
-        let actualInvoiceCount = 0;
-        invoicesSnap.forEach(doc => {
-            const invoiceData = doc.data();
-            totalSales += invoiceData.total || 0;
-            if (invoiceData.paymentMethod !== 'Credit-Repayment') {
-                actualInvoiceCount++;
-            }
-        });
-        setStats({ totalSales, invoicesToday: actualInvoiceCount, newCustomers: customersSnap.size });
+        let invoicesToday = 0;
 
-        // 庁 FIX: Set announcement state from getDoc result
+        if (dailyStatsSnap.exists()) {
+            const data = dailyStatsSnap.data();
+            totalSales = data.totalSales || 0;
+            invoicesToday = data.invoiceCount || 0; // ✅ Fetching count directly from doc
+        }
+
+        setStats({ 
+            totalSales, 
+            invoicesToday, 
+            newCustomers: customersSnap.size 
+        });
+
+        // 2. Process Announcement
         if (announcementSnap.exists() && announcementSnap.data().isEnabled) {
             setGlobalAnnouncement(announcementSnap.data());
         } else {
             setGlobalAnnouncement(null);
         }
 
-        // ... (Low stock item logic remains the same) ...
+        // 3. Low Stock Logic
         if (settingsSnap.exists()) {
             const threshold = settingsSnap.data().stockReminder;
             const stockReminderThreshold = threshold === "Do not remind" ? null : parseInt(threshold);
@@ -87,30 +130,19 @@ const DashboardView = ({ internalUser }) => {
                 if (lowItems.length > 0) {
                     setLowStockItems(lowItems);
                     const isAlertDismissed = sessionStorage.getItem('lowStockAlertDismissed') === 'true';
-                    if (!isAlertDismissed) {
-                        setShowLowStockAlert(true);
-                    }
+                    if (!isAlertDismissed) setShowLowStockAlert(true);
                 }
             }
         }
         
-        // ... (Sales Chart logic remains the same) ...
+        // 4. Chart Logic (Last 7 Days)
+        // Note: Kept as invoice query for historical accuracy if daily_stats wasn't populated before.
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 6);
         weekAgo.setHours(0, 0, 0, 0);
 
-        const creditCustomersQuery = query(collection(db, uid, "customers", "customer_list"), where("isCreditCustomer", "==", true));
         const weeklyInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(weekAgo)));
-        
-        const [creditCustomersSnap, weeklyInvoicesSnap] = await Promise.all([
-            getDocs(creditCustomersQuery),
-            getDocs(weeklyInvoicesQuery)
-        ]);
-        const creditCustomerIds = new Set(creditCustomersSnap.docs.map(doc => doc.id));
-
-        const validWeeklyInvoices = weeklyInvoicesSnap.docs
-            .map(d => d.data())
-            .filter(inv => inv.paymentMethod !== 'Credit' || creditCustomerIds.has(inv.customerId) === false);
+        const weeklyInvoicesSnap = await getDocs(weeklyInvoicesQuery);
         
         const dailySales = {};
         for (let i = 0; i < 7; i++) {
@@ -119,10 +151,14 @@ const DashboardView = ({ internalUser }) => {
             const dateString = date.toISOString().split('T')[0];
             dailySales[dateString] = 0;
         }
-        validWeeklyInvoices.forEach(inv => {
-            const dateString = inv.createdAt.toDate().toISOString().split('T')[0];
-            if (dailySales[dateString] !== undefined) {
-                dailySales[dateString] += inv.total;
+
+        weeklyInvoicesSnap.forEach(doc => {
+            const inv = doc.data();
+            if (inv.createdAt) {
+                const dateString = inv.createdAt.toDate().toISOString().split('T')[0];
+                if (dailySales[dateString] !== undefined) {
+                    dailySales[dateString] += inv.total;
+                }
             }
         });
         
@@ -134,69 +170,15 @@ const DashboardView = ({ internalUser }) => {
             datasets: [{ 
                 label: 'Sales', 
                 data: dataPoints, 
-                borderColor: '#3498db', 
-                backgroundColor: 'rgba(52, 152, 219, 0.1)', 
+                borderColor: '#6366f1', // Indigo
+                backgroundColor: 'rgba(99, 102, 241, 0.1)', 
                 fill: true, 
-                tension: 0.2 
+                tension: 0.3,
+                pointBackgroundColor: '#fff',
+                pointBorderColor: '#6366f1',
+                pointRadius: 4
             }]
         });
-
-        // ... (Overdue Customers logic) ...
-        const creditCustomers = creditCustomersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (creditCustomers.length > 0 && creditCustomers.map(c=>c.id).length > 0) {
-            
-            // 庁 FIX: Added date filter to optimize the invoice query
-            const lookbackDate = new Date();
-            lookbackDate.setDate(lookbackDate.getDate() - 180); // Look back 180 days
-            lookbackDate.setHours(0, 0, 0, 0);
-
-            const creditInvoicesQuery = query(
-                collection(db, uid, "invoices", "invoice_list"), 
-                where("customerId", "in", creditCustomers.map(c=>c.id)), 
-                where("paymentMethod", "==", "Credit"),
-                where("createdAt", ">=", Timestamp.fromDate(lookbackDate)) // 庁 This filter reduces reads
-            );
-            
-            // This query still fetches all payments, which is necessary for accurate balance
-            // unless the data model is changed to store `balance` on the invoice.
-            const creditPaymentsQuery = query(collection(db, uid, "credit_payments", "payments"));
-
-            const [creditInvoicesSnap, creditPaymentsSnap] = await Promise.all([
-                getDocs(creditInvoicesQuery),
-                getDocs(creditPaymentsQuery)
-            ]);
-
-            const paymentsByInvoice = {};
-            creditPaymentsSnap.docs.forEach(doc => {
-                const payment = doc.data();
-                if (!paymentsByInvoice[payment.invoiceId]) paymentsByInvoice[payment.invoiceId] = 0;
-                paymentsByInvoice[payment.invoiceId] += payment.amount;
-            });
-            
-            const overdue = {};
-            const today = new Date();
-            today.setHours(0,0,0,0);
-
-            creditInvoicesSnap.docs.forEach(doc => {
-                const invoice = { id: doc.id, ...doc.data() };
-                const totalPaid = paymentsByInvoice[invoice.id] || 0;
-                const balance = invoice.total - totalPaid;
-
-                if (balance > 0) {
-                    const customer = creditCustomers.find(c => c.id === invoice.customerId);
-                    const overdueDays = customer?.overdueDays || 30;
-                    const invoiceDate = invoice.createdAt.toDate();
-                    const dueDate = new Date(invoiceDate);
-                    dueDate.setDate(invoiceDate.getDate() + overdueDays);
-                    
-                    if (dueDate < today) {
-                        if (!overdue[invoice.customerName]) overdue[invoice.customerName] = 0;
-                        overdue[invoice.customerName] += balance;
-                    }
-                }
-            });
-            setOverdueCustomers(Object.entries(overdue).map(([name, amount]) => ({ name, amount })));
-        }
 
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -206,14 +188,15 @@ const DashboardView = ({ internalUser }) => {
     };
 
     fetchData();
-
-    // 庁 FIX: Removed the onSnapshot listener and the unsubscribe return
-  }, []); // Empty dependency array means this runs once on mount
+  }, []); 
 
   const handleDismissLowStockAlert = () => {
     setShowLowStockAlert(false);
     sessionStorage.setItem('lowStockAlertDismissed', 'true');
   };
+
+  const formattedDate = currentTime.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const formattedTime = currentTime.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
   if (loading) return (
     <div style={styles.loadingContainer}>
@@ -243,61 +226,75 @@ const DashboardView = ({ internalUser }) => {
             <p style={styles.lowStockAlertText}>
                 The following {lowStockItems.length} item(s) are running low: <strong>{lowStockItems.map(i => i.item).join(', ')}</strong>.
             </p>
-            <button onClick={handleDismissLowStockAlert} style={styles.dismissButton}>
-                <FaRegTimesCircle />
-            </button>
+            <button onClick={handleDismissLowStockAlert} style={styles.dismissButton}>✕</button>
         </div>
       )}
 
+      {/* --- NEW HEADER SECTION --- */}
       <div style={styles.header}>
-        <h1 style={styles.title}>Hi, {internalUser?.username || "Admin"}!</h1>
-        <p style={styles.subtitle}>Welcome back, here's a look at your business today.</p>
+        <div style={styles.headerContent}>
+            <div>
+                <h1 style={styles.title}>{greeting}</h1>
+                <p style={styles.subtitle}>{subGreeting}</p>
+            </div>
+            <div style={styles.timeContainer}>
+                <div style={styles.timeText}>{formattedTime}</div>
+                <div style={styles.dateText}>{formattedDate}</div>
+            </div>
+        </div>
       </div>
       
+      {/* --- KPI CARDS --- */}
       <div style={styles.cardsContainer}>
         <div style={styles.card}>
-          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #68d391, #2f855a)'}}>
-            <FaDollarSign size={24} />
+          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #10b981, #059669)'}}>
+            <FaDollarSign size={22} color="white" />
           </div>
-          <p style={styles.cardLabel}>Total Sales (Today)</p>
-          <p style={styles.cardValue}>Rs. {stats.totalSales.toFixed(2)}</p>
+          <div style={styles.cardContent}>
+            <p style={styles.cardLabel}>Total Sales (Today)</p>
+            <p style={styles.cardValue}>Rs. {stats.totalSales.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
         </div>
         <div style={styles.card}>
-          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #63b3ed, #3182ce)'}}>
-            <FaUserPlus size={24} />
+          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #3b82f6, #2563eb)'}}>
+            <FaUserPlus size={22} color="white" />
           </div>
-          <p style={styles.cardLabel}>New Customers</p>
-          <p style={styles.cardValue}>{stats.newCustomers}</p>
+          <div style={styles.cardContent}>
+            <p style={styles.cardLabel}>New Customers</p>
+            <p style={styles.cardValue}>{stats.newCustomers}</p>
+          </div>
         </div>
         <div style={styles.card}>
-          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #f6ad55, #dd6b20)'}}>
-            <FaFileInvoice size={24} />
+          <div style={{...styles.iconWrapper, background: 'linear-gradient(135deg, #f59e0b, #d97706)'}}>
+            <FaFileInvoice size={22} color="white" />
           </div>
-          <p style={styles.cardLabel}>Invoices Today</p>
-          <p style={styles.cardValue}>{stats.invoicesToday}</p>
+          <div style={styles.cardContent}>
+             <p style={styles.cardLabel}>Invoices Today</p>
+             <p style={styles.cardValue}>{stats.invoicesToday}</p>
+          </div>
         </div>
       </div>
 
+      {/* --- CHART SECTION --- */}
       <div style={styles.mainContent}>
-        <div style={styles.activitySection}>
-          <h3 style={styles.sectionTitle}><FaUserClock style={{marginRight: '8px'}}/> Overdue Customers</h3>
-          {overdueCustomers.length > 0 ? (
-            <ul style={styles.overdueList}>
-              {overdueCustomers.map((cust, index) => (
-                <li key={index} style={styles.overdueListItem}>
-                  <span>{cust.name}</span>
-                  <span style={styles.overdueAmount}>Rs. {cust.amount.toFixed(2)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p style={styles.chartPlaceholder}>No overdue credit customers.</p>
-          )}
-        </div>
         <div style={styles.chartSection}>
-          <h3 style={styles.sectionTitle}>Sales This Week</h3>
+          <div style={styles.chartHeader}>
+             <h3 style={styles.sectionTitle}>Sales Performance</h3>
+             <span style={styles.chartSubtitle}>Last 7 Days</span>
+          </div>
           <div style={styles.chartWrapper}>
-            <Line options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }}}} data={salesChartData} />
+            <Line 
+                options={{ 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 } } },
+                        x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                    }
+                }} 
+                data={salesChartData} 
+            />
           </div>
         </div>
       </div>
@@ -305,66 +302,56 @@ const DashboardView = ({ internalUser }) => {
   );
 };
 
-// ... (Styles remain unchanged)
 const styles = {
-  container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
-  loadingContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '400px', flexDirection: 'column', gap: '20px' },
+  container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f9fafb', minHeight: '100vh' },
+  loadingContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh', flexDirection: 'column', gap: '20px' },
   loadingSpinner: { border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '50px', height: '50px', animation: 'spin 1s linear infinite' },
-  criticalAlert: { backgroundColor: '#fff1f2', border: '1px solid #ffccc7', color: '#a8071a', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 4px 12px rgba(168,7,26,0.1)' },
+  
+  // Alerts
+  criticalAlert: { backgroundColor: '#fff1f2', border: '1px solid #ffccc7', color: '#a8071a', borderRadius: '12px', padding: '20px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(168,7,26,0.05)' },
   criticalAlertHeader: { display: 'flex', alignItems: 'center', gap: '12px' },
   criticalAlertTitle: { margin: 0, fontSize: '18px', fontWeight: '600' },
   criticalAlertText: { margin: '8px 0 0 0', fontSize: '15px', lineHeight: '1.5' },
-  lowStockAlert: {
-    position: 'relative',
-    backgroundColor: '#fffbe6',
-    border: '1px solid #ffe58f',
-    color: '#d46b08',
-    borderRadius: '12px',
-    padding: '16px 20px',
-    marginBottom: '24px',
-    boxShadow: '0 4px 12px rgba(212,107,8,0.1)',
-  },
+  lowStockAlert: { position: 'relative', backgroundColor: '#fffbe6', border: '1px solid #ffe58f', color: '#d46b08', borderRadius: '12px', padding: '16px 20px', marginBottom: '24px', boxShadow: '0 2px 8px rgba(212,107,8,0.05)' },
   lowStockAlertHeader: { display: 'flex', alignItems: 'center', gap: '12px' },
   lowStockAlertTitle: { margin: 0, fontSize: '16px', fontWeight: '600' },
   lowStockAlertText: { margin: '8px 0 0 0', fontSize: '14px', lineHeight: '1.5', paddingRight: '30px' },
-  dismissButton: {
-    position: 'absolute',
-    top: '12px',
-    right: '12px',
-    background: 'transparent',
-    border: 'none',
-    color: '#d46b08',
-    cursor: 'pointer',
-    fontSize: '20px',
-    opacity: 0.7,
-  },
-  header: { marginBottom: '24px' },
-  title: { fontSize: '32px', fontWeight: 'bold', color: '#111827', margin: 0 },
-  subtitle: { fontSize: '16px', color: '#6b7280', marginTop: '4px' },
-  cardsContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '24px', marginBottom: '24px' },
-  card: { backgroundColor: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', gap: '8px', transition: 'transform 0.2s, box-shadow 0.2s' },
-  iconWrapper: { width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px', color: '#fff' },
-  cardLabel: { fontSize: '14px', color: '#6b7280', margin: 0 },
-  cardValue: { fontSize: '28px', fontWeight: 'bold', color: '#111827', margin: 0 },
-  mainContent: { display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '24px', alignItems: 'flex-start' },
-  activitySection: { backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
-  sectionTitle: { fontSize: '18px', fontWeight: '600', padding: '20px 24px', margin: 0, borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center' },
-  chartSection: { backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
-  chartPlaceholder: { height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontStyle: 'italic', padding: '24px' },
-  chartWrapper: { position: 'relative', height: '300px', padding: '20px' },
-  overdueList: { listStyle: 'none', margin: 0, padding: '10px 24px 24px 24px' },
-  overdueListItem: { display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f0f0f0' },
-  overdueAmount: { fontWeight: 'bold', color: '#e74c3c' },
+  dismissButton: { position: 'absolute', top: '12px', right: '12px', background: 'transparent', border: 'none', color: '#d46b08', cursor: 'pointer', fontSize: '16px', opacity: 0.7 },
+
+  // Header & Time
+  header: { marginBottom: '32px', backgroundColor: 'white', padding: '24px', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' },
+  headerContent: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' },
+  title: { fontSize: '28px', fontWeight: '800', color: '#111827', margin: 0, letterSpacing: '-0.5px' },
+  subtitle: { fontSize: '15px', color: '#6b7280', marginTop: '6px' },
+  timeContainer: { textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' },
+  timeText: { fontSize: '32px', fontWeight: '800', color: '#3730a3', lineHeight: '1' },
+  dateText: { fontSize: '14px', fontWeight: '600', color: '#6b7280', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+
+  // Cards
+  cardsContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', marginBottom: '24px' },
+  card: { backgroundColor: '#fff', padding: '24px', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: '20px', transition: 'transform 0.2s', border: '1px solid #f3f4f6' },
+  iconWrapper: { width: '56px', height: '56px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
+  cardContent: { display: 'flex', flexDirection: 'column' },
+  cardLabel: { fontSize: '13px', fontWeight: '600', color: '#6b7280', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' },
+  cardValue: { fontSize: '26px', fontWeight: '800', color: '#111827', margin: '4px 0 0 0' },
+
+  // Chart
+  mainContent: { display: 'flex', flexDirection: 'column', gap: '24px' },
+  chartSection: { backgroundColor: '#fff', borderRadius: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', padding: '24px', border: '1px solid #f3f4f6' },
+  chartHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+  sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1f2937', margin: 0 },
+  chartSubtitle: { fontSize: '12px', fontWeight: '600', color: '#9ca3af', backgroundColor: '#f3f4f6', padding: '4px 8px', borderRadius: '6px' },
+  chartWrapper: { position: 'relative', height: '350px', width: '100%' },
 };
 
+// Add styles for animations
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
-  .card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.07); }
-  .pulse-icon { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+  .pulse-icon { animation: pulse 2s infinite; }
 `;
 document.head.appendChild(styleSheet);
-
 
 export default DashboardView;
