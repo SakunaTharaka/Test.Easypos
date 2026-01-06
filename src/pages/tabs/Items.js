@@ -16,6 +16,7 @@ import {
   startAfter,
   where,
   writeBatch,
+  increment, // Imported increment
 } from "firebase/firestore";
 import {
   AiOutlinePlus,
@@ -35,8 +36,11 @@ const Items = ({ internalUser }) => {
   const [inventoryType, setInventoryType] = useState(null); 
   
   const [isSaving, setIsSaving] = useState(false);
-  // ✅ NEW: State for the buffering screen during sync
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // ✅ NEW: State for Total Items Count
+  const [totalItems, setTotalItems] = useState(0);
+  const MAX_ITEMS = 1000;
 
   // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,6 +62,24 @@ const Items = ({ internalUser }) => {
     const cur = getCurrentInternal();
     return cur?.isAdmin === true || cur?.isAdmin === "1";
   })();
+
+  // ✅ NEW: Fetch Total Item Count on Load
+  useEffect(() => {
+    const fetchCount = async () => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        try {
+            const counterRef = doc(db, uid, "counters");
+            const snap = await getDoc(counterRef);
+            if (snap.exists()) {
+                setTotalItems(snap.data().totalItems || 0);
+            }
+        } catch (error) {
+            console.error("Error fetching item count:", error);
+        }
+    };
+    fetchCount();
+  }, []);
 
   const fetchItems = async () => {
       setLoading(true);
@@ -165,16 +187,37 @@ const Items = ({ internalUser }) => {
     setForm((prev) => ({ ...prev, type: selectedType, brand: selectedType === "ourProduct" ? "" : prev.brand }));
   };
   
+  // ✅ UPDATED: getNextPID now checks limit and increments total count
   const getNextPID = async (uid) => {
     const counterRef = doc(db, uid, "counters");
     try {
       return await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
-        const nextPID = (counterDoc.data()?.lastItemID || 0) + 1;
-        transaction.set(counterRef, { lastItemID: nextPID }, { merge: true });
+        
+        // Check current count
+        const currentData = counterDoc.data() || {};
+        const currentCount = currentData.totalItems || 0;
+
+        if (currentCount >= MAX_ITEMS) {
+            throw new Error("MAX_LIMIT_REACHED");
+        }
+
+        const nextPID = (currentData.lastItemID || 0) + 1;
+        
+        // Increment totalItems and set new PID
+        transaction.set(counterRef, { 
+            lastItemID: nextPID,
+            totalItems: currentCount + 1 
+        }, { merge: true });
+
         return String(nextPID).padStart(6, "0");
       });
     } catch (err) {
+      if (err.message === "MAX_LIMIT_REACHED") {
+          alert(`You have reached the maximum limit of ${MAX_ITEMS} items.`);
+          return "LIMIT_REACHED";
+      }
+      console.error(err);
       alert("Could not generate a new Product ID. Please try again.");
       return null;
     }
@@ -192,6 +235,7 @@ const Items = ({ internalUser }) => {
       return;
     }
 
+    // SKU Uniqueness Check
     const skuToCheck = form.sku?.trim();
     if (skuToCheck) {
       try {
@@ -240,18 +284,14 @@ const Items = ({ internalUser }) => {
       };
 
       if (editingItem) {
-        // ✅ START SYNC: Show Buffering Screen
+        // Edit logic (No count change)
         setIsSyncing(true);
 
         const itemDocRef = doc(itemsColRef, editingItem.id);
-        
-        // 1. Update the main item
         await updateDoc(itemDocRef, dataToSave);
         
-        // 2. Sync changes to "priced_items" collection
         try {
             const pricedItemsRef = collection(db, uid, "price_categories", "priced_items");
-            // Find all entries in price lists that match this Item ID
             const q = query(pricedItemsRef, where("itemId", "==", editingItem.id));
             const querySnapshot = await getDocs(q);
 
@@ -263,7 +303,6 @@ const Items = ({ internalUser }) => {
                         itemSKU: form.sku || "",
                         itemBrand: form.brand.trim(),
                         itemType: form.type,
-                        // If you are storing 'sku' separately as requested previously:
                         sku: form.sku || "" 
                     });
                 });
@@ -272,7 +311,6 @@ const Items = ({ internalUser }) => {
             }
         } catch (syncError) {
             console.error("Error syncing to price categories:", syncError);
-            alert("Item saved, but failed to update price categories: " + syncError.message);
         }
 
         setItems(prevItems => prevItems.map(item => 
@@ -280,15 +318,26 @@ const Items = ({ internalUser }) => {
         ));
 
       } else {
+        // Add logic (Checks Limit & Increments Count)
         const pid = await getNextPID(uid);
+        
+        if (pid === "LIMIT_REACHED") {
+            setIsSaving(false);
+            setIsSyncing(false);
+            return;
+        }
         if (pid === null) {
           setIsSaving(false);
           setIsSyncing(false);
           return;
         }
+
         const newData = { ...dataToSave, addedBy: username, createdAt: serverTimestamp(), pid };
         const docRef = await addDoc(itemsColRef, newData);
         setItems(prevItems => [{ id: docRef.id, ...newData, createdAt: new Date() }, ...prevItems]);
+        
+        // Update local count state
+        setTotalItems(prev => prev + 1);
       }
 
       setForm({ name: "", brand: "", sku: "", type: "", category: "" });
@@ -298,17 +347,27 @@ const Items = ({ internalUser }) => {
       alert("Error saving item: " + error.message);
     } finally {
       setIsSaving(false);
-      // ✅ END SYNC: Hide Buffering Screen
       setIsSyncing(false); 
     }
   };
 
+  // ✅ UPDATED: handleDelete Decrements Count
   const handleDelete = async (id) => {
     if (!isAdmin || !window.confirm("Are you sure?")) return;
     const uid = auth.currentUser.uid;
     try {
       await deleteDoc(doc(db, uid, "items", "item_list", id));
+      
+      // Update Counter in DB
+      const counterRef = doc(db, uid, "counters");
+      await updateDoc(counterRef, {
+        totalItems: increment(-1)
+      });
+
+      // Update Local State
       setItems(prevItems => prevItems.filter(item => item.id !== id));
+      setTotalItems(prev => Math.max(0, prev - 1));
+
     } catch (error) {
       alert("Error deleting item: " + error.message);
     }
@@ -335,6 +394,10 @@ const Items = ({ internalUser }) => {
   const itemTypeOptions = getItemTypeOptions();
 
   const handleAddItemClick = () => {
+    if (totalItems >= MAX_ITEMS) {
+        return alert(`Maximum limit of ${MAX_ITEMS} items reached. Please delete some items to add new ones.`);
+    }
+
     let defaultType = "";
     if (inventoryType === "Buy and Sell only") {
       defaultType = "buySell";
@@ -349,7 +412,6 @@ const Items = ({ internalUser }) => {
   return (
     <div style={{ padding: "24px", fontFamily: "'Segoe UI', sans-serif" }}>
       
-      {/* ✅ BUFFERING SCREEN OVERLAY */}
       {isSyncing && (
         <div style={{
             position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
@@ -373,9 +435,24 @@ const Items = ({ internalUser }) => {
         </div>
       )}
 
-      <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333" }}>Items Management</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333", margin: 0 }}>Items Management</h2>
+          
+          {/* ✅ VISUAL COUNTER */}
+          <div style={{ 
+              backgroundColor: totalItems >= MAX_ITEMS ? '#fadbd8' : '#e8f6f3',
+              color: totalItems >= MAX_ITEMS ? '#c0392b' : '#27ae60',
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontWeight: '600',
+              fontSize: '14px',
+              border: totalItems >= MAX_ITEMS ? '1px solid #e74c3c' : '1px solid #2ecc71'
+          }}>
+              Total Items: {totalItems} / {MAX_ITEMS}
+          </div>
+      </div>
 
-      <div style={{ margin: "20px 0", display: "flex", gap: "12px", alignItems: "center" }}>
+      <div style={{ marginBottom: "20px", display: "flex", gap: "12px", alignItems: "center" }}>
         <div style={{ flex: 1, position: "relative" }}>
           <AiOutlineSearch style={{ position: "absolute", top: "10px", left: "10px", color: "#888" }} />
           <input
@@ -395,20 +472,22 @@ const Items = ({ internalUser }) => {
         </div>
         <button
           onClick={handleAddItemClick}
+          disabled={totalItems >= MAX_ITEMS}
           style={{ 
               display: "flex", 
               alignItems: "center", 
               gap: "6px", 
               padding: "8px 16px", 
-              background: "#3498db", 
+              background: totalItems >= MAX_ITEMS ? "#95a5a6" : "#3498db", 
               color: "white", 
               border: "none", 
               borderRadius: "6px", 
-              cursor: "pointer", 
+              cursor: totalItems >= MAX_ITEMS ? "not-allowed" : "pointer", 
               fontSize: '14px',
               whiteSpace: 'nowrap',
               flexShrink: 0
             }}
+            title={totalItems >= MAX_ITEMS ? "Item limit reached" : "Add New Item"}
         >
           <AiOutlinePlus /> Add Item
         </button>

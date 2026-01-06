@@ -27,8 +27,8 @@ const DashboardView = ({ internalUser }) => {
   const [subGreeting, setSubGreeting] = useState("");
 
   // Helper: Get Sri Lanka Date String for Doc ID
-  const getSriLankaDate = () => {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+  const getSriLankaDate = (dateObj = new Date()) => {
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
   };
 
   // 1. Clock & Greeting Effect
@@ -98,7 +98,8 @@ const DashboardView = ({ internalUser }) => {
         if (dailyStatsSnap.exists()) {
             const data = dailyStatsSnap.data();
             totalSales = data.totalSales || 0;
-            invoicesToday = data.invoiceCount || 0; // ✅ Fetching count directly from doc
+            // ✅ FIX: Reading count directly from daily_stats (matches Invoice.js logic)
+            invoicesToday = data.invoiceCount || 0; 
         }
 
         setStats({ 
@@ -135,41 +136,40 @@ const DashboardView = ({ internalUser }) => {
             }
         }
         
-        // 4. Chart Logic (Last 7 Days)
-        // Note: Kept as invoice query for historical accuracy if daily_stats wasn't populated before.
-        const weekAgo = new Date();
-        weekAgo.setDate(weekAgo.getDate() - 6);
-        weekAgo.setHours(0, 0, 0, 0);
+        // 4. ✅ OPTIMIZED Chart Logic (Last 7 Days from daily_stats)
+        // Instead of reading ALL invoices, we read exactly 7 documents from daily_stats
+        const chartLabels = [];
+        const chartDataPoints = [];
+        const chartPromises = [];
 
-        const weeklyInvoicesQuery = query(collection(db, uid, "invoices", "invoice_list"), where("createdAt", ">=", Timestamp.fromDate(weekAgo)));
-        const weeklyInvoicesSnap = await getDocs(weeklyInvoicesQuery);
-        
-        const dailySales = {};
-        for (let i = 0; i < 7; i++) {
-            const date = new Date(weekAgo);
-            date.setDate(date.getDate() + i);
-            const dateString = date.toISOString().split('T')[0];
-            dailySales[dateString] = 0;
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = getSriLankaDate(d);
+            
+            // Push label (e.g., "Mon")
+            chartLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+            
+            // Push promise to fetch specific daily_stat doc
+            const statRef = doc(db, uid, "daily_stats", "entries", dateStr);
+            chartPromises.push(getDoc(statRef));
         }
 
-        weeklyInvoicesSnap.forEach(doc => {
-            const inv = doc.data();
-            if (inv.createdAt) {
-                const dateString = inv.createdAt.toDate().toISOString().split('T')[0];
-                if (dailySales[dateString] !== undefined) {
-                    dailySales[dateString] += inv.total;
-                }
+        const chartDocs = await Promise.all(chartPromises);
+
+        chartDocs.forEach((docSnap) => {
+            if (docSnap.exists()) {
+                chartDataPoints.push(docSnap.data().totalSales || 0);
+            } else {
+                chartDataPoints.push(0); // If no sales that day, push 0
             }
         });
-        
-        const labels = Object.keys(dailySales).map(date => new Date(date).toLocaleDateString('en-US', { weekday: 'short' }));
-        const dataPoints = Object.values(dailySales);
 
         setSalesChartData({
-            labels,
+            labels: chartLabels,
             datasets: [{ 
                 label: 'Sales', 
-                data: dataPoints, 
+                data: chartDataPoints, 
                 borderColor: '#6366f1', // Indigo
                 backgroundColor: 'rgba(99, 102, 241, 0.1)', 
                 fill: true, 
@@ -188,7 +188,7 @@ const DashboardView = ({ internalUser }) => {
     };
 
     fetchData();
-  }, []); 
+  }, [internalUser]); // Re-run if user changes (rare)
 
   const handleDismissLowStockAlert = () => {
     setShowLowStockAlert(false);
@@ -230,7 +230,7 @@ const DashboardView = ({ internalUser }) => {
         </div>
       )}
 
-      {/* --- NEW HEADER SECTION --- */}
+      {/* --- HEADER SECTION --- */}
       <div style={styles.header}>
         <div style={styles.headerContent}>
             <div>

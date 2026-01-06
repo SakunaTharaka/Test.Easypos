@@ -1,3 +1,4 @@
+
 /* global qz */
 import React, { useEffect, useState, useRef } from "react";
 import { auth, db } from "../../firebase"; 
@@ -264,7 +265,7 @@ const Orders = ({ internalUser }) => {
                 items: checkout,
                 total: advance, 
                 deliveryCharge: 0, 
-                advanceAmount: 0,
+                advanceAmount: 0, 
                 received: advance, 
                 createdAt: serverTimestamp(),
                 issuedBy: internalUser?.username || "Admin",
@@ -531,10 +532,12 @@ const Orders = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
+      <div style={styles.headerContainer}><h1 style={styles.header}>Orders Management</h1></div>
+
       <div style={styles.card}>
         <div style={styles.cardHeader}>
             <div style={{flex: 1}}>
-                <h2 style={styles.cardTitle}>New Order</h2>
+                <h2 style={styles.sectionTitle}>New Order</h2>
                 <div style={styles.invoiceBadge}>{invoiceNumber}</div>
             </div>
             <div style={{width: 300}}>
@@ -572,7 +575,7 @@ const Orders = ({ internalUser }) => {
                     </div>
                     {showDropdown && (
                         <ul style={styles.dropdown}>
-                            {filteredItems.map((item, idx) => ( <li key={item.id} style={{...styles.ddItem, backgroundColor: idx === selectedIndex ? '#e0f2fe' : 'white'}} onClick={() => selectItemAndJumpToQty(item)}><span>{item.itemName}</span><span style={{fontWeight:'bold'}}>Rs. {item.price}</span></li> ))}
+                            {filteredItems.map((item, idx) => ( <li key={item.id} style={{...styles.ddItem, backgroundColor: idx === selectedIndex ? '#eff6ff' : 'white'}} onClick={() => selectItemAndJumpToQty(item)}><span>{item.itemName}</span><span style={{fontWeight:'bold'}}>Rs. {item.price}</span></li> ))}
                         </ul>
                     )}
                 </div>
@@ -622,11 +625,11 @@ const Orders = ({ internalUser }) => {
 
       <div style={{...styles.card, marginTop: 20}}>
           <div style={styles.listHeader}>
-              <h2 style={styles.cardTitle}>Order History</h2>
+              <h2 style={styles.sectionTitle}>Order History</h2>
               <label style={styles.checkboxLabel}><input type="checkbox" checked={showCompletedOrders} onChange={e=>setShowCompletedOrders(e.target.checked)}/> Show Completed</label>
           </div>
           <div style={styles.ordersGrid}>
-              {loadingOrders ? <p style={{padding: 20, color: '#666'}}>Loading orders...</p> : filteredOrders.length === 0 ? <p style={{padding: 20, color: '#666'}}>No active orders found.</p> : filteredOrders.map(order => (
+              {loadingOrders ? <p style={{padding: 20, color: '#6b7280'}}>Loading orders...</p> : filteredOrders.length === 0 ? <p style={{padding: 20, color: '#6b7280'}}>No active orders found.</p> : filteredOrders.map(order => (
                   <div key={order.id} style={styles.orderCard}>
                       <div style={styles.orderCardTop}>
                           <div><span style={styles.orderName}>{order.customerName}</span><span style={styles.orderNum}>{order.orderNumber}</span></div>
@@ -653,10 +656,10 @@ const Orders = ({ internalUser }) => {
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmPopup}>
             <h4>Confirm Payment</h4>
-            <p style={{margin: '0 0 20px 0', color: '#666', fontSize: '14px'}}>
+            <p style={{margin: '0 0 20px 0', color: '#6b7280', fontSize: '14px'}}>
                 {pendingAction?.type === 'COMPLETE' ? `Collecting Balance: Rs. ${pendingAction.order.balance.toFixed(2)}` : `Advance: Rs. ${(parseFloat(advanceAmount)||0).toFixed(2)}`}
             </p>
-            <p style={{fontSize: '12px', color: '#888', marginBottom: '15px'}}>Use ← → arrow keys and press Enter to confirm.</p>
+            <p style={{fontSize: '12px', color: '#9ca3af', marginBottom: '15px'}}>Use ← → arrow keys and press Enter to confirm.</p>
             <div style={styles.confirmButtons}>
                 {paymentOptions.map(method => (
                     <button 
@@ -668,7 +671,7 @@ const Orders = ({ internalUser }) => {
                     </button>
                 ))}
             </div>
-            <button onClick={() => setShowPaymentConfirm(false)} style={{marginTop: '20px', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: '#666', fontSize: '12px'}}>Cancel</button>
+            <button onClick={() => setShowPaymentConfirm(false)} style={{marginTop: '20px', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: '#6b7280', fontSize: '12px'}}>Cancel</button>
           </div>
         </div>
       )}
@@ -696,14 +699,14 @@ const Orders = ({ internalUser }) => {
                         <p>{selectedOrder.remarks || "No remarks."}</p>
                     </div>
 
-                    <div style={{maxHeight: '200px', overflowY: 'auto', border: '1px solid #eee', marginBottom: '20px'}}>
+                    <div style={{maxHeight: '200px', overflowY: 'auto', border: '1px solid #e5e7eb', marginBottom: '20px'}}>
                         <table style={styles.itemsTable}>
                             <thead>
                                 <tr>
-                                    <th style={{...styles.th, background:'#f8f9fa'}}>Item</th>
-                                    <th style={{...styles.th, background:'#f8f9fa'}}>Qty</th>
-                                    <th style={{...styles.th, background:'#f8f9fa'}}>Rate</th>
-                                    <th style={{...styles.th, background:'#f8f9fa'}}>Total</th>
+                                    <th style={{...styles.th, background:'#f9fafb'}}>Item</th>
+                                    <th style={{...styles.th, background:'#f9fafb'}}>Qty</th>
+                                    <th style={{...styles.th, background:'#f9fafb'}}>Rate</th>
+                                    <th style={{...styles.th, background:'#f9fafb'}}>Total</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -742,90 +745,91 @@ const Orders = ({ internalUser }) => {
   );
 };
 
-const themeColors = { primary: '#00A1FF', secondary: '#F089D7', success: '#10b981', danger: '#ef4444', dark: '#1e293b', border: '#e2e8f0', bg: '#f8fafc' };
 const styles = {
-  container: { padding: '24px', maxWidth: '1200px', margin: '0 auto', fontFamily: "'Inter', sans-serif" },
-  card: { background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', border: `1px solid ${themeColors.border}`, overflow: 'hidden' },
-  cardHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  cardTitle: { margin: 0, fontSize: '18px', fontWeight: '700', color: themeColors.dark },
-  invoiceBadge: { display: 'inline-block', background: '#e0f2fe', color: themeColors.primary, padding: '4px 10px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', marginTop: 5 },
-  formContent: { padding: '24px' },
+  container: { padding: '20px', fontFamily: "'Inter', sans-serif", background: '#f3f4f6', minHeight: '100vh' },
+  headerContainer: { marginBottom: '20px' },
+  header: { fontSize: '24px', fontWeight: '600', color: '#1f2937' },
+  card: { backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' },
+  cardHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', background: '#f9fafb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  sectionTitle: { margin: 0, fontSize: '16px', fontWeight: '600', color: '#374151' },
+  invoiceBadge: { display: 'inline-block', background: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: '600', marginTop: 5 },
+  formContent: { padding: '20px' },
   gridThree: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' },
-  input: { padding: '10px 12px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '14px', outline: 'none', transition: 'border 0.2s', width: '100%', boxSizing: 'border-box' },
-  inputBig: { padding: '12px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '16px', fontWeight: '600', width: '100%', boxSizing: 'border-box' },
-  divider: { margin: '24px 0', borderTop: `1px solid ${themeColors.border}` },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
+  label: { fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase' },
+  input: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', transition: 'border 0.2s', width: '100%', boxSizing: 'border-box' },
+  inputBig: { padding: '10px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '16px', fontWeight: '600', width: '100%', boxSizing: 'border-box' },
+  divider: { margin: '24px 0', borderTop: '1px solid #e5e7eb' },
   itemEntryRow: { display: 'flex', gap: '15px', alignItems: 'flex-start' },
   searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center' },
-  searchIcon: { position: 'absolute', left: '12px', color: '#94a3b8' },
-  searchInput: { padding: '10px 12px 10px 36px', borderRadius: '8px', border: `1px solid ${themeColors.border}`, fontSize: '14px', width: '100%', boxSizing: 'border-box' },
-  btnAdd: { padding: '10px 20px', background: themeColors.success, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', height: '40px' },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '8px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', zIndex: 10, maxHeight: '200px', overflowY: 'auto', margin: '4px 0 0 0', padding: 0, listStyle: 'none' },
-  ddItem: { padding: '10px 16px', cursor: 'pointer', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#333' },
-  tableWrapper: { marginTop: '20px', border: `1px solid ${themeColors.border}`, borderRadius: '8px', overflow: 'hidden' },
+  searchIcon: { position: 'absolute', left: '12px', color: '#9ca3af' },
+  searchInput: { padding: '8px 12px 8px 36px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', width: '100%', boxSizing: 'border-box' },
+  btnAdd: { padding: '8px 20px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', height: '36px' },
+  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #e5e7eb', borderRadius: '4px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', zIndex: 10, maxHeight: '200px', overflowY: 'auto', margin: '4px 0 0 0', padding: 0, listStyle: 'none' },
+  ddItem: { padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#374151' },
+  tableWrapper: { marginTop: '20px', border: '1px solid #e5e7eb', borderRadius: '4px', overflow: 'hidden' },
   table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', padding: '12px 16px', background: '#f8fafc', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: '600', borderBottom: `1px solid ${themeColors.border}` },
-  thAction: { width: '50px', background: '#f8fafc', borderBottom: `1px solid ${themeColors.border}` },
-  td: { padding: '12px 16px', borderBottom: `1px solid ${themeColors.border}`, fontSize: '14px', color: '#333' },
-  tdAction: { padding: '12px 16px', borderBottom: `1px solid ${themeColors.border}`, textAlign: 'center' },
-  emptyTd: { padding: '20px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' },
-  btnIconDanger: { background: 'none', border: 'none', color: themeColors.danger, cursor: 'pointer', fontSize: '16px', padding: '4px' },
-  footerPanel: { marginTop: '24px', paddingTop: '24px', borderTop: `1px solid ${themeColors.border}` },
+  th: { textAlign: 'left', padding: '12px 16px', background: '#f9fafb', fontSize: '12px', color: '#4b5563', textTransform: 'uppercase', fontWeight: '600', borderBottom: '1px solid #e5e7eb' },
+  thAction: { width: '50px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' },
+  td: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb', fontSize: '14px', color: '#1f2937' },
+  tdAction: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb', textAlign: 'center' },
+  emptyTd: { padding: '20px', textAlign: 'center', color: '#9ca3af', fontStyle: 'italic' },
+  btnIconDanger: { background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '4px' },
+  footerPanel: { marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #e5e7eb' },
   financialRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' },
   totalsBlock: { textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '8px' },
-  totalRow: { fontSize: '14px', color: '#64748b', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
-  balanceRow: { fontSize: '18px', color: themeColors.danger, display: 'flex', justifyContent: 'flex-end', gap: '20px' },
-  btnPrimary: { width: '100%', padding: '14px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '16px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'background 0.2s' },
-  btnDisabled: { width: '100%', padding: '14px', background: '#cbd5e1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'not-allowed' },
-  listHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  checkboxLabel: { fontSize: '14px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
-  ordersGrid: { padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
-  orderCard: { background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' },
+  totalRow: { fontSize: '14px', color: '#4b5563', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
+  balanceRow: { fontSize: '18px', color: '#ef4444', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
+  btnPrimary: { width: '100%', padding: '12px', background: '#00A1FF', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '16px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'background 0.2s' },
+  btnDisabled: { width: '100%', padding: '12px', background: '#9ca3af', color: 'white', border: 'none', borderRadius: '4px', cursor: 'not-allowed' },
+  listHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  checkboxLabel: { fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', textTransform: 'uppercase', fontWeight: '600' },
+  ordersGrid: { padding: '20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' },
+  orderCard: { background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' },
   orderCardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
-  orderName: { display: 'block', fontWeight: '700', color: themeColors.dark, fontSize: '15px' },
-  orderNum: { fontSize: '12px', color: '#64748b' },
+  orderName: { display: 'block', fontWeight: '700', color: '#1f2937', fontSize: '15px' },
+  orderNum: { fontSize: '12px', color: '#6b7280' },
   statusPending: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#fff7ed', color: '#c2410c' },
   statusCompleted: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#ecfdf5', color: '#047857' },
-  orderMeta: { fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' },
+  orderMeta: { fontSize: '13px', color: '#4b5563', display: 'flex', flexDirection: 'column', gap: '4px' },
   metaRow: { display: 'flex', justifyContent: 'space-between' },
-  orderActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
-  actionBtnSuccess: { flex: 1, padding: '8px', background: '#dcfce7', color: themeColors.success, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px' },
-  actionBtnPrimary: { flex: 1, padding: '8px', background: '#e0f2fe', color: themeColors.primary, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center', fontSize: '13px' },
-  actionBtnDanger: { padding: '8px 12px', background: '#fee2e2', color: themeColors.danger, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
-  confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
+  orderActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid #e5e7eb' },
+  actionBtnSuccess: { flex: 1, padding: '6px', background: '#ecfdf5', color: '#10b981', border: '1px solid #a7f3d0', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '13px' },
+  actionBtnPrimary: { flex: 1, padding: '6px', background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center', fontSize: '13px' },
+  actionBtnDanger: { padding: '6px 10px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
+  confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 10px 15px rgba(0,0,0,0.1)', width: 'auto', minWidth: '400px' },
   confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },
-  confirmButton: { padding: '10px 24px', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', background: '#f8f8f8', fontWeight: '600', flex: 1 },
-  confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1, boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.4)' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(2px)' },
-  modalContentWide: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '700px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease', overflow: 'hidden' },
-  modalHeader: { padding: '16px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  modalTitle: { margin: 0, fontSize: '18px', fontWeight: '700', color: themeColors.dark },
-  modalBody: { padding: '24px' },
-  closeIcon: { background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' },
-  detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: '20px' },
+  confirmButton: { padding: '10px 24px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: '#f9fafb', fontWeight: '600', flex: 1, color: '#374151' },
+  confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1 },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(1px)' },
+  modalContentWide: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '700px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease', overflow: 'hidden' },
+  modalHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: '#1f2937' },
+  modalBody: { padding: '20px' },
+  closeIcon: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#9ca3af' },
+  detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px', marginBottom: '20px' },
   detailItem: { display: 'flex', flexDirection: 'column', fontSize: '14px' },
-  notesBox: { background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', border: `1px solid ${themeColors.border}` },
-  financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '15px' },
+  notesBox: { background: '#f9fafb', padding: '12px', borderRadius: '4px', marginBottom: '20px', fontSize: '14px', border: '1px solid #e5e7eb' },
+  financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '15px' },
   modalActionsRow: { display: 'flex', justifyContent: 'flex-end', gap: '10px' },
-  btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
+  btnSecondary: { padding: '8px 16px', background: 'white', border: '1px solid #d1d5db', color: '#374151', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
   itemsTable: { width: '100%', borderCollapse: 'collapse' },
 };
 
 const customSelectStyles = {
   control: (provided) => ({
     ...provided,
-    borderColor: '#e2e8f0',
-    borderRadius: '8px',
+    borderColor: '#d1d5db',
+    borderRadius: '4px',
     padding: '2px',
     boxShadow: 'none',
-    '&:hover': { borderColor: '#cbd5e1' }
+    '&:hover': { borderColor: '#9ca3af' }
   }),
   option: (provided, state) => ({
     ...provided,
     backgroundColor: state.isSelected ? '#00A1FF' : state.isFocused ? '#e0f2fe' : 'white',
-    color: state.isSelected ? 'white' : '#333',
+    color: state.isSelected ? 'white' : '#374151',
     cursor: 'pointer'
   })
 };

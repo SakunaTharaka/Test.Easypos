@@ -193,9 +193,9 @@ const UserDetails = () => {
               </div>
               <div style={selectedPlan === 'yearly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('yearly')}>
                 {selectedPlan === 'yearly' && <FaCheckCircle style={styles.checkIcon} />}
-                <div style={styles.saveBadge}>Save 12%</div>
+                <div style={styles.saveBadge}>Save 7.41%</div>
                 <h3 style={styles.planTitle}>Yearly</h3>
-                <p style={styles.planPrice}>Rs. 19,000 <span style={styles.pricePer}>/ year</span></p>
+                <p style={styles.planPrice}>Rs. 20,000 <span style={styles.pricePer}>/ year</span></p>
               </div>
             </div>
             <button onClick={handleStartTrial} style={loading ? styles.buttonDisabled : styles.button} disabled={loading}>

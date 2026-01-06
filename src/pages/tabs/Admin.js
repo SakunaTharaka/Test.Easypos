@@ -8,7 +8,7 @@ import {
   collection,
   deleteDoc,
 } from "firebase/firestore";
-import { FaKey, FaTrash } from 'react-icons/fa'; // Using icons for clarity
+import { FaKey, FaTrash } from 'react-icons/fa';
 
 const Admin = ({ internalUsers, setInternalUsers }) => {
   const [loading, setLoading] = useState(true);
@@ -35,6 +35,13 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
 
   const handleAddUser = async () => {
     if (!newUser.username || !newUser.password) return alert("Enter username and password");
+
+    // --- CHECK: Limit max users to 6 ---
+    if (internalUsers.length >= 6) {
+      return alert("Maximum limit reached. You cannot add more than 6 users.");
+    }
+    // -----------------------------------
+
     if (internalUsers.some(u => u.username.toLowerCase() === newUser.username.toLowerCase())) return alert("Username already exists");
 
     const uid = auth.currentUser.uid;
@@ -52,7 +59,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
 
   const handleDeleteUser = async (user) => {
     if (user.isMaster) return alert("Cannot delete the master admin account.");
-    // This is an extra server-side check, though the UI should prevent this.
     if (user.id === loggedInUser?.id) return alert("You cannot delete your own account.");
     
     if (!window.confirm(`Delete user ${user.username}?`)) return;
@@ -118,7 +124,14 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
       </div>
 
       <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>Add New User</h3>
+        <div style={styles.sectionHeaderRow}>
+            <h3 style={styles.sectionTitle}>Add New User</h3>
+            {/* Visual Counter for User Limit */}
+            <span style={internalUsers.length >= 6 ? styles.limitReached : styles.limitBadge}>
+                Current: {internalUsers.length}/6
+            </span>
+        </div>
+        
         <div style={styles.formRow}>
           <div style={styles.inputGroup}>
             <label style={styles.label}>Username</label>
@@ -127,6 +140,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
               placeholder="Enter username" 
               value={newUser.username} 
               onChange={e => setNewUser({ ...newUser, username: e.target.value })} 
+              disabled={internalUsers.length >= 6} // Disable input if full
             />
           </div>
           <div style={styles.inputGroup}>
@@ -137,6 +151,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
               placeholder="Enter password" 
               value={newUser.password} 
               onChange={e => setNewUser({ ...newUser, password: e.target.value })} 
+              disabled={internalUsers.length >= 6} // Disable input if full
             />
           </div>
           <div style={styles.checkboxGroup}>
@@ -146,11 +161,19 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
                 checked={newUser.isAdmin} 
                 onChange={e => setNewUser({ ...newUser, isAdmin: e.target.checked })} 
                 style={styles.checkbox}
+                disabled={internalUsers.length >= 6}
               /> 
               Admin Privileges
             </label>
           </div>
-          <button onClick={handleAddUser} style={styles.addButton}>Add User</button>
+          <button 
+            onClick={handleAddUser} 
+            style={internalUsers.length >= 6 ? styles.addButtonDisabled : styles.addButton}
+            disabled={internalUsers.length >= 6}
+            title={internalUsers.length >= 6 ? "User limit reached (Max 6)" : "Add User"}
+          >
+            Add User
+          </button>
         </div>
       </div>
 
@@ -189,7 +212,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
                       >
                         <FaKey />
                       </button>
-                      {/* ✅ FIX: The delete button is now disabled for the current logged-in user */}
                       {!user.isMaster && (
                         <button 
                           onClick={() => handleDeleteUser(user)} 
@@ -276,7 +298,10 @@ const styles = {
   title: { fontSize: "28px", fontWeight: "600", color: "#2c3e50", margin: "0 0 8px 0" },
   subtitle: { fontSize: "16px", color: "#7f8c8d", margin: 0 },
   section: { backgroundColor: "#fff", borderRadius: "8px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", padding: "20px", marginBottom: "20px" },
-  sectionTitle: { fontSize: "18px", fontWeight: "600", color: "#2c3e50", margin: "0 0 20px 0", paddingBottom: "10px", borderBottom: "1px solid #eee" },
+  sectionHeaderRow: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px solid #eee", paddingBottom: "10px" },
+  sectionTitle: { fontSize: "18px", fontWeight: "600", color: "#2c3e50", margin: 0 },
+  limitBadge: { fontSize: "13px", color: "#7f8c8d", backgroundColor: "#f1f2f6", padding: "4px 8px", borderRadius: "4px" },
+  limitReached: { fontSize: "13px", color: "#c0392b", backgroundColor: "#fadbd8", padding: "4px 8px", borderRadius: "4px", fontWeight: "bold" },
   formRow: { display: "flex", flexWrap: "wrap", gap: "15px", alignItems: "flex-end" },
   inputGroup: { display: "flex", flexDirection: "column", minWidth: "200px", flex: 1 },
   label: { marginBottom: "8px", fontWeight: "500", fontSize: "14px", color: "#2c3e50" },
@@ -285,6 +310,7 @@ const styles = {
   checkboxLabel: { display: "flex", alignItems: "center", fontSize: "14px", color: "#2c3e50" },
   checkbox: { marginRight: "8px" },
   addButton: { padding: "10px 20px", background: "#3498db", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "500", fontSize: "14px", height: "fit-content" },
+  addButtonDisabled: { padding: "10px 20px", background: "#bdc3c7", color: "#fff", border: "none", borderRadius: "6px", cursor: "not-allowed", fontWeight: "500", fontSize: "14px", height: "fit-content" },
   tableContainer: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse" },
   tableHeader: { backgroundColor: "#f1f8ff" },

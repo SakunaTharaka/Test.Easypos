@@ -11,14 +11,13 @@ import {
   where,
   serverTimestamp,
   runTransaction
+  // limit is removed because we want ALL items
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
-// --- STYLES FROM INVOICE VIEWER ---
-
+// --- STYLES (Unchanged) ---
 const styles = {
-    // --- Layout Styles (Screen) ---
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
     rightPanel: { flex: 2, display: 'flex', flexDirection: 'column' },
@@ -90,7 +89,7 @@ const styles = {
 
 // --- COMPONENTS ---
 
-// 1. PrintableLayout (Centered Header)
+// 1. PrintableLayout
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderDetails }) => {
   if (!invoice || (!Array.isArray(invoice.items) && !serviceJob && !orderDetails)) {
     return null;
@@ -130,7 +129,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
   return (
     <div style={styles.invoiceBox}>
-      {/* --- HEADER SECTION (Centered) --- */}
+      {/* --- HEADER SECTION --- */}
       <div className="invoice-header-section" style={{ textAlign: 'center' }}>
         <div className="company-details" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             {companyInfo?.companyLogo && (
@@ -139,7 +138,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 style={{ ...styles.logo, display: 'block', margin: '0 auto 10px auto' }} 
                 alt="Company Logo" 
                 onLoad={onImageLoad}
-                onError={onImageLoad} // Handle error as loaded to prevent hanging
+                onError={onImageLoad} 
             />
             )}
             <h1 style={{ ...styles.companyNameText, textAlign: 'center', width: '100%' }}>{companyInfo?.companyName || "Your Company"}</h1>
@@ -275,42 +274,37 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   );
 };
 
-// 2. BrowserPrintComponent (UPDATED: USING IFRAME TO PREVENT BLANK PAGES)
+// 2. BrowserPrintComponent
 const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
     const [mountNode, setMountNode] = useState(null);
     const iframeRef = useRef(null);
     const [isImageLoaded, setIsImageLoaded] = useState(!companyInfo?.companyLogo);
 
     useEffect(() => {
-        // 1. Create invisible iframe
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed';
-        iframe.style.top = '-10000px'; // Hide off-screen
+        iframe.style.top = '-10000px'; 
         iframe.style.left = '-10000px';
         iframe.style.width = '1px';
         iframe.style.height = '1px';
         document.body.appendChild(iframe);
         iframeRef.current = iframe;
 
-        // 2. Open document and write base HTML
         const doc = iframe.contentWindow.document;
         doc.open();
         doc.write('<html><head><title>Print Invoice</title></head><body><div id="print-mount"></div></body></html>');
         doc.close();
 
-        // 3. Inject print-specific styles to ensure clean print
         const style = doc.createElement('style');
         style.textContent = `
             @page { size: auto; margin: 5mm; } 
             body { margin: 0; padding: 0; font-family: sans-serif; background: white; }
-            /* Ensure the print container is fully visible */
             #print-mount { width: 100%; overflow: visible; }
         `;
         doc.head.appendChild(style);
 
         setMountNode(doc.getElementById('print-mount'));
 
-        // Cleanup: Remove iframe when component unmounts
         return () => {
             if (document.body.contains(iframe)) {
                 document.body.removeChild(iframe);
@@ -318,10 +312,8 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
         };
     }, []);
 
-    // Trigger Print when content and images are ready
     useEffect(() => {
         if (mountNode && isImageLoaded && iframeRef.current) {
-            // Small timeout to allow React Portal to render fully
             const timer = setTimeout(() => {
                 const win = iframeRef.current.contentWindow;
                 if (win) {
@@ -333,7 +325,6 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
         }
     }, [mountNode, isImageLoaded]);
 
-    // Listen for the 'afterprint' event to close the preview
     useEffect(() => {
         if (!iframeRef.current) return;
         const win = iframeRef.current.contentWindow;
@@ -342,14 +333,12 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
             onPrintFinished();
         };
         
-        // 'afterprint' fires when the print dialog is closed (printed or cancelled)
         win.addEventListener('afterprint', handleAfterPrint);
         return () => win.removeEventListener('afterprint', handleAfterPrint);
     }, [mountNode, onPrintFinished]);
 
     return (
         <>
-            {/* 1. Visible Overlay for the Main Window (So user knows what's happening) */}
             <div style={{
                 position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                 background: 'rgba(0,0,0,0.7)', zIndex: 99999,
@@ -369,7 +358,6 @@ const BrowserPrintComponent = ({ invoice, companyInfo, onPrintFinished }) => {
                 </button>
             </div>
 
-            {/* 2. Content Portaled into the Hidden Iframe */}
             {mountNode && ReactDOM.createPortal(
                 <PrintableLayout 
                     invoice={invoice} 
@@ -456,8 +444,12 @@ const Invoice = ({ internalUser }) => {
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [checkout, setCheckout] = useState([]);
-  const [items, setItems] = useState([]);
+  
+  // ✅ RESTORED: 'items' state to allow Client-Side Caching (Download Once)
+  const [items, setItems] = useState([]); 
   const [filteredItems, setFilteredItems] = useState([]);
+  const [selectedDbItem, setSelectedDbItem] = useState(null); 
+
   const [itemInput, setItemInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -491,9 +483,8 @@ const Invoice = ({ internalUser }) => {
   const qtyInputRef = useRef(null);
   const receivedAmountRef = useRef(null);
 
-  // Helper: Get Date in Sri Lanka Time
   const getSriLankaDate = () => {
-    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
   };
 
   useEffect(() => {
@@ -562,27 +553,64 @@ const Invoice = ({ internalUser }) => {
   
   useEffect(() => { if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); }, [selectedShift]);
 
+  // ✅ UPDATED: Download ALL items once when customer changes (Client-Side Caching)
   useEffect(() => {
     const fetchCustomerData = async () => {
-      if (!selectedCustomer || !auth.currentUser) { setItems([]); setIsCustomerDiscountable(false); return; }
-      const pricedItemsColRef = collection(db, auth.currentUser.uid, "price_categories", "priced_items");
-      const q = query(pricedItemsColRef, where("categoryId", "==", selectedCustomer.priceCategoryId));
-      const itemsSnap = await getDocs(q);
-      setItems(itemsSnap.docs.map(d => ({ ...d.data(), id: d.id })));
+      // 1. Reset inputs & clear old items
+      setItemInput("");
+      setFilteredItems([]);
+      setSelectedDbItem(null); 
+      setItems([]); 
+      
+      if (!selectedCustomer || !auth.currentUser) { 
+          setIsCustomerDiscountable(false); 
+          return; 
+      }
 
-      if(selectedCustomer.priceCategoryId) {
-         const catRef = doc(db, auth.currentUser.uid, "price_categories", "categories", selectedCustomer.priceCategoryId);
-         getDoc(catRef).then(catSnap => setIsCustomerDiscountable(catSnap.exists() && catSnap.data().isDiscountable));
-      } else { setIsCustomerDiscountable(false); }
+      try {
+        // 2. Fetch Category Settings
+        if(selectedCustomer.priceCategoryId) {
+           const catRef = doc(db, auth.currentUser.uid, "price_categories", "categories", selectedCustomer.priceCategoryId);
+           getDoc(catRef).then(catSnap => setIsCustomerDiscountable(catSnap.exists() && catSnap.data().isDiscountable));
+        } else { 
+          setIsCustomerDiscountable(false); 
+        }
+
+        // 3. Download ALL items for this category (The Cache)
+        const pricedItemsColRef = collection(db, auth.currentUser.uid, "price_categories", "priced_items");
+        const q = query(pricedItemsColRef, where("categoryId", "==", selectedCustomer.priceCategoryId));
+        
+        const snapshot = await getDocs(q);
+        const allItems = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+        
+        setItems(allItems); // Store in memory
+      } catch (error) {
+        console.error("Error fetching items:", error);
+      }
     };
     fetchCustomerData();
   }, [selectedCustomer]);
 
+  // ✅ UPDATED: Client-Side Search (Instant Filtering)
   useEffect(() => {
-    if (!itemInput.trim()) { setFilteredItems([]); setShowDropdown(false); return; }
-    const term = itemInput.toLowerCase();
-    const filtered = items.filter(i => i.itemName.toLowerCase().includes(term) || (i.itemSKU && i.itemSKU.toLowerCase().includes(term)) || (i.pid && String(i.pid).toLowerCase().includes(term)));
-    setFilteredItems(filtered); setSelectedIndex(0); setShowDropdown(filtered.length > 0);
+    if (!itemInput.trim()) {
+      setFilteredItems([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const lowerTerm = itemInput.toLowerCase();
+    
+    // Filter the 'items' array we already downloaded
+    const results = items.filter(item => 
+      (item.itemName && item.itemName.toLowerCase().includes(lowerTerm)) ||
+      (item.itemSKU && item.itemSKU.toLowerCase().includes(lowerTerm)) || 
+      (item.pid && String(item.pid).toLowerCase().includes(lowerTerm))
+    );
+    
+    setFilteredItems(results);
+    setShowDropdown(results.length > 0);
+    setSelectedIndex(0);
   }, [itemInput, items]);
 
   useEffect(() => {
@@ -621,24 +649,51 @@ const Invoice = ({ internalUser }) => {
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex(p => (p - 1 + filteredItems.length) % filteredItems.length); }
     else if (e.key === "Enter") { e.preventDefault(); if (filteredItems[selectedIndex]) handleItemSelect(filteredItems[selectedIndex]); }
   };
-  const handleItemSelect = (item) => { setItemInput(item.itemName); setShowDropdown(false); setTimeout(() => qtyInputRef.current?.focus(), 50); };
+
+  const handleItemSelect = (item) => { 
+      setItemInput(item.itemName); 
+      setSelectedDbItem(item); 
+      setShowDropdown(false); 
+      setTimeout(() => qtyInputRef.current?.focus(), 50); 
+  };
+
   const handleQtyKeyDown = (e) => { if (e.key === "Enter") { e.preventDefault(); addItemToCheckout(); } };
   const handleQtyChange = (e) => { const v = e.target.value; if (v === "" || /^[0-9]*\.?[0-9]*$/.test(v)) setQtyInput(v); };
   
   const addItemToCheckout = () => {
     if (!itemInput || !qtyInput || isNaN(qtyInput) || qtyInput <= 0) return;
-    const itemData = items.find(i => i.itemName === itemInput);
-    if (!itemData) return alert("Item not found.");
+    
+    // 1. Try to use the explicitly selected item
+    let itemData = selectedDbItem; 
+
+    // 2. Fallback: If user typed "Apple" and hit Enter without selecting, find it in the memory array
+    if (!itemData) {
+        itemData = items.find(i => i.itemName.toLowerCase() === itemInput.toLowerCase());
+    }
+
+    if (!itemData) {
+        return alert("Please select a valid item from the list.");
+    }
+
     const existingIdx = checkout.findIndex(i => i.itemId === itemData.itemId);
     if (existingIdx > -1) {
-        const newCheckout = [...checkout]; newCheckout[existingIdx].quantity += Number(qtyInput); setCheckout(newCheckout);
-    } else setCheckout(p => [...p, { ...itemData, quantity: Number(qtyInput) }]);
-    setItemInput(""); setQtyInput(1); setShowDropdown(false); itemInputRef.current?.focus();
+        const newCheckout = [...checkout]; 
+        newCheckout[existingIdx].quantity += Number(qtyInput); 
+        setCheckout(newCheckout);
+    } else {
+        setCheckout(p => [...p, { ...itemData, quantity: Number(qtyInput) }]);
+    }
+
+    setItemInput(""); 
+    setQtyInput(1); 
+    setSelectedDbItem(null); 
+    setShowDropdown(false); 
+    itemInputRef.current?.focus();
   };
+
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
   
-  // --- UPDATED SAVE FUNCTION WITH ORDER NUMBER & DAILY INVOICE COUNT ---
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
@@ -659,14 +714,10 @@ const Invoice = ({ internalUser }) => {
       
       const walletRef = walletDocId ? doc(db, user.uid, "wallet", "accounts", walletDocId) : null;
 
-      // 1. Prepare Daily Stats Ref
       const dailyDateString = getSriLankaDate(); 
       const dailyStatsRef = doc(db, user.uid, "daily_stats", "entries", dailyDateString);
 
       const finalInvoiceData = await runTransaction(db, async (t) => {
-        // --- ALL READS FIRST ---
-
-        // 1. Read Item Costs
         let invoiceTotalCOGS = 0;
         for (const item of checkout) {
              if (item.itemId) {
@@ -680,23 +731,18 @@ const Invoice = ({ internalUser }) => {
              }
         }
 
-        // 2. Read Daily Stats
         const dailyStatsSnap = await t.get(dailyStatsRef);
         const currentDailyCOGS = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalCOGS) || 0) : 0;
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
         const currentMethodSales = (dailyStatsSnap.exists() && salesMethodField) ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
-        // ✅ Read current invoice count for the day
         const currentInvoiceCount = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().invoiceCount) || 0) : 0;
 
-        // 3. Read Counter (Invoice & Daily Order)
         const cDoc = await t.get(counterRef);
         const nextSeq = (cDoc.exists() ? cDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
         
-        // ✅ DAILY ORDER NUMBER LOGIC (Resets daily because datePrefix changes)
         const currentDailyOrderSeq = (cDoc.exists() ? cDoc.data().dailyOrderCounters?.[datePrefix] || 0 : 0);
         const nextDailyOrderSeq = currentDailyOrderSeq + 1;
         
-        // 4. Read Wallet
         let currentWalletBalance = 0;
         if (walletRef) {
             const wDoc = await t.get(walletRef);
@@ -705,16 +751,13 @@ const Invoice = ({ internalUser }) => {
             }
         }
 
-        // --- ALL WRITES AFTER ---
-        
-        // 1. Update Daily Stats
         const newDailyCOGS = currentDailyCOGS + invoiceTotalCOGS;
         const newDailySales = currentDailySales + total; 
         
         const statsUpdate = {
             totalCOGS: newDailyCOGS,
             totalSales: newDailySales,
-            invoiceCount: currentInvoiceCount + 1, // ✅ Increment daily invoice count
+            invoiceCount: currentInvoiceCount + 1,
             date: dailyDateString,
             lastUpdated: serverTimestamp()
         };
@@ -725,13 +768,11 @@ const Invoice = ({ internalUser }) => {
 
         t.set(dailyStatsRef, statsUpdate, { merge: true });
 
-        // 2. Update Counters (Invoice & Daily Order)
         t.set(counterRef, { 
             invoiceCounters: { [datePrefix]: nextSeq },
-            dailyOrderCounters: { [datePrefix]: nextDailyOrderSeq } // ✅ Saves daily order count
+            dailyOrderCounters: { [datePrefix]: nextDailyOrderSeq }
         }, { merge: true });
         
-        // 3. Create Invoice
         const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, items: checkout, 
@@ -741,12 +782,11 @@ const Invoice = ({ internalUser }) => {
           createdAt: serverTimestamp(), invoiceNumber: newInvNum, issuedBy: internalUser?.username || "Admin", 
           shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
           totalCOGS: invoiceTotalCOGS,
-          dailyOrderNumber: nextDailyOrderSeq // ✅ Save the Order Number to the Invoice
+          dailyOrderNumber: nextDailyOrderSeq
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
 
-        // 4. Update Wallet
         if (walletRef) {
             const newBalance = currentWalletBalance + invData.total;
             t.set(walletRef, { 
@@ -769,8 +809,6 @@ const Invoice = ({ internalUser }) => {
   const handleSaveAttempt = () => {
     if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
     if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
-    
-    // Default to cash confirm, no credit check logic
     setConfirmPaymentMethod('Cash'); 
     setShowPaymentConfirm(true);
   };
@@ -812,7 +850,7 @@ const Invoice = ({ internalUser }) => {
         <div style={styles.itemEntrySection}>
           <div style={{position: 'relative', flex: 1}}>
             <label style={styles.label}>ADD ITEM</label>
-            <input ref={itemInputRef} value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={handleItemKeyDown} placeholder="Type item name, SKU, or PID..." style={styles.input} />
+            <input ref={itemInputRef} value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={handleItemKeyDown} placeholder="Type item name..." style={styles.input} />
             {showDropdown && filteredItems.length > 0 && ( <ul style={styles.dropdown}>{filteredItems.map((i, idx) => ( <li key={i.id} style={{...styles.dropdownItem, ...(idx === selectedIndex ? styles.dropdownItemSelected : {})}} onClick={() => handleItemSelect(i)}>{i.itemName}<span style={styles.dropdownPrice}>Rs. {i.price.toFixed(2)}</span></li> ))}</ul> )}
           </div>
           <div style={{width: '120px'}}><label style={styles.label}>QTY</label><input ref={qtyInputRef} value={qtyInput} onChange={handleQtyChange} onKeyDown={handleQtyKeyDown} onFocus={(e) => e.target.select()} type="text" inputMode="decimal" style={styles.input} /></div>

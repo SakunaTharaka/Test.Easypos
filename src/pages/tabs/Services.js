@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
@@ -552,10 +553,12 @@ const Services = ({ internalUser }) => {
 
   return (
     <div style={styles.container}>
+      <div style={styles.headerContainer}><h1 style={styles.header}>Services Management</h1></div>
+
       {/* --- FORM SECTION --- */}
       <div style={styles.card}>
         <div style={styles.cardHeader}>
-            <h2 style={styles.cardTitle}>New Service Job</h2>
+            <h2 style={styles.sectionTitle}>New Job Entry</h2>
         </div>
         <form onSubmit={handleSaveClick} style={styles.formContent}>
            <div style={styles.gridThree}>
@@ -586,12 +589,12 @@ const Services = ({ internalUser }) => {
              </div>
           </div>
           
-          <div style={styles.inputGroup}>
+          <div style={{...styles.inputGroup, marginTop: '15px'}}>
             <label style={styles.label}>Info / Notes</label>
-            <textarea style={styles.textarea} rows="3" value={generalInfo} onChange={(e) => setGeneralInfo(e.target.value)} placeholder="Device details, issues, serial number..." />
+            <textarea style={styles.textarea} rows="2" value={generalInfo} onChange={(e) => setGeneralInfo(e.target.value)} placeholder="Device details, issues, serial number..." />
           </div>
           
-          <div style={{...styles.gridThree, marginTop: '15px', padding: '15px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0'}}>
+          <div style={{...styles.gridThree, marginTop: '15px', padding: '15px', background: '#f9fafb', borderRadius: '4px', border: '1px solid #e5e7eb'}}>
             <div style={styles.inputGroup}>
                 <label style={styles.label}>Total Charge (Rs.) *</label>
                 <input type="number" style={{...styles.input, fontWeight: 'bold'}} value={totalCharge} onChange={(e) => setTotalCharge(e.target.value)} placeholder="0.00" />
@@ -617,19 +620,16 @@ const Services = ({ internalUser }) => {
       </div>
 
       {/* --- LIST SECTION --- */}
-      <div style={{...styles.card, marginTop: '24px'}}>
+      <div style={{...styles.card, marginTop: '20px'}}>
          <div style={styles.listHeader}>
-            <h2 style={styles.cardTitle}>Service Jobs</h2>
-            <div style={styles.listControls}>
-                <div style={styles.searchWrapper}>
-                    <FaSearch style={styles.searchIcon}/>
-                    <input type="text" style={styles.searchInput} placeholder="Search loaded jobs..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                </div>
-                <label style={styles.checkboxLabel}>
-                    <input type="checkbox" checked={showCompletedJobs} onChange={(e) => setShowCompletedJobs(e.target.checked)} /> 
-                    Show Completed
-                </label>
-           </div>
+            <div style={styles.searchWrapper}>
+                <FaSearch style={styles.searchIcon}/>
+                <input type="text" style={styles.searchInput} placeholder="Search loaded jobs..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            </div>
+            <label style={styles.checkboxLabel}>
+                <input type="checkbox" checked={showCompletedJobs} onChange={(e) => setShowCompletedJobs(e.target.checked)} /> 
+                Show Completed
+            </label>
         </div>
         
         <div style={styles.jobsGrid}>
@@ -638,7 +638,7 @@ const Services = ({ internalUser }) => {
                  <div style={styles.jobCardTop}>
                     <div>
                         <span style={styles.jobCardName}>{job.customerName}</span>
-                        {job.customerPhone && <span style={{fontSize: 12, color: '#666'}}>{job.customerPhone}</span>}
+                        {job.customerPhone && <span style={{fontSize: 12, color: '#6b7280'}}>{job.customerPhone}</span>}
                         <div style={styles.jobCardType}>{job.jobType}</div>
                     </div>
                     <span style={job.status === 'Pending' ? styles.statusPending : styles.statusCompleted}>
@@ -650,7 +650,7 @@ const Services = ({ internalUser }) => {
                     <div style={styles.detailRow}><span>Inv:</span> <strong>{job.generatedInvoiceNumber}</strong></div>
                     <div style={styles.detailRow}><span>Date:</span> {formatDate(job.createdAt).split(',')[0]}</div>
                     <div style={styles.detailRow}><span>Est:</span> {formatDate(job.jobCompleteDate)}</div>
-                    <div style={{...styles.detailRow, marginTop: 5, color: '#333'}}>
+                    <div style={{...styles.detailRow, marginTop: 5, color: '#374151'}}>
                         <span>Balance:</span> <strong style={{color: calculateBalance(job) > 0 ? '#ef4444' : '#10b981'}}>Rs. {calculateBalance(job).toFixed(2)}</strong>
                     </div>
                 </div>
@@ -679,7 +679,7 @@ const Services = ({ internalUser }) => {
 
         {/* --- LOAD MORE BUTTON --- */}
         {filteredJobs.length > 0 && !searchTerm && (
-            <div style={{padding: '20px', display: 'flex', justifyContent: 'center', borderTop: `1px solid ${themeColors.border}`}}>
+            <div style={{padding: '20px', display: 'flex', justifyContent: 'center', borderTop: '1px solid #e5e7eb'}}>
                 <button onClick={handleLoadMore} disabled={loadMoreLoading} style={styles.btnSecondary}>
                     {loadMoreLoading ? 'Loading...' : <><FaArrowDown style={{marginRight: 8}} /> Load Older Jobs</>}
                 </button>
@@ -694,10 +694,10 @@ const Services = ({ internalUser }) => {
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmPopup}>
             <h4>Confirm Payment</h4>
-            <p style={{margin: '0 0 20px 0', color: '#666', fontSize: '14px'}}>
+            <p style={{margin: '0 0 20px 0', color: '#6b7280', fontSize: '14px'}}>
                 {pendingAction?.type === 'COMPLETE' ? `Collecting Balance: Rs. ${pendingAction.job.balance.toFixed(2)}` : `Advance: Rs. ${(parseFloat(advanceAmount)||0).toFixed(2)}`}
             </p>
-            <p style={{fontSize: '12px', color: '#888', marginBottom: '15px'}}>Use ← → arrow keys and press Enter to confirm.</p>
+            <p style={{fontSize: '12px', color: '#9ca3af', marginBottom: '15px'}}>Use ← → arrow keys and press Enter to confirm.</p>
             <div style={styles.confirmButtons}>
                 {paymentOptions.map(method => (
                     <button 
@@ -709,7 +709,7 @@ const Services = ({ internalUser }) => {
                     </button>
                 ))}
             </div>
-            <button onClick={() => setShowPaymentConfirm(false)} style={{marginTop: '20px', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: '#666', fontSize: '12px'}}>Cancel</button>
+            <button onClick={() => setShowPaymentConfirm(false)} style={{marginTop: '20px', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', color: '#6b7280', fontSize: '12px'}}>Cancel</button>
           </div>
         </div>
       )}
@@ -803,78 +803,68 @@ const Services = ({ internalUser }) => {
   );
 };
 
-const themeColors = { 
-    primary: '#00A1FF', 
-    secondary: '#F089D7', 
-    success: '#10b981', 
-    warning: '#f59e0b', 
-    danger: '#ef4444', 
-    dark: '#1e293b', 
-    light: '#f8fafc', 
-    border: '#e2e8f0' 
-};
-
 const styles = {
-  container: { padding: '24px', maxWidth: '1200px', margin: '0 auto' },
-  card: { background: 'white', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', border: `1px solid ${themeColors.border}`, overflow: 'hidden' },
-  cardHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, background: '#f8fafc' },
-  cardTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: themeColors.dark },
-  formContent: { padding: '24px' },
+  container: { padding: '20px', fontFamily: "'Inter', sans-serif", background: '#f3f4f6', minHeight: '100vh' },
+  headerContainer: { marginBottom: '20px' },
+  header: { fontSize: '24px', fontWeight: '600', color: '#1f2937' },
+  card: { backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' },
+  cardHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' },
+  sectionTitle: { margin: 0, fontSize: '16px', fontWeight: '600', color: '#374151' },
+  formContent: { padding: '20px' },
   gridThree: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: '13px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase' },
-  input: { padding: '10px 12px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, fontSize: '14px', outline: 'none', transition: 'all 0.2s' },
-  textarea: { padding: '10px 12px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, fontSize: '14px', outline: 'none', resize: 'vertical', fontFamily: 'inherit' },
-  balanceGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  balanceValue: { fontSize: '16px', fontWeight: '700', color: themeColors.danger, padding: '10px 0' },
-  errorMsg: { color: themeColors.danger, fontSize: '14px', marginTop: '10px', background: '#fee2e2', padding: '10px', borderRadius: '6px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
+  label: { fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase' },
+  input: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', transition: 'all 0.2s', width: '100%', boxSizing: 'border-box' },
+  textarea: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', resize: 'vertical', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' },
+  balanceGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
+  balanceValue: { fontSize: '16px', fontWeight: '700', color: '#ef4444', padding: '8px 0' },
+  errorMsg: { color: '#ef4444', fontSize: '14px', marginTop: '10px', background: '#fee2e2', padding: '10px', borderRadius: '4px' },
   formActions: { marginTop: '20px', display: 'flex', justifyContent: 'flex-end' },
-  listHeader: { padding: '20px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' },
-  listControls: { display: 'flex', gap: '15px', alignItems: 'center' },
+  listHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' },
   searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center' },
-  searchIcon: { position: 'absolute', left: '10px', color: '#94a3b8' },
-  searchInput: { padding: '8px 10px 8px 32px', borderRadius: '6px', border: `1px solid ${themeColors.border}`, fontSize: '14px', width: '200px' },
-  checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#475569', cursor: 'pointer' },
-  jobsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', padding: '24px' },
-  jobCard: { background: 'white', border: `1px solid ${themeColors.border}`, borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', transition: 'transform 0.2s, box-shadow 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
+  searchIcon: { position: 'absolute', left: '10px', color: '#9ca3af' },
+  searchInput: { padding: '8px 10px 8px 32px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', width: '250px' },
+  checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '600', color: '#4b5563', cursor: 'pointer', textTransform: 'uppercase' },
+  jobsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px', padding: '20px' },
+  jobCard: { background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' },
   jobCardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
-  jobCardName: { fontSize: '15px', fontWeight: '700', color: themeColors.dark, display: 'block' },
-  jobCardType: { fontSize: '13px', color: '#64748b' },
+  jobCardName: { fontSize: '15px', fontWeight: '700', color: '#1f2937', display: 'block' },
+  jobCardType: { fontSize: '13px', color: '#6b7280' },
   statusPending: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#fff7ed', color: '#c2410c' },
   statusCompleted: { fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', background: '#ecfdf5', color: '#047857' },
-  jobCardDetails: { fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '4px' },
+  jobCardDetails: { fontSize: '13px', color: '#4b5563', display: 'flex', flexDirection: 'column', gap: '4px' },
   detailRow: { display: 'flex', justifyContent: 'space-between' },
-  jobCardActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: `1px solid ${themeColors.border}` },
-  btnPrimary: { padding: '10px 20px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
-  btnSecondary: { padding: '8px 16px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
-  btnDanger: { padding: '8px 16px', background: themeColors.danger, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
-  btnInfo: { padding: '8px 16px', background: themeColors.warning, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
-  btnDisabled: { padding: '10px 20px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '6px', cursor: 'not-allowed' },
-  actionBtnPrimary: { flex: 1, padding: '8px', background: '#e0f2fe', color: themeColors.primary, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  actionBtnSuccess: { flex: 1, padding: '8px', background: '#dcfce7', color: themeColors.success, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  actionBtnInfo: { flex: 1, padding: '8px', background: '#fef3c7', color: themeColors.warning, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  actionBtnDanger: { flex: 1, padding: '8px', background: '#fee2e2', color: themeColors.danger, border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(2px)' },
-  modalContent: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '600px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease' },
-  modalContentSmall: { background: 'white', borderRadius: '12px', width: '90%', maxWidth: '400px', padding: '24px', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' },
-  modalHeader: { padding: '16px 24px', borderBottom: `1px solid ${themeColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  modalTitle: { margin: 0, fontSize: '18px', fontWeight: '700', color: themeColors.dark },
-  modalBody: { padding: '24px' },
-  modalText: { color: '#64748b', marginBottom: '20px' },
-  closeIcon: { background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' },
-  detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: '20px' },
+  jobCardActions: { display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid #e5e7eb' },
+  btnPrimary: { padding: '8px 16px', background: '#00A1FF', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  btnSecondary: { padding: '8px 16px', background: 'white', border: '1px solid #d1d5db', color: '#374151', borderRadius: '4px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  btnDanger: { padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
+  btnInfo: { padding: '8px 16px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
+  btnDisabled: { padding: '8px 16px', background: '#9ca3af', color: 'white', border: 'none', borderRadius: '4px', cursor: 'not-allowed' },
+  actionBtnPrimary: { flex: 1, padding: '6px', background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  actionBtnSuccess: { flex: 1, padding: '6px', background: '#ecfdf5', color: '#10b981', border: '1px solid #a7f3d0', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  actionBtnInfo: { flex: 1, padding: '6px', background: '#fffbeb', color: '#f59e0b', border: '1px solid #fde68a', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  actionBtnDanger: { flex: 1, padding: '6px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', display: 'flex', justifyContent: 'center' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(1px)' },
+  modalContent: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '600px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' },
+  modalContentSmall: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '400px', padding: '20px', textAlign: 'center', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' },
+  modalHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: '#1f2937' },
+  modalBody: { padding: '20px' },
+  modalText: { color: '#4b5563', marginBottom: '20px', fontSize: '14px' },
+  closeIcon: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#9ca3af' },
+  detailGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px', marginBottom: '20px' },
   detailItem: { display: 'flex', flexDirection: 'column', fontSize: '14px' },
-  notesBox: { background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', border: `1px solid ${themeColors.border}` },
-  financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '15px' },
+  notesBox: { background: '#f9fafb', padding: '12px', borderRadius: '4px', marginBottom: '20px', fontSize: '14px', border: '1px solid #e5e7eb' },
+  financialBox: { background: '#f0f9ff', padding: '16px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '14px' },
   modalActionsRow: { display: 'flex', justifyContent: 'flex-end', gap: '10px' },
   modalBtnRow: { display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '20px' },
-  confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
-  confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', width: 'auto', minWidth: '400px' },
+  confirmOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
+  confirmPopup: { backgroundColor: 'white', padding: '24px', borderRadius: '8px', textAlign: 'center', boxShadow: '0 10px 15px rgba(0,0,0,0.1)', width: 'auto', minWidth: '400px' },
   confirmButtons: { display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '20px' },
-  confirmButton: { padding: '10px 24px', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', background: '#f8f8f8', fontWeight: '600', flex: 1 },
-  confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '6px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1, boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.4)' },
-  loadingText: { textAlign: 'center', padding: '20px', color: '#666' },
-  noJobsText: { textAlign: 'center', padding: '20px', color: '#666' },
+  confirmButton: { padding: '10px 24px', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', background: '#f9fafb', fontWeight: '600', flex: 1, color: '#374151' },
+  confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1 },
+  loadingText: { textAlign: 'center', padding: '20px', color: '#6b7280' },
+  noJobsText: { textAlign: 'center', padding: '20px', color: '#6b7280' },
 };
 
 export default Services;
