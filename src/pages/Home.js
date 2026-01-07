@@ -26,7 +26,6 @@ const Home = () => {
 
     // Mouse Parallax Logic
     const handleMouseMove = (e) => {
-      // Calibrate sensitivity for smoother effect
       setMousePosition({
         x: (e.clientX - window.innerWidth / 2) / 40,
         y: (e.clientY - window.innerHeight / 2) / 40,
@@ -189,7 +188,7 @@ const Home = () => {
       <header className={`navbar ${isLoaded ? 'loaded' : ''}`}>
         <div className="nav-content">
           <div className="logo-section">
-            <div className="logo-icon"></div>
+            <img src="/my-logo.png" alt="EasyPOS Logo" className="logo-icon" />
             <h1>EasyPOS<span className="highlight">.lk</span></h1>
           </div>
           <nav className="nav-links">
@@ -249,7 +248,7 @@ const Home = () => {
       {/* Footer */}
       <footer className={`footer ${isLoaded ? 'loaded' : ''}`}>
         <div className="footer-content">
-          <p>© 2025 EasyPOS.lk | Built for Performance</p>
+          <p>© 2025 Wayne Technologies | Built for Performance</p>
           <div className="footer-links">
             {isAdminButtonVisible && (
               <button onClick={openMasterAdmin} className="admin-btn">Master Admin</button>
@@ -375,11 +374,15 @@ const Home = () => {
         }
 
         .logo-section { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+        
+        /* UPDATED: Increased size to 64px (2x) */
         .logo-icon {
-          width: 32px; height: 32px;
-          background: linear-gradient(135deg, var(--primary), #8b5cf6);
+          width: 64px; 
+          height: 64px;
           border-radius: 8px;
+          object-fit: contain;
         }
+        
         .logo-section h1 { font-size: 1.5rem; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
         .highlight { color: var(--primary); }
 
