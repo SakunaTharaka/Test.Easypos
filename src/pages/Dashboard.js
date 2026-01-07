@@ -102,6 +102,16 @@ const Dashboard = () => {
         navigate("/");
         return;
       }
+
+      // ---------------------------------------------------------
+      // 🔒 NEW SECURITY CHECK: BLOCK UNVERIFIED USERS
+      // ---------------------------------------------------------
+      if (!currentUser.emailVerified) {
+        navigate("/verify-email");
+        return; 
+      }
+      // ---------------------------------------------------------
+
       const uid = currentUser.uid;
       
       // Announcement

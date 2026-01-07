@@ -27,6 +27,16 @@ const UserDetails = () => {
         navigate("/");
         return;
       }
+
+      // ---------------------------------------------------------
+      // 🔒 NEW SECURITY CHECK: BLOCK UNVERIFIED USERS
+      // ---------------------------------------------------------
+      if (!currentUser.emailVerified) {
+        navigate("/verify-email");
+        return;
+      }
+      // ---------------------------------------------------------
+
       setUser(currentUser);
 
       const userRef = doc(db, "Userinfo", currentUser.uid);
@@ -237,4 +247,3 @@ const styles = {
 };
 
 export default UserDetails;
-

@@ -11,6 +11,7 @@ import InvoiceViewer from './pages/InvoiceViewer';
 import MasterAdmin from './pages/MasterAdmin';
 import BillingPage from './pages/BillingPage';
 import MaintenancePage from './pages/MaintenancePage';
+import VerifyEmail from "./pages/VerifyEmail"; // <--- IMPORT THIS
 
 // Import the Terms and Conditions page
 import TermsAndConditions from "./pages/TermsAndConditions";
@@ -22,6 +23,10 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        
+        {/* New Route for Verification */}
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        
         <Route path="/user-details" element={<UserDetails />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/stockout-view/:id" element={<StockOutView />} />
@@ -29,8 +34,6 @@ function App() {
         <Route path="/master-admin" element={<MasterAdmin />} />
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
-        
-        {/* Add the new route for the Terms page */}
         <Route path="/terms" element={<TermsAndConditions />} />
       </Routes>
     </Router>
@@ -38,4 +41,3 @@ function App() {
 }
 
 export default App;
-

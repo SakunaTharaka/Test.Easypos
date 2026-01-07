@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { auth, provider } from "../firebase";
-import { createUserWithEmailAndPassword, signInWithPopup } from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithPopup, sendEmailVerification } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 
 const Signup = () => {
@@ -9,10 +9,17 @@ const Signup = () => {
   const [password, setPassword] = useState("");
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // PROTECT THE ROUTE: Check if user is already logged in
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
-        navigate("/dashboard", { replace: true });
+        if (user.emailVerified) {
+          // If verified, go to dashboard
+          navigate("/dashboard", { replace: true });
+        } else {
+          // If logged in but NOT verified, go to waiting room
+          navigate("/verify-email", { replace: true });
+        }
       } else {
         setCheckingAuth(false);
       }
@@ -23,8 +30,15 @@ const Signup = () => {
 
   const handleEmailSignup = async () => {
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      navigate("/user-details");
+      // 1. Create the user
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      
+      // 2. Send the verification email immediately
+      await sendEmailVerification(userCredential.user);
+      
+      // 3. Force redirect to the verification waiting room
+      navigate("/verify-email");
+      
     } catch (error) {
       alert("Signup failed: " + error.message);
     }
@@ -32,6 +46,7 @@ const Signup = () => {
 
   const handleGoogleSignup = async () => {
     try {
+      // Google accounts are auto-verified by Firebase
       await signInWithPopup(auth, provider);
       navigate("/user-details");
     } catch (error) {

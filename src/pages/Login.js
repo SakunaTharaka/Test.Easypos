@@ -9,10 +9,17 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // PROTECT THE ROUTE: Check if user is already logged in
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
-        navigate("/dashboard", { replace: true });
+        if (user.emailVerified) {
+          // If verified, go to dashboard
+          navigate("/dashboard", { replace: true });
+        } else {
+          // If logged in but NOT verified, go to waiting room
+          navigate("/verify-email", { replace: true });
+        }
       } else {
         setCheckingAuth(false); // No user, show login form
       }
@@ -23,16 +30,35 @@ const Login = () => {
 
   const handleEmailLogin = async () => {
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      navigate("/user-details");
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // CRITICAL CHECK: Is the email verified?
+      if (!userCredential.user.emailVerified) {
+        // Stop them here and send to verification page
+        navigate("/verify-email");
+      } else {
+        // Proceed to user details or dashboard
+        navigate("/user-details");
+      }
+
     } catch (error) {
-      alert("Login failed: " + error.message);
+      // Custom Error Messages for clarity
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        alert("Account not found or incorrect password.\n\nPlease check your details or Sign Up if you are new.");
+      } else if (error.code === 'auth/wrong-password') {
+        alert("Incorrect password.");
+      } else if (error.code === 'auth/too-many-requests') {
+        alert("Too many failed attempts. Please try again later.");
+      } else {
+        alert("Login failed: " + error.message);
+      }
     }
   };
 
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, provider);
+      // Google Auth is automatically verified
       navigate("/user-details");
     } catch (error) {
       alert("Google login failed: " + error.message);
