@@ -7,6 +7,7 @@ import {
   serverTimestamp, 
   deleteDoc, 
   doc, 
+  getDoc, // Added getDoc for fetching settings
   runTransaction, 
   orderBy, 
   limit, 
@@ -18,7 +19,7 @@ import {
   AiOutlinePlus, 
   AiOutlineDelete, 
   AiOutlineSearch, 
-  AiOutlineFilter,
+  AiOutlineFilter, 
   AiOutlineLoading 
 } from "react-icons/ai";
 import AsyncSelect from "react-select/async";
@@ -31,6 +32,9 @@ const StockOut = ({ internalUser }) => {
   const [showModal, setShowModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   
+  // State for Company Settings (Header & Logo)
+  const [companySettings, setCompanySettings] = useState(null);
+
   const [form, setForm] = useState({
     itemId: "",
     category: "",
@@ -63,7 +67,113 @@ const StockOut = ({ internalUser }) => {
   };
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
-  // --- ASYNC OPTION LOADER (FIXED) ---
+  // --- 1. Fetch Company Settings for Receipt Header ---
+  useEffect(() => {
+    const fetchSettings = async () => {
+        const user = auth.currentUser;
+        if (!user) return;
+        try {
+            const settingsRef = doc(db, user.uid, "settings");
+            const snap = await getDoc(settingsRef);
+            if (snap.exists()) {
+                setCompanySettings(snap.data());
+            }
+        } catch (error) {
+            console.error("Error fetching settings:", error);
+        }
+    };
+    fetchSettings();
+  }, []);
+
+  // --- 2. Receipt Generator Function ---
+  const handleOpenReceipt = (item) => {
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return alert("Please allow popups to view the receipt.");
+
+    // Retrieve company info
+    const logoUrl = companySettings?.companyLogo || "";
+    const companyName = companySettings?.companyName || "Company Name";
+    const dateStr = item.createdAt?.toDate ? item.createdAt.toDate().toLocaleString() : new Date().toLocaleString();
+
+    // ✅ UPDATED: Use .ico file for the tab icon
+    const appIconUrl = window.location.origin + "/my-logo.ico";
+
+    const htmlContent = `
+      <html>
+      <head>
+        <title>Stock Out Receipt - ${item.stockOutId}</title>
+        
+        <link rel="icon" href="${appIconUrl}" />
+
+        <style>
+          body { font-family: 'Inter', sans-serif; padding: 40px; color: #333; }
+          .header { display: flex; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+          .logo { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; margin-right: 20px; background: #f3f4f6; }
+          .company-info h1 { margin: 0; font-size: 24px; color: #2c3e50; }
+          .company-info p { margin: 5px 0 0 0; font-size: 14px; color: #7f8c8d; }
+          .receipt-title { text-align: center; margin-bottom: 30px; }
+          .receipt-title h2 { margin: 0; font-size: 22px; text-transform: uppercase; letter-spacing: 1px; }
+          .receipt-title span { font-size: 14px; color: #7f8c8d; }
+          .details-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+          .details-table th { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; color: #7f8c8d; font-size: 12px; text-transform: uppercase; }
+          .details-table td { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; }
+          .strong { font-weight: 600; color: #2c3e50; }
+          .footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; display: flex; justify-content: space-between; font-size: 12px; color: #7f8c8d; }
+          .signature-box { text-align: center; margin-top: 40px; }
+          .signature-line { width: 150px; border-top: 1px solid #333; margin: 0 auto 5px auto; }
+          @media print { .no-print { display: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+            ${logoUrl ? `<img src="${logoUrl}" class="logo" id="receiptLogo" />` : '<div class="logo"></div>'}
+            <div class="company-info">
+                <h1>${companyName}</h1>
+                <p>Wayne Systems Inventory Management</p>
+            </div>
+        </div>
+
+        <div class="receipt-title">
+            <h2>Stock Out Note</h2>
+            <span>ID: ${item.stockOutId}</span>
+        </div>
+
+        <table class="details-table">
+            <tr><th width="30%">Item</th><td class="strong">${item.item}</td></tr>
+            <tr><th>Category</th><td>${item.category}</td></tr>
+            <tr><th>Type</th><td>${item.type}</td></tr>
+            <tr><th>Quantity</th><td class="strong" style="font-size: 16px;">${item.quantity} ${item.unit}</td></tr>
+            <tr><th>Date & Time</th><td>${dateStr}</td></tr>
+            <tr><th>Receiver Name</th><td>${item.receiverName || '-'}</td></tr>
+            <tr><th>Receiver ID</th><td>${item.receiverId || '-'}</td></tr>
+            <tr><th>Remark</th><td>${item.remark || '-'}</td></tr>
+            <tr><th>Issued By</th><td>${item.addedBy}</td></tr>
+        </table>
+
+        <div class="footer">
+            <div class="signature-box"><div class="signature-line"></div>Receiver Signature</div>
+            <div class="signature-box"><div class="signature-line"></div>Authorized Signature</div>
+        </div>
+        
+        <script>
+          // ✅ Fast Print Script: Prints as soon as possible
+          const img = document.getElementById('receiptLogo');
+          if (img && !img.complete) {
+              img.onload = () => { window.print(); };
+              setTimeout(() => { window.print(); }, 1500); 
+          } else {
+              window.print();
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
+  // --- ASYNC OPTION LOADER ---
   const loadDropdownOptions = async (inputValue) => {
     const user = auth.currentUser;
     if (!user) return [];
@@ -71,23 +181,19 @@ const StockOut = ({ internalUser }) => {
 
     const itemsColRef = collection(db, uid, "items", "item_list");
     
-    // 1. Base Constraints: Only show 'storesItem' or 'buySell' items
+    // 1. Base Constraints
     let constraints = [
         where("type", "in", ["storesItem", "buySell"]),
         limit(20) 
     ];
 
     if (inputValue) {
-        // 2. Case Sensitivity Fix:
-        // Most items are saved like "Samsung Phone" (Capitalized).
-        // If user types "sam", we convert it to "Sam" to match the DB.
+        // 2. Case Sensitivity Handler
         const formattedInput = inputValue.charAt(0).toUpperCase() + inputValue.slice(1);
-
         constraints.push(where("name", ">=", formattedInput));
         constraints.push(where("name", "<=", formattedInput + "\uf8ff"));
         constraints.push(orderBy("name"));
     } else {
-        // 3. Default View: Sort by name A-Z
         constraints.push(orderBy("name"));
     }
 
@@ -108,8 +214,6 @@ const StockOut = ({ internalUser }) => {
         });
     } catch (error) {
         console.error("Error loading items:", error);
-        
-        // 4. Missing Index Handler
         if (error.code === 'failed-precondition') {
             alert("System Error: Missing Database Index.\n\nOpen your browser console (F12) and click the link provided by Firebase to fix this instantly.");
         }
@@ -213,9 +317,10 @@ const StockOut = ({ internalUser }) => {
     }
   };
 
-  // --- SAVE Transaction ---
+  // --- SAVE Transaction (UPDATED: Optional Receiver & Period Out) ---
   const handleSave = async () => {
-    if (!form.item || !form.quantity || !form.receiverId || !form.receiverName) { return alert("Please fill all required fields (*)."); }
+    // ✅ Validation Check: Receiver Name and ID are no longer required
+    if (!form.item || !form.quantity) { return alert("Please fill all required fields (*)."); }
     if (isProcessing) return; 
 
     setIsProcessing(true);
@@ -235,6 +340,7 @@ const StockOut = ({ internalUser }) => {
 
           const itemData = itemSnap.data();
           const currentQty = parseFloat(itemData.qtyOnHand) || 0;
+          const currentPeriodOut = parseFloat(itemData.periodOut) || 0; 
           const requestedQty = parseFloat(form.quantity);
 
           if (currentQty < requestedQty) {
@@ -244,7 +350,11 @@ const StockOut = ({ internalUser }) => {
           const newQty = currentQty - requestedQty;
           const costAtTimeOfSale = parseFloat(itemData.averageCost) || 0;
 
-          transaction.update(itemRef, { qtyOnHand: newQty });
+          // ✅ Increment Period Out
+          transaction.update(itemRef, { 
+              qtyOnHand: newQty,
+              periodOut: currentPeriodOut + requestedQty 
+          });
 
           const stockOutRef = doc(collection(db, uid, "inventory", "stock_out"));
           const stockOutData = { 
@@ -254,8 +364,8 @@ const StockOut = ({ internalUser }) => {
               type: form.type || "",
               unit: form.unit || "", 
               remark: form.remark || "",
-              receiverId: form.receiverId,
-              receiverName: form.receiverName,
+              receiverId: form.receiverId || "", // Optional
+              receiverName: form.receiverName || "", // Optional
               stockOutId, 
               quantity: requestedQty, 
               costAtTimeOfSale: costAtTimeOfSale, 
@@ -279,7 +389,7 @@ const StockOut = ({ internalUser }) => {
     }
   };
 
-  // --- DELETE Transaction ---
+  // --- DELETE Transaction (Restores Stock & Period Out) ---
   const handleDelete = async (item) => {
     if (!isAdmin) return alert("Only admins can delete stock-out entries.");
     if (isProcessing) return; 
@@ -309,10 +419,12 @@ const StockOut = ({ internalUser }) => {
         const masterData = itemSnap.data();
         const currentMasterQty = parseFloat(masterData.qtyOnHand) || 0;
         const currentMasterAvg = parseFloat(masterData.averageCost) || 0;
+        const currentPeriodOut = parseFloat(masterData.periodOut) || 0;
         
         const newMasterQty = currentMasterQty + restoreQty;
         let newAvgCost = 0;
 
+        // Recalculate Average Cost on Restoration
         if (newMasterQty > 0) {
             const currentTotalValue = currentMasterQty * currentMasterAvg;
             const returnedValue = restoreQty * restoreCost;
@@ -321,16 +433,18 @@ const StockOut = ({ internalUser }) => {
             newAvgCost = restoreCost;
         }
 
+        // ✅ Decrement Period Out (prevent negative)
         transaction.update(itemRef, { 
             qtyOnHand: newMasterQty,
-            averageCost: newAvgCost 
+            averageCost: newAvgCost,
+            periodOut: Math.max(0, currentPeriodOut - restoreQty) 
         });
         
         transaction.delete(stockOutRef);
       });
 
       fetchStockOuts(page > 1 ? 'prev' : 'initial');
-      alert("Record deleted, Stock Restored, and Average Cost updated successfully.");
+      alert("Record deleted, Stock Restored, and Counters updated successfully.");
 
     } catch (error) {
       console.error("Delete failed:", error);
@@ -340,6 +454,7 @@ const StockOut = ({ internalUser }) => {
     }
   };
   
+  // Safe filtering
   const filteredList = stockOutList.filter((item) => {
     if (!search) return true;
     return Object.values(item).some((val) => val?.toString().toLowerCase().includes(search.toLowerCase()));
@@ -388,7 +503,6 @@ const StockOut = ({ internalUser }) => {
                 <div style={styles.formGroupFull}>
                     <label style={styles.label}>Select Item *</label>
                     <AsyncSelect 
-                        // Removed cacheOptions to fix "new item not showing" issue
                         defaultOptions 
                         loadOptions={loadDropdownOptions} 
                         onChange={handleItemSelect}
@@ -405,8 +519,11 @@ const StockOut = ({ internalUser }) => {
                 </div>
                 <div style={styles.formGroupFull}><label style={styles.label}>Quantity *</label><input type="number" name="quantity" value={form.quantity} onChange={handleChange} style={styles.input} placeholder="Enter quantity being removed"/></div>
                 <hr style={styles.hr} />
-                <div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID *</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div>
-                <div style={styles.formGroup}><label style={styles.label}>Receiver Name *</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div>
+                
+                {/* ✅ UPDATED: Removed Asterisk (*) to indicate optional fields */}
+                <div style={styles.formGroup}><label style={styles.label}>Receiver Emp ID</label><input type="text" name="receiverId" value={form.receiverId} onChange={handleChange} style={styles.input} placeholder="Employee ID"/></div>
+                <div style={styles.formGroup}><label style={styles.label}>Receiver Name</label><input type="text" name="receiverName" value={form.receiverName} onChange={handleChange} style={styles.input} placeholder="Full name"/></div>
+                
                 <div style={styles.formGroupFull}><label style={styles.label}>Remark</label><textarea name="remark" value={form.remark} onChange={handleChange} style={styles.textarea} rows={3} maxLength={250} placeholder="Add a note or reason..."/></div>
             </div>
             
@@ -429,7 +546,16 @@ const StockOut = ({ internalUser }) => {
             <tbody>
               {filteredList.length > 0 ? (filteredList.map((item) => (
                   <tr key={item.id} style={styles.tr}>
-                    <td style={styles.td}><Link to={`/stockout-view/${item.id}`} style={styles.link}>{item.stockOutId}</Link></td>
+                    <td style={styles.td}>
+                        {/* ✅ UPDATED: Clickable ID to Open Receipt */}
+                        <span 
+                            style={{...styles.link, cursor: 'pointer'}} 
+                            onClick={() => handleOpenReceipt(item)}
+                            title="Click to print receipt"
+                        >
+                            {item.stockOutId}
+                        </span>
+                    </td>
                     <td style={styles.td}>{item.item}</td>
                     <td style={styles.td}>{item.type}</td>
                     <td style={styles.td}>{item.category}</td>

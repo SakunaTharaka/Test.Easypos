@@ -344,7 +344,8 @@ const Dashboard = () => {
             {activeFinanceTab === "Stock Payments" && <StockPayment />}
             {/* Removed CreditCust component rendering */}
             {activeFinanceTab === "Reconcilation" && <DaySaleBal />}
-            {activeFinanceTab === "Expenses" && <Expenses />}
+            {/* ✅ FIXED: Passing 'goToSettings' prop to Expenses */}
+            {activeFinanceTab === "Expenses" && <Expenses goToSettings={() => setActiveTab("Settings")} />}
             {activeFinanceTab === "Summary" && <Summary />}
             {activeFinanceTab === "Cash Book" && <CashBook />}
             {activeFinanceTab === "Accounts" && <Accounts />}
@@ -417,7 +418,12 @@ const Dashboard = () => {
       <div style={styles.mainContentWrapper}>
         {/* Fixed Top Header */}
         <div style={styles.topBar}>
-          <div style={styles.headerLeft}>
+          {/* Clickable Header Left for Settings Redirect */}
+          <div 
+            style={{...styles.headerLeft, cursor: 'pointer'}} 
+            onClick={() => setActiveTab("Settings")}
+            title="Go to Settings"
+          >
             <div style={styles.logoPlaceholder}>
               {userInfo?.companyLogo ? (
                 <img src={userInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} />
@@ -428,11 +434,20 @@ const Dashboard = () => {
               <p style={styles.wayneSystems}>Wayne Systems</p>
             </div>
           </div>
+
           <div style={styles.headerCenter}>
+            {/* Clickable System Alert for Dashboard Redirect */}
             {isAnnouncementActive && (
-              <div style={styles.blinkingIndicator}>SYSTEM ALERT</div>
+              <div 
+                style={{...styles.blinkingIndicator, cursor: 'pointer'}} 
+                onClick={() => setActiveTab("Dashboard")}
+                title="Go to Dashboard"
+              >
+                SYSTEM ALERT
+              </div>
             )}
           </div>
+          
           <div style={styles.headerRight}>
             {internalLoggedInUser && (
               <div style={styles.userBadge}><span style={styles.userName}>{internalLoggedInUser.username}</span></div>

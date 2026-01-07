@@ -6,7 +6,8 @@ import Select from "react-select";
 import CreatableSelect from 'react-select/creatable';
 import { CashBookContext } from "../../context/CashBookContext";
 
-const Expenses = () => {
+// ✅ UPDATED: Receive 'goToSettings' prop from Dashboard
+const Expenses = ({ goToSettings }) => {
   const { cashBooks, cashBookBalances, reconciledDates, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
 
   const [expenseCategories, setExpenseCategories] = useState([]);
@@ -31,10 +32,12 @@ const Expenses = () => {
     } catch (e) { return null; }
   };
 
-  const categoryOptions = useMemo(() => 
-    expenseCategories.map(cat => ({ value: cat, label: cat })),
-    [expenseCategories]
-  );
+  // ✅ UPDATED: Added "Add New Category" Option
+  const categoryOptions = useMemo(() => [
+    { value: 'ADD_NEW', label: '➕ Add New Category', color: '#2ecc71' },
+    ...expenseCategories.map(cat => ({ value: cat, label: cat }))
+  ], [expenseCategories]);
+
   const cashBookOptions = useMemo(() => 
     cashBooks.map(book => ({ value: book.id, label: book.name })),
     [cashBooks]
@@ -99,7 +102,6 @@ const Expenses = () => {
         const expensesQuery = buildQuery(expensesCollection, 'createdAt');
         const paymentsQuery = buildQuery(paymentsCollection, 'paidAt');
         
-        // ✨ FIX: Changed getDocs(paymentsSnap) to getDocs(paymentsQuery)
         const [expensesSnap, paymentsSnap] = await Promise.all([getDocs(expensesQuery), getDocs(paymentsQuery)]);
         
         const expensesData = expensesSnap.docs.map(d => ({ ...d.data(), id: d.id, type: 'Expense' }));
@@ -154,7 +156,17 @@ const Expenses = () => {
       } else { setFormError(""); }
   }, [formState.amount, formState.cashBook, cashBookBalances]);
 
+  // ✅ UPDATED: Handle Selection & Redirect
   const handleSelectChange = (name, selectedOption) => {
+      // 1. Check if "Add New" was clicked
+      if (name === 'category' && selectedOption?.value === 'ADD_NEW') {
+          if (goToSettings) {
+              goToSettings(); // Switch tab
+          } else {
+              alert("Please go to Settings > Finance Settings to add new categories.");
+          }
+          return;
+      }
       setFormState(prev => ({...prev, [name]: selectedOption}));
   };
 
@@ -247,7 +259,15 @@ const Expenses = () => {
             </div>
             <div style={{...styles.formGroup, flex: 1.5}}>
                 <label style={styles.label}>Category</label>
-                <CreatableSelect isClearable options={categoryOptions} value={formState.category} onChange={(option) => handleSelectChange('category', option)} placeholder="Select or type..." styles={customSelectStyles} />
+                {/* ✅ UPDATED: Using modified categoryOptions */}
+                <CreatableSelect 
+                    isClearable 
+                    options={categoryOptions} 
+                    value={formState.category} 
+                    onChange={(option) => handleSelectChange('category', option)} 
+                    placeholder="Select or type..." 
+                    styles={customSelectStyles} 
+                />
             </div>
             <div style={styles.formGroup}>
                 <label style={styles.label}>Amount</label>

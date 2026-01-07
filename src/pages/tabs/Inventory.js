@@ -433,7 +433,23 @@ const Inventory = ({ internalUser }) => {
             <div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock-In</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div>
             <div style={styles.formGrid}>
               <div style={styles.formGroup}><label style={styles.label}>Supplier Name</label><input value={supplierInfo.name} onChange={e => setSupplierInfo({...supplierInfo, name: e.target.value})} style={styles.input} /></div>
-              <div style={styles.formGroup}><label style={styles.label}>Supplier Mobile</label><input value={supplierInfo.mobile} onChange={e => setSupplierInfo({...supplierInfo, mobile: e.target.value})} style={styles.input} maxLength="10"/></div>
+              
+              {/* ✅ UPDATED: Digits Only & Max Length 10 */}
+              <div style={styles.formGroup}>
+                  <label style={styles.label}>Supplier Mobile</label>
+                  <input 
+                      value={supplierInfo.mobile} 
+                      onChange={(e) => {
+                          // Allow only numbers
+                          const val = e.target.value.replace(/[^0-9]/g, '');
+                          setSupplierInfo({...supplierInfo, mobile: val});
+                      }} 
+                      style={styles.input} 
+                      maxLength="10"
+                      placeholder="07XXXXXXXX"
+                  />
+              </div>
+
               <div style={styles.formGroupFull}><label style={styles.label}>Supplier Company</label><input value={supplierInfo.company} onChange={e => setSupplierInfo({...supplierInfo, company: e.target.value})} style={styles.input} /></div>
               <div style={styles.formGroupFull}><label style={styles.label}>Reference Purchase Order (Optional)</label><Select options={purchaseOrders} value={selectedPO} onChange={setSelectedPO} placeholder="Search by PO ID..." isClearable /></div>
               <hr style={styles.hr} />

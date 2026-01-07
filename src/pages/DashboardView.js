@@ -26,9 +26,9 @@ const DashboardView = ({ internalUser }) => {
   const [greeting, setGreeting] = useState("");
   const [subGreeting, setSubGreeting] = useState("");
 
-  // Helper: Get Sri Lanka Date String for Doc ID
+  // Helper: Get Sri Lanka Date String for Doc ID (Matches Invoice.js)
   const getSriLankaDate = (dateObj = new Date()) => {
-    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // Result: YYYY-MM-DD
   };
 
   // 1. Clock & Greeting Effect
@@ -70,7 +70,7 @@ const DashboardView = ({ internalUser }) => {
       try {
         const uid = user.uid;
         
-        // --- A. Fetch Today's Stats from daily_stats (Optimized) ---
+        // --- A. Fetch Today's Stats from daily_stats ---
         const todayDateStr = getSriLankaDate();
         const dailyStatsRef = doc(db, uid, "daily_stats", "entries", todayDateStr);
         
@@ -98,7 +98,6 @@ const DashboardView = ({ internalUser }) => {
         if (dailyStatsSnap.exists()) {
             const data = dailyStatsSnap.data();
             totalSales = data.totalSales || 0;
-            // ✅ FIX: Reading count directly from daily_stats (matches Invoice.js logic)
             invoicesToday = data.invoiceCount || 0; 
         }
 
@@ -115,16 +114,24 @@ const DashboardView = ({ internalUser }) => {
             setGlobalAnnouncement(null);
         }
 
-        // 3. Low Stock Logic
+        // 3. Low Stock Logic (FIXED)
         if (settingsSnap.exists()) {
             const threshold = settingsSnap.data().stockReminder;
             const stockReminderThreshold = threshold === "Do not remind" ? null : parseInt(threshold);
 
             if (stockReminderThreshold !== null) {
-                const allStock = await calculateStockBalances(db, uid);
+                // FIX 1: Fetch 1000 items to cover more inventory (instead of default 50)
+                // FIX 2: Destructure 'data' because calculateStockBalances returns { data, lastVisible }
+                const stockResult = await calculateStockBalances(db, uid, null, 1000); 
+                const allStock = stockResult.data || []; 
+
                 const lowItems = allStock.filter(item => {
-                    if (item.totalStockIn <= 0) return false;
-                    const percentage = (item.availableQty / item.totalStockIn) * 100;
+                    // FIX 3: Calculate Total Stock In manually (opening + periodIn)
+                    const totalStockIn = (item.openingStock || 0) + (item.periodIn || 0);
+                    
+                    if (totalStockIn <= 0) return false; // Avoid division by zero
+                    
+                    const percentage = (item.availableQty / totalStockIn) * 100;
                     return percentage <= stockReminderThreshold;
                 });
 
@@ -136,8 +143,7 @@ const DashboardView = ({ internalUser }) => {
             }
         }
         
-        // 4. ✅ OPTIMIZED Chart Logic (Last 7 Days from daily_stats)
-        // Instead of reading ALL invoices, we read exactly 7 documents from daily_stats
+        // 4. Chart Logic
         const chartLabels = [];
         const chartDataPoints = [];
         const chartPromises = [];
@@ -161,7 +167,7 @@ const DashboardView = ({ internalUser }) => {
             if (docSnap.exists()) {
                 chartDataPoints.push(docSnap.data().totalSales || 0);
             } else {
-                chartDataPoints.push(0); // If no sales that day, push 0
+                chartDataPoints.push(0);
             }
         });
 
@@ -188,7 +194,7 @@ const DashboardView = ({ internalUser }) => {
     };
 
     fetchData();
-  }, [internalUser]); // Re-run if user changes (rare)
+  }, [internalUser]); 
 
   const handleDismissLowStockAlert = () => {
     setShowLowStockAlert(false);

@@ -75,6 +75,7 @@ const StockBalance = () => {
         setPage(1);
       }
 
+      // 1. Fetch data from utility
       const { data, lastVisible: newCursor } = await calculateStockBalances(
           db, 
           uid, 
@@ -174,7 +175,6 @@ const StockBalance = () => {
 
   const exportToCSV = () => {
     // Note: This only exports the CURRENT PAGE because that's all we have loaded.
-    // To export ALL, you'd need a separate function to fetch all collections.
     const headers = ["Item", "Category", "Opening Stock", "Period In", "Period Out", "Available Qty"];
     const csvContent = [
       headers.join(","),
@@ -200,7 +200,7 @@ const StockBalance = () => {
         <h2 style={styles.header}>Stock Balance Report</h2>
         <p style={styles.subHeader}>View inventory levels (Page {page})</p>
         {stockReminderThreshold && (
-          <div style={styles.reminderNote}><AiOutlineExclamationCircle size={16} /><span>Items below threshold are highlighted.</span></div>
+          <div style={styles.reminderNote}><AiOutlineExclamationCircle size={16} /><span>Items below threshold ({stockReminderThreshold}%) are highlighted in yellow.</span></div>
         )}
       </div>
 
@@ -249,10 +249,12 @@ const StockBalance = () => {
                 <tbody>
                   {filteredData.length > 0 ? (
                     filteredData.map((item, idx) => {
-                      // Calc percentage for reminder
-                      const throughput = item.openingStock + item.periodIn;
+                      // ✅ FIX: Calculate percentage using (Opening + PeriodIn)
+                      const throughput = (Number(item.openingStock) || 0) + (Number(item.periodIn) || 0);
                       const percentage = throughput > 0 ? (item.availableQty / throughput) * 100 : 100;
-                      const isLow = stockReminderThreshold && percentage <= stockReminderThreshold;
+                      
+                      // Highlight Logic
+                      const isLow = stockReminderThreshold !== null && percentage <= stockReminderThreshold && throughput > 0;
                       const isUnbal = item.availableQty < 0;
 
                       return (
@@ -299,7 +301,6 @@ const StockBalance = () => {
   );
 };
 
-// ... Styles object remains exactly the same as previous, just ensure paginationButton styles are there
 const styles = {
     container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f8f9fa' },
     loadingContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#6c757d' },

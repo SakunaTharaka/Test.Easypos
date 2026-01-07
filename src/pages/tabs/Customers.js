@@ -29,6 +29,9 @@ const Customers = ({ internalUser, maintainCreditCustomers }) => {
   
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // ✅ Defined Constant for Limit
+  const MAX_CUSTOMERS = 50;
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
@@ -108,6 +111,11 @@ const Customers = ({ internalUser, maintainCreditCustomers }) => {
     if (!form.name.trim() || !form.priceCategoryId) {
       return alert("Customer Name and Price Category are required.");
     }
+
+    // ✅ **LIMIT CHECK**: Allow max 50 customers
+    if (!editingCustomer && customers.length >= MAX_CUSTOMERS) {
+        return alert(`Customer Limit Reached (Max ${MAX_CUSTOMERS}).\nYou cannot create more customers. Please delete old customers to add new ones.`);
+    }
     
     setIsSaving(true);
     const uid = auth.currentUser.uid;
@@ -161,20 +169,51 @@ const Customers = ({ internalUser, maintainCreditCustomers }) => {
 
   return (
     <div style={{ padding: 16 }}>
+      {/* HEADER ROW: Title (Left) + Limit Badge (Right) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2>Customers Management</h2>
-        {isAdmin && (
+        <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333", margin: 0 }}>Customers Management</h2>
+        
+        {/* ✅ VISUAL COUNTER (Exact Match to Items.js) */}
+        <div style={{ 
+            backgroundColor: customers.length >= MAX_CUSTOMERS ? '#fadbd8' : '#e8f6f3',
+            color: customers.length >= MAX_CUSTOMERS ? '#c0392b' : '#27ae60',
+            padding: '8px 16px',
+            borderRadius: '20px',
+            fontWeight: '600',
+            fontSize: '14px',
+            border: customers.length >= MAX_CUSTOMERS ? '1px solid #e74c3c' : '1px solid #2ecc71'
+        }}>
+            Total Customers: {customers.length} / {MAX_CUSTOMERS}
+        </div>
+      </div>
+
+      {/* ACTION ROW: Button (Right Aligned) */}
+      {isAdmin && (
+        <div style={{ marginBottom: "20px", display: "flex", justifyContent: 'flex-end', alignItems: "center" }}>
           <button
             onClick={() => {
+              if (customers.length >= MAX_CUSTOMERS) {
+                  return alert(`Customer Limit Reached (Max ${MAX_CUSTOMERS}).\nPlease delete old customers to add new ones.`);
+              }
               resetForm();
               setShowCustomerPopup(true);
             }}
-            style={{ padding: "8px 16px", background: "#3498db", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ 
+                padding: "8px 16px", 
+                background: customers.length >= MAX_CUSTOMERS ? "#95a5a6" : "#3498db", 
+                color: "#fff", 
+                border: "none", 
+                borderRadius: 4, 
+                cursor: customers.length >= MAX_CUSTOMERS ? "not-allowed" : "pointer", 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px' 
+            }}
           >
             <AiOutlinePlus /> Add Customer
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>

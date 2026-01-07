@@ -47,6 +47,9 @@ const PriceCat = ({ internalUser }) => {
   const priceInputRef = useRef(null); 
   const saveButtonRef = useRef(null);
 
+  // ✅ Defined Constant for Limit
+  const MAX_CATEGORIES = 35;
+
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
     try {
@@ -191,6 +194,12 @@ const PriceCat = ({ internalUser }) => {
 
   const initiateSaveCategory = () => {
     if (!newCategoryName.trim()) return alert("Enter category name");
+    
+    // ✅ LIMIT CHECK
+    if (!editingCategory && categories.length >= MAX_CATEGORIES) {
+        return alert(`Category Limit Reached (Max ${MAX_CATEGORIES}).\nPlease delete old categories to add new ones.`);
+    }
+
     if (editingCategory) {
         handleSaveCategory(editingCategory.isDiscountable || false);
     } else {
@@ -418,21 +427,39 @@ const PriceCat = ({ internalUser }) => {
   return (
     <div style={{ display: "flex", height: "calc(100vh - 200px)" }}>
       <div style={{ width: "300px", borderRight: "1px solid #ddd", padding: 16, overflowY: 'auto' }}>
-        <h3>Price Categories</h3>
+        
+        {/* ✅ SIDEBAR HEADER with LIMIT BADGE */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ margin: 0 }}>Price Categories</h3>
+            <div style={{ 
+                backgroundColor: categories.length >= MAX_CATEGORIES ? '#fadbd8' : '#e8f6f3',
+                color: categories.length >= MAX_CATEGORIES ? '#c0392b' : '#27ae60',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontWeight: '600',
+                fontSize: '11px',
+                border: categories.length >= MAX_CATEGORIES ? '1px solid #e74c3c' : '1px solid #2ecc71',
+                whiteSpace: 'nowrap'
+            }}>
+                {categories.length} / {MAX_CATEGORIES}
+            </div>
+        </div>
+
         {isAdmin && (
           <div style={{ marginBottom: 16 }}>
             <input type="text" placeholder="New category name..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8, boxSizing: 'border-box' }} />
             <button 
               onClick={initiateSaveCategory} 
-              disabled={isSavingCategory}
+              // ✅ Disable logic based on limit
+              disabled={isSavingCategory || (!editingCategory && categories.length >= MAX_CATEGORIES)}
               style={{ 
                 width: "100%", 
                 padding: 8, 
-                background: editingCategory ? "#f39c12" : "#2ecc71", 
+                background: editingCategory ? "#f39c12" : (categories.length >= MAX_CATEGORIES ? "#95a5a6" : "#2ecc71"), 
                 color: "#fff", 
                 border: "none", 
                 borderRadius: 4, 
-                cursor: "pointer",
+                cursor: (categories.length >= MAX_CATEGORIES && !editingCategory) ? "not-allowed" : "pointer",
                 opacity: isSavingCategory ? 0.7 : 1
               }}
             >

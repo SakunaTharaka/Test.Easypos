@@ -13,7 +13,7 @@ import {
   runTransaction 
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
-import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload } from 'react-icons/ai'; 
+import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload, AiOutlineBank, AiOutlineWallet, AiOutlineGlobal } from 'react-icons/ai'; 
 
 const Accounts = () => {
   const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
@@ -136,9 +136,8 @@ const Accounts = () => {
     e.preventDefault();
     if (!uid) return;
     
-    // --- 🛑 VALIDATION: PREVENT DEPOSIT -> WITHDRAWAL ---
     if (transferFromId === 'DEPOSIT_CASH' && transferToId === 'WITHDRAWAL_CASH') {
-        return alert("Operation Not Allowed: You cannot select 'Deposit to Business' and 'Withdrawal Cash' at the same time. Please select a valid internal account.");
+        return alert("Operation Not Allowed: You cannot select 'Deposit to Business' and 'Withdrawal Cash' at the same time.");
     }
 
     if (!transferFromId || !transferToId || !transferAmount) return alert("Please select Source, Destination, and Amount.");
@@ -149,18 +148,15 @@ const Accounts = () => {
 
     const allOptions = getAllOptions();
     
-    // Resolve Objects
     let transferFrom = null;
     let transferTo = null;
 
-    // 1. Resolve Source
     if (transferFromId === 'DEPOSIT_CASH') {
         transferFrom = { value: 'DEPOSIT_CASH', label: 'Deposit to Business', type: 'EXTERNAL_SOURCE' };
     } else {
         transferFrom = allOptions.find(o => o.value === transferFromId);
     }
 
-    // 2. Resolve Destination
     if (transferToId === 'WITHDRAWAL_CASH') {
         transferTo = { value: 'WITHDRAWAL_CASH', label: 'Withdrawal Cash', type: 'EXTERNAL_DEST' };
     } else {
@@ -169,7 +165,6 @@ const Accounts = () => {
 
     if (!transferFrom || !transferTo) return alert("Invalid account selection.");
 
-    // Pre-check for CashBooks (Only if NOT a deposit)
     if (transferFrom.type === 'CASHBOOK') {
         const currentBalance = cashBookBalances[transferFrom.value] || 0;
         if (currentBalance < amt) return alert(`Insufficient funds in ${transferFrom.label}.`);
@@ -180,7 +175,7 @@ const Accounts = () => {
         await runTransaction(db, async (transaction) => {
             const timestamp = serverTimestamp();
             
-            // --- SOURCE LOGIC ---
+            // Source Logic
             let currentSourceBalance = 0;
             let sourceWalletRef = null;
 
@@ -191,11 +186,9 @@ const Accounts = () => {
                 currentSourceBalance = Number(sDoc.data().balance) || 0;
                 if (currentSourceBalance < amt) throw `Insufficient funds in ${transferFrom.label}.`;
                 
-                // Deduct
                 transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
             } 
             else if (transferFrom.type === 'CASHBOOK') {
-                // Cashbook balance is calculated, so we just add an EXPENSE record to reduce it
                 const expRef = doc(collection(db, uid, 'user_data', 'expenses'));
                 transaction.set(expRef, {
                     expenseId: `TRF-${Date.now()}`,
@@ -208,9 +201,8 @@ const Accounts = () => {
                     createdBy: "System"
                 });
             }
-            // If EXTERNAL_SOURCE (Deposit), we do nothing to the source.
 
-            // --- DESTINATION LOGIC ---
+            // Destination Logic
             let currentDestBalance = 0;
             let destWalletRef = null;
 
@@ -219,11 +211,9 @@ const Accounts = () => {
                 const dDoc = await transaction.get(destWalletRef);
                 if (dDoc.exists()) currentDestBalance = Number(dDoc.data().balance) || 0;
                 
-                // Add
                 transaction.set(destWalletRef, { balance: currentDestBalance + amt, lastUpdated: timestamp }, { merge: true });
             }
             else if (transferTo.type === 'CASHBOOK') {
-                // Add Entry to CashBook
                 const entryRef = doc(collection(db, uid, 'cash_book_entries', 'entry_list'));
                 transaction.set(entryRef, {
                     amount: amt,
@@ -233,9 +223,8 @@ const Accounts = () => {
                     addedBy: "System"
                 });
             }
-            // If EXTERNAL_DEST (Withdrawal), we do nothing to the destination.
 
-            // --- LOG TRANSACTION ---
+            // Log Transaction
             const transferRef = doc(collection(db, uid, "finance", "transfers"));
             transaction.set(transferRef, {
                 fromId: transferFrom.value,
@@ -264,8 +253,7 @@ const Accounts = () => {
 
     } catch (error) {
         console.error("Transaction failed:", error);
-        const msg = typeof error === 'string' ? error : (error.message || "Unknown error");
-        alert("Transaction failed: " + msg);
+        alert("Transaction failed: " + (error.message || error));
     } finally {
         setIsTransferring(false);
     }
@@ -293,60 +281,71 @@ const Accounts = () => {
   return (
     <div style={styles.container}>
       
-      {/* --- SECTION 1: ACCOUNT BALANCES --- */}
+      {/* --- HEADER --- */}
       <div style={styles.headerRow}>
-         <h3 style={{...styles.sectionTitle, marginBottom: 0}}>Wallet Balances</h3>
+         <div>
+            <h1 style={styles.pageTitle}>Accounts & Funds</h1>
+            <p style={styles.subTitle}>Manage wallets, cash books, and internal transfers</p>
+         </div>
          <button onClick={fetchWalletBalances} style={styles.refreshBtn} title="Refresh Balances">
-            <AiOutlineReload className={loading ? 'spin' : ''} /> Refresh
+            <AiOutlineReload className={loading ? 'spin' : ''} /> Refresh Data
          </button>
       </div>
 
+      {/* --- SECTION 1: WALLET BALANCES --- */}
       <div style={styles.gridContainer}>
           <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxGreen}>Cash</div>
+              <div style={styles.cardIconBoxGreen}><AiOutlineWallet size={24}/></div>
               <div>
                   <div style={styles.cardLabel}>Cash from Sale</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.cash.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.cash.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
               </div>
           </div>
 
           <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxBlue}>Card</div>
+              <div style={styles.cardIconBoxBlue}><AiOutlineBank size={24}/></div>
               <div>
                   <div style={styles.cardLabel}>Card Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.card.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.card.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
               </div>
           </div>
 
           <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxPurple}>Online</div>
+              <div style={styles.cardIconBoxPurple}><AiOutlineGlobal size={24}/></div>
               <div>
                   <div style={styles.cardLabel}>Online Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.online.toFixed(2)}</div>
+                  <div style={styles.cardBalance}>Rs. {salesBalances.online.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
               </div>
           </div>
       </div>
       
       {/* --- SECTION 2: CASH BOOKS --- */}
-      <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>Cash Books</h3>
-          <div style={styles.cashBookGrid}>
-              {cashBooks.length > 0 ? cashBooks.map(book => (
-                  <div key={book.id} style={styles.cashBookCard}>
-                      <div style={styles.cashBookName}>{book.name}</div>
-                      <div style={styles.cashBookBalance}>Rs. {(cashBookBalances[book.id] || 0).toFixed(2)}</div>
-                  </div>
-              )) : <p style={{color: '#888'}}>No cash books found.</p>}
-          </div>
-      </div>
+      {cashBooks.length > 0 && (
+        <div style={styles.section}>
+            <div style={styles.sectionHeader}>
+                <h3 style={styles.sectionTitle}>Cash Books</h3>
+            </div>
+            <div style={styles.cashBookGrid}>
+                {cashBooks.map(book => (
+                    <div key={book.id} style={styles.cashBookCard}>
+                        <div style={styles.cashBookName}>{book.name}</div>
+                        <div style={styles.cashBookBalance}>Rs. {(cashBookBalances[book.id] || 0).toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+      )}
 
-      {/* --- SECTION 3: TRANSFER / DEPOSIT / WITHDRAW --- */}
+      {/* --- SECTION 3: TRANSFER --- */}
       <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>Manage Funds</h3>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Fund Transfer / Adjustment</h3>
+            <span style={styles.sectionBadge}>Internal Only</span>
+          </div>
           <div style={styles.transferContainer}>
               <form onSubmit={handleTransfer} style={styles.transferForm}>
                   
-                  <div style={styles.inputGroup}>
+                  <div style={{...styles.inputGroup, flex: 2}}>
                       <label style={styles.label}>From (Source)</label>
                       <select 
                           style={styles.select}
@@ -354,9 +353,7 @@ const Accounts = () => {
                           onChange={(e) => setTransferFromId(e.target.value)}
                       >
                           <option value="">Select Source...</option>
-                          {/* ✅ ADDED DEPOSIT OPTION HERE */}
                           <option value="DEPOSIT_CASH" style={{fontWeight: 'bold', color: '#16a34a'}}>➕ Deposit to Business</option>
-                          
                           <optgroup label="Sales Buckets">
                               <option value="SALES_CASH">Cash from Sale</option>
                               <option value="SALES_CARD">Card Payment Bank</option>
@@ -371,10 +368,10 @@ const Accounts = () => {
                   </div>
 
                   <div style={styles.arrowContainer}>
-                      <span style={{fontSize: '24px', color: '#94a3b8', fontWeight: 'bold'}}>→</span>
+                      <AiOutlineArrowRight size={20} />
                   </div>
 
-                  <div style={styles.inputGroup}>
+                  <div style={{...styles.inputGroup, flex: 2}}>
                       <label style={styles.label}>To (Destination)</label>
                       <select 
                           style={styles.select}
@@ -382,9 +379,7 @@ const Accounts = () => {
                           onChange={(e) => setTransferToId(e.target.value)}
                       >
                           <option value="">Select Destination...</option>
-                          {/* ✅ ADDED WITHDRAWAL OPTION HERE */}
                           <option value="WITHDRAWAL_CASH" style={{fontWeight: 'bold', color: '#ef4444'}}>➖ Withdrawal Cash</option>
-                          
                           <optgroup label="Sales Buckets">
                               <option value="SALES_CASH">Cash from Sale</option>
                               <option value="SALES_CARD">Card Payment Bank</option>
@@ -398,7 +393,7 @@ const Accounts = () => {
                       </select>
                   </div>
 
-                  <div style={styles.inputGroup}>
+                  <div style={{...styles.inputGroup, flex: 1}}>
                       <label style={styles.label}>Amount (Rs.)</label>
                       <input 
                           type="number" step="0.01" 
@@ -407,16 +402,16 @@ const Accounts = () => {
                       />
                   </div>
 
-                  <div style={styles.inputGroup}>
+                  <div style={{...styles.inputGroup, flex: 2}}>
                       <label style={styles.label}>Reference / Note</label>
                       <input 
                           type="text" value={transferDesc} onChange={e => setTransferDesc(e.target.value)} 
-                          style={styles.input} placeholder="Optional"
+                          style={styles.input} placeholder="Optional reason..."
                       />
                   </div>
 
                   <button type="submit" style={isTransferring ? styles.transferBtnDisabled : styles.transferBtn} disabled={isTransferring}>
-                      {isTransferring ? 'Processing...' : 'Execute Transaction'}
+                      {isTransferring ? 'Processing...' : 'Execute'}
                   </button>
               </form>
           </div>
@@ -424,18 +419,22 @@ const Accounts = () => {
       
       {/* --- SECTION 4: HISTORY --- */}
       <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>Transaction History</h3>
+          <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Transaction History</h3>
+          </div>
+          
           <div style={styles.controlsRow}>
               <div style={styles.searchBox}>
-                  <AiOutlineSearch style={{color: '#94a3b8'}} />
-                  <input type="text" placeholder="Search..." style={styles.simpleInput} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                  <AiOutlineSearch style={{color: '#94a3b8', fontSize: '18px'}} />
+                  <input type="text" placeholder="Search transactions..." style={styles.simpleInput} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
               </div>
               <div style={styles.dateBox}>
-                  <label style={{fontSize: '13px', fontWeight: '600', color: '#64748b'}}>Filter Date:</label>
-                  <input type="date" style={styles.simpleInput} value={filterDate} onChange={handleDateFilterChange} />
+                  <label style={{fontSize: '13px', fontWeight: '600', color: '#64748b'}}>Filter:</label>
+                  <input type="date" style={styles.dateInput} value={filterDate} onChange={handleDateFilterChange} />
                   {filterDate && <button onClick={() => { setFilterDate(""); setCurrentPage(1); setPageCursors([null]); }} style={styles.clearBtn}>Clear</button>}
               </div>
           </div>
+
           <div style={styles.tableWrapper}>
               <table style={styles.table}>
                   <thead>
@@ -452,7 +451,7 @@ const Accounts = () => {
                           <tr><td colSpan="5" style={styles.loadingTd}>Loading transactions...</td></tr>
                       ) : displayedHistory.length > 0 ? (
                           displayedHistory.map(tx => (
-                              <tr key={tx.id}>
+                              <tr key={tx.id} style={styles.tr}>
                                   <td style={styles.td}>{tx.createdAt?.toDate ? tx.createdAt.toDate().toLocaleString() : 'N/A'}</td>
                                   <td style={styles.td}><span style={styles.tag}>{tx.fromLabel}</span></td>
                                   <td style={styles.td}><span style={{...styles.tag, background: '#dcfce7', color: '#16a34a'}}>{tx.toLabel}</span></td>
@@ -482,97 +481,134 @@ const Accounts = () => {
 };
 
 const themeColors = { 
-  primary: '#00A1FF', 
-  secondary: '#6c5ce7',
-  success: '#00b894',
-  text: '#2d3436',
-  border: '#dfe6e9',
-  bg: '#f9fafb'
+  primary: '#2563eb', 
+  primaryHover: '#1d4ed8',
+  secondary: '#64748b',
+  success: '#10b981',
+  danger: '#ef4444',
+  text: '#1e293b',
+  border: '#e2e8f0',
+  bg: '#f3f4f6'
 };
 
 const styles = {
   container: {
-    padding: '24px',
+    padding: '0',
     fontFamily: "'Inter', sans-serif",
-    maxWidth: '1200px',
-    margin: '0 auto',
+    width: '100%',
     backgroundColor: themeColors.bg,
-    minHeight: '80vh'
+    minHeight: '100%',
+    boxSizing: 'border-box'
   },
   headerRow: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '15px'
+    marginBottom: '24px'
+  },
+  pageTitle: {
+    fontSize: '24px',
+    fontWeight: '700',
+    color: '#1e293b',
+    margin: 0
+  },
+  subTitle: {
+    fontSize: '14px',
+    color: '#64748b',
+    marginTop: '4px'
   },
   refreshBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    padding: '8px 12px',
+    gap: '8px',
+    padding: '10px 16px',
     background: 'white',
     border: '1px solid #cbd5e1',
-    borderRadius: '6px',
-    fontSize: '13px',
+    borderRadius: '8px',
+    fontSize: '14px',
     fontWeight: '600',
     color: '#475569',
     cursor: 'pointer',
-    transition: 'all 0.2s'
+    transition: 'all 0.2s',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
   },
   gridContainer: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '20px',
-    marginBottom: '30px'
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '24px',
+    marginBottom: '32px'
   },
   accountCard: {
     background: 'white',
-    padding: '20px',
+    padding: '24px',
     borderRadius: '12px',
-    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
     display: 'flex',
     alignItems: 'center',
-    gap: '16px',
-    border: '1px solid #f1f5f9'
+    gap: '20px',
+    border: '1px solid #e2e8f0',
+    transition: 'transform 0.2s',
+    cursor: 'default'
   },
-  cardIconBoxGreen: { width: '48px', height: '48px', borderRadius: '10px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
-  cardIconBoxBlue: { width: '48px', height: '48px', borderRadius: '10px', background: '#dbeafe', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
-  cardIconBoxPurple: { width: '48px', height: '48px', borderRadius: '10px', background: '#f3e8ff', color: '#9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' },
-  cardLabel: { fontSize: '14px', color: '#64748b', fontWeight: '500' },
-  cardBalance: { fontSize: '20px', color: '#0f172a', fontWeight: '700', marginTop: '4px' },
+  cardIconBoxGreen: { width: '56px', height: '56px', borderRadius: '12px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  cardIconBoxBlue: { width: '56px', height: '56px', borderRadius: '12px', background: '#dbeafe', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  cardIconBoxPurple: { width: '56px', height: '56px', borderRadius: '12px', background: '#f3e8ff', color: '#9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  cardLabel: { fontSize: '13px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  cardBalance: { fontSize: '24px', color: '#0f172a', fontWeight: '800', marginTop: '4px' },
   
-  section: { background: 'white', borderRadius: '12px', padding: '24px', marginBottom: '30px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0' },
-  sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1e293b', marginBottom: '20px', display: 'flex', alignItems: 'center' },
+  section: { 
+    background: 'white', 
+    borderRadius: '16px', 
+    padding: '24px', 
+    marginBottom: '32px', 
+    boxShadow: '0 1px 3px rgba(0,0,0,0.05)', 
+    border: '1px solid #e2e8f0' 
+  },
+  sectionHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' },
+  sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1e293b', margin: 0 },
+  sectionBadge: { fontSize: '11px', fontWeight: '600', color: themeColors.primary, background: '#eff6ff', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase' },
   
-  cashBookGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' },
-  cashBookCard: { background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', textAlign: 'center' },
+  cashBookGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '16px' },
+  cashBookCard: { 
+    background: '#f8fafc', 
+    padding: '20px', 
+    borderRadius: '12px', 
+    border: '1px solid #e2e8f0', 
+    textAlign: 'center',
+    transition: 'border-color 0.2s'
+  },
   cashBookName: { fontSize: '14px', fontWeight: '600', color: '#475569' },
-  cashBookBalance: { fontSize: '18px', fontWeight: '700', color: '#0f172a', marginTop: '8px' },
+  cashBookBalance: { fontSize: '20px', fontWeight: '700', color: '#0f172a', marginTop: '8px' },
 
   transferContainer: { background: '#f8fafc', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' },
   transferForm: { display: 'flex', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' },
-  inputGroup: { flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column', gap: '8px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '150px' },
   label: { fontSize: '13px', fontWeight: '600', color: '#475569' },
-  input: { padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box' },
-  select: { padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', backgroundColor: 'white' },
-  arrowContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: '10px' },
-  transferBtn: { padding: '12px 24px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginBottom: '1px', transition: 'background 0.2s' },
-  transferBtnDisabled: { padding: '12px 24px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'not-allowed', marginBottom: '1px' },
+  input: { padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', transition: 'border-color 0.2s' },
+  select: { padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', backgroundColor: 'white' },
+  arrowContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: '12px', color: '#94a3b8' },
   
-  controlsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' },
-  searchBox: { display: 'flex', alignItems: 'center', gap: '10px', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1, minWidth: '250px' },
-  dateBox: { display: 'flex', alignItems: 'center', gap: '10px' },
+  transferBtn: { padding: '12px 24px', background: themeColors.primary, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', marginBottom: '1px', transition: 'background 0.2s', height: '42px' },
+  transferBtnDisabled: { padding: '12px 24px', background: '#94a3b8', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'not-allowed', marginBottom: '1px', height: '42px' },
+  
+  controlsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' },
+  searchBox: { display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', padding: '10px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', flex: 1, minWidth: '280px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' },
+  dateBox: { display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', padding: '6px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' },
   simpleInput: { border: 'none', background: 'transparent', outline: 'none', fontSize: '14px', width: '100%' },
-  clearBtn: { padding: '4px 8px', fontSize: '12px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer' },
-  tableWrapper: { overflowX: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' },
+  dateInput: { border: 'none', outline: 'none', fontSize: '13px', color: '#334155' },
+  clearBtn: { padding: '4px 8px', fontSize: '12px', background: '#f1f5f9', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#64748b' },
+  
+  tableWrapper: { overflowX: 'auto', borderRadius: '12px', border: '1px solid #e2e8f0' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
-  th: { padding: '12px 16px', textAlign: 'left', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: '600' },
-  td: { padding: '12px 16px', borderBottom: '1px solid #e2e8f0', color: '#334155' },
-  loadingTd: { textAlign: 'center', padding: '24px', color: '#94a3b8' },
-  tag: { padding: '4px 8px', borderRadius: '4px', background: '#f1f5f9', fontSize: '12px', fontWeight: '500', color: '#475569' },
-  paginationRow: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginTop: '20px' },
-  pageBtn: { display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer' },
-  pageInfo: { fontSize: '14px', color: '#64748b' }
+  th: { padding: '16px', textAlign: 'left', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontWeight: '600', fontSize: '13px', textTransform: 'uppercase' },
+  tr: { transition: 'background 0.1s' },
+  td: { padding: '16px', borderBottom: '1px solid #f1f5f9', color: '#334155', verticalAlign: 'middle' },
+  loadingTd: { textAlign: 'center', padding: '32px', color: '#94a3b8' },
+  tag: { padding: '4px 10px', borderRadius: '6px', background: '#f1f5f9', fontSize: '12px', fontWeight: '600', color: '#475569', display: 'inline-block' },
+  
+  paginationRow: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '24px' },
+  pageBtn: { display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', color: '#475569', transition: 'all 0.2s' },
+  pageInfo: { fontSize: '14px', color: '#64748b', fontWeight: '500' }
 };
 
 export default Accounts;

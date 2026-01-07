@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { db, auth } from '../../firebase';
-import { collection, getDocs, query, where, Timestamp, doc, setDoc, getDoc, serverTimestamp, deleteDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, doc, setDoc, deleteDoc, orderBy, limit } from 'firebase/firestore';
 import { FaSearch, FaSpinner, FaClipboardList, FaSave, FaBook, FaTrash } from 'react-icons/fa';
 
 // --- Reusable Toast Notification ---
@@ -47,10 +47,12 @@ const StockOutBal = () => {
         setLastSaveTimestamp(null);
         setHasFetchedSummary(false);
         setSummaryData([]);
+        setActualQuantities({});
     }, [summaryDate]);
 
     const showToast = (message, type = 'success') => setToast({ message, type });
 
+    // ✅ FIXED LOGIC: Handles Mid-Day Restocking correctly
     const handleFetchSummary = useCallback(async () => {
         if (!summaryDate) { alert("Please select a date."); return; }
         setSummaryLoading(true);
@@ -61,70 +63,69 @@ const StockOutBal = () => {
         const endOfDay = Timestamp.fromDate(new Date(summaryDate + 'T23:59:59'));
         
         try {
-            // Check for the most recently saved report for this day
+            // 1. Check for the most recently saved report for this day
             const reportsRef = collection(db, uid, 'reports', 'daily_summaries');
             const latestReportQuery = query(reportsRef, where("reportDate", "==", summaryDate), orderBy("savedAt", "desc"), limit(1));
             const latestReportSnap = await getDocs(latestReportQuery);
 
-            let invoiceQueryStartTime = startOfDay;
-            let initialData = [];
+            let queryStartTime = startOfDay; // Default to start of day
+            let currentSummaryMap = {}; // Use a map to aggregate data
 
             if (!latestReportSnap.empty) {
                 // A report exists. Load its state as the starting point.
                 const latestReport = latestReportSnap.docs[0].data();
-                invoiceQueryStartTime = latestReport.savedAt; 
+                queryStartTime = latestReport.savedAt; 
                 setLastSaveTimestamp(latestReport.savedAt);
 
-                // Reconstruct the summary from the last saved state
-                initialData = latestReport.items.map(item => ({
-                    name: item.name,
-                    stockOutQty: item.actualQty, // New stock-out is the last actual qty
-                    invoicedQty: 0, 
-                }));
-
-            } else {
-                // No reports saved yet. This is the first fetch of the day.
-                setLastSaveTimestamp(null);
-                const stockOutRef = collection(db, uid, 'inventory', 'stock_out');
-                const stockOutQuery = query(stockOutRef, where('createdAt', '>=', startOfDay), where('createdAt', '<=', endOfDay), where('type', '==', 'buySell'));
-                const stockOutSnap = await getDocs(stockOutQuery);
-                const summaryMap = {};
-                stockOutSnap.forEach(docSnap => {
-                    const data = docSnap.data();
-                    const itemName = data.item;
-                    if (itemName) {
-                        if (!summaryMap[itemName]) summaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
-                        summaryMap[itemName].stockOutQty += Number(data.quantity);
-                    }
+                // Populate map with saved actuals (The saved actual becomes the new opening stock)
+                latestReport.items.forEach(item => {
+                    currentSummaryMap[item.name] = {
+                        name: item.name,
+                        stockOutQty: Number(item.actualQty) || 0, // Reset Stock Out to the Actual Count
+                        invoicedQty: 0
+                    };
                 });
-                initialData = Object.values(summaryMap);
+            } else {
+                setLastSaveTimestamp(null);
             }
+
+            // 2. Fetch NEW Stock Outs (Restocking) since the start time
+            // This ensures items added mid-day are included
+            const stockOutRef = collection(db, uid, 'inventory', 'stock_out');
+            const stockOutQuery = query(stockOutRef, where('createdAt', '>=', queryStartTime), where('createdAt', '<=', endOfDay), where('type', '==', 'buySell'));
+            const stockOutSnap = await getDocs(stockOutQuery);
             
-            // Fetch any new invoices created since the start of the day or the last save
+            stockOutSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                const itemName = data.item;
+                if (itemName) {
+                    if (!currentSummaryMap[itemName]) {
+                        currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
+                    }
+                    currentSummaryMap[itemName].stockOutQty += Number(data.quantity);
+                }
+            });
+            
+            // 3. Fetch NEW Invoices since the start time
             const invoicesRef = collection(db, uid, 'invoices', 'invoice_list');
-            const invoicesQuery = query(invoicesRef, where('createdAt', '>=', invoiceQueryStartTime), where('createdAt', '<=', endOfDay));
+            const invoicesQuery = query(invoicesRef, where('createdAt', '>=', queryStartTime), where('createdAt', '<=', endOfDay));
             const invoicesSnap = await getDocs(invoicesQuery);
             
-            const newInvoicesMap = {};
             invoicesSnap.forEach(docSnap => {
                 docSnap.data().items?.forEach(item => {
                     const itemName = item.itemName;
                     if (itemName) {
-                        if (!newInvoicesMap[itemName]) newInvoicesMap[itemName] = { invoicedQty: 0 };
-                        newInvoicesMap[itemName].invoicedQty += Number(item.quantity);
+                        if (!currentSummaryMap[itemName]) {
+                            // Edge case: Item sold but not stocked out? Initialize it.
+                            currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
+                        }
+                        currentSummaryMap[itemName].invoicedQty += Number(item.quantity);
                     }
                 });
             });
 
-            // Merge new invoices with the initial data
-            const finalData = initialData.map(item => {
-                const newItem = { ...item };
-                if (newInvoicesMap[item.name]) {
-                    newItem.invoicedQty += newInvoicesMap[item.name].invoicedQty;
-                }
-                return newItem;
-            }).sort((a,b) => a.name.localeCompare(b.name));
-            
+            // Convert map to array and sort
+            const finalData = Object.values(currentSummaryMap).sort((a,b) => a.name.localeCompare(b.name));
             setSummaryData(finalData);
 
         } catch (error) {
@@ -154,14 +155,15 @@ const StockOutBal = () => {
             await setDoc(reportRef, {
                 reportDate: summaryDate,
                 items: reportPayload,
-                savedAt: saveTimestamp, // Use client-side timestamp for consistency
+                savedAt: saveTimestamp,
             });
 
+            // Update local state to reflect the new "Baseline" immediately
             const nextStateData = summaryData.map(item => {
                 const actualQty = Number(actualQuantities[item.name]) || 0;
                 return {
                     ...item,
-                    stockOutQty: actualQty,
+                    stockOutQty: actualQty, // The actual becomes the new start
                     invoicedQty: 0,
                 };
             });
@@ -169,7 +171,7 @@ const StockOutBal = () => {
             setSummaryData(nextStateData);
             setActualQuantities({});
             setLastSaveTimestamp(saveTimestamp);
-            showToast("Report saved! Ready for next invoices.");
+            showToast("Report saved! Ready for next transactions.");
 
         } catch (error) {
             console.error("Error saving report: ", error);
@@ -228,7 +230,7 @@ const StockOutBal = () => {
                 </div>
                 <button onClick={handleFetchSummary} disabled={summaryLoading || !summaryDate} style={summaryLoading || !summaryDate ? styles.buttonDisabled : styles.button}>
                     {summaryLoading ? <FaSpinner className="spinner" /> : <FaSearch />}
-                    {summaryLoading ? 'Fetching...' : lastSaveTimestamp ? 'Fetch New Invoices' : 'Fetch Summary'}
+                    {summaryLoading ? 'Fetching...' : lastSaveTimestamp ? 'Fetch New Data' : 'Fetch Summary'}
                 </button>
             </div>
             {summaryLoading ? (
