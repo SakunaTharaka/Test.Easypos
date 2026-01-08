@@ -11,7 +11,6 @@ import {
   where,
   serverTimestamp,
   runTransaction
-  // limit is removed because we want ALL items
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
@@ -89,7 +88,7 @@ const styles = {
 
 // --- COMPONENTS ---
 
-// 1. PrintableLayout
+// 1. PrintableLayout (Invoice Layout)
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderDetails }) => {
   if (!invoice || (!Array.isArray(invoice.items) && !serviceJob && !orderDetails)) {
     return null;
@@ -98,6 +97,10 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
+
+  // Filter out normal items vs Free Issue items for distinct display if needed, 
+  // but standard table flow is usually better. 
+  // We will handle them inside the map.
 
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
@@ -116,7 +119,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
+  // Calculate Save: Only for Paid Items where Orig > Price
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
+    if(item.isFreeIssue) return sum; // Don't count free issue as "saved" in this logic unless requested
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
   }, 0) : 0;
@@ -150,7 +155,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <h3 style={{ marginTop: 0, borderBottom: '2px solid #000', paddingBottom: 5, textAlign: 'center' }}>
                 {isServiceOrder ? "SERVICE ORDER" : isOrder ? "CUSTOMER ORDER" : "INVOICE"}
             </h3>
-            {/* Centered Container for Details */}
             <div style={{ textAlign: 'left', display: 'inline-block', width: 'auto', minWidth: '200px' }}>
                 <p><strong>{isServiceOrder || isOrder ? "Order #:" : "Invoice #:"}</strong> {invoice.invoiceNumber}</p>
                 <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
@@ -202,7 +206,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
                 <tr key={index}>
-                  <td style={styles.td}>{item.itemName}</td>
+                  <td style={styles.td}>
+                      {item.itemName}
+                      {/* ✅ SHOW FREE ISSUE LABEL */}
+                      {item.isFreeIssue && (
+                          <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
+                              {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                          </div>
+                      )}
+                  </td>
                   <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
                   {invoice.isDiscountable && (
                       <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
@@ -465,7 +477,12 @@ const Invoice = ({ internalUser }) => {
   const [shiftProductionEnabled, setShiftProductionEnabled] = useState(false);
   const [availableShifts, setAvailableShifts] = useState([]);
   const [selectedShift, setSelectedShift] = useState("");
+  
+  // Payment & Offer Popups
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
+  const [showFreeIssuePopup, setShowFreeIssuePopup] = useState(false); // ✅ NEW STATE
+  const [calculatedFreeItems, setCalculatedFreeItems] = useState([]); // ✅ NEW STATE
+  
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const paymentOptions = ['Cash', 'Card', 'Online'];
   
@@ -615,7 +632,7 @@ const Invoice = ({ internalUser }) => {
 
   useEffect(() => {
     const handleShortcuts = (e) => {
-      if (showPaymentConfirm || isSaving || showQZPrintModal || isPrintingBrowser) return;
+      if (showPaymentConfirm || showFreeIssuePopup || isSaving || showQZPrintModal || isPrintingBrowser) return;
       if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
       if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(p => !p); }
       if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(p => !p); }
@@ -623,7 +640,7 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, selectedShift, showPaymentConfirm, isSaving, showQZPrintModal, isPrintingBrowser]);
+  }, [checkout, selectedCustomer, selectedShift, showPaymentConfirm, showFreeIssuePopup, isSaving, showQZPrintModal, isPrintingBrowser]);
 
   useEffect(() => {
     if (amountReceivedMode) receivedAmountRef.current?.focus();
@@ -692,7 +709,49 @@ const Invoice = ({ internalUser }) => {
   };
 
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
-  const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); itemInputRef.current?.focus(); };
+  const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); setCalculatedFreeItems([]); itemInputRef.current?.focus(); };
+  
+  // ✅ LOGIC: Calculate Buy X Get Y Offers
+  const handleSaveAttempt = () => {
+    if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
+    if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
+
+    const freeItems = [];
+
+    // Iterate through current checkout items
+    checkout.forEach(item => {
+        if (item.buyQty && item.getQty && Number(item.buyQty) > 0) {
+            const billedQty = Number(item.quantity);
+            const sets = Math.floor(billedQty / Number(item.buyQty));
+            if (sets > 0) {
+                const freeQty = sets * Number(item.getQty);
+                freeItems.push({
+                    ...item, // Clone original item data
+                    freeQty: freeQty, // Calculate specific free amount
+                    isFreeIssue: true // Mark as free
+                });
+            }
+        }
+    });
+
+    setCalculatedFreeItems(freeItems);
+
+    if (freeItems.length > 0) {
+        // Show Free Issue Popup
+        setShowFreeIssuePopup(true);
+    } else {
+        // Proceed directly to payment
+        setConfirmPaymentMethod('Cash'); 
+        setShowPaymentConfirm(true);
+    }
+  };
+
+  // ✅ Confirms Free Issue Popup
+  const handleFreeIssueConfirm = () => {
+      setShowFreeIssuePopup(false);
+      setConfirmPaymentMethod('Cash'); 
+      setShowPaymentConfirm(true);
+  };
   
   const executeSaveInvoice = async (method) => {
     const user = auth.currentUser;
@@ -718,8 +777,30 @@ const Invoice = ({ internalUser }) => {
       const dailyStatsRef = doc(db, user.uid, "daily_stats", "entries", dailyDateString);
 
       const finalInvoiceData = await runTransaction(db, async (t) => {
+        
+        // ✅ MERGE FREE ITEMS INTO CHECKOUT DATA FOR SAVING
+        let itemsToSave = [...checkout];
+        
+        // Re-calculate based on state just to be safe, or use state
+        // We use the previously calculated array or recalculate to ensure safety
+        // Here we append the free items as NEW ROWS with Price 0.
+        calculatedFreeItems.forEach(freeItem => {
+            itemsToSave.push({
+                ...freeItem,
+                quantity: freeItem.freeQty, // The calculated free amount
+                price: 0, // FREE
+                originalPrice: 0, // No value for customer view
+                isFreeIssue: true,
+                buyQty: freeItem.buyQty,
+                getQty: freeItem.getQty,
+                // ✅ CORRECTED: SAVE WITH ORIGINAL ITEM NAME
+                // We rely on 'isFreeIssue' flag for UI distinction, but keep DB name same for aggregation.
+                itemName: freeItem.itemName 
+            });
+        });
+
         let invoiceTotalCOGS = 0;
-        for (const item of checkout) {
+        for (const item of itemsToSave) {
              if (item.itemId) {
                  const itemMasterRef = doc(db, user.uid, "items", "item_list", item.itemId);
                  const itemSnap = await t.get(itemMasterRef);
@@ -775,7 +856,8 @@ const Invoice = ({ internalUser }) => {
         
         const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
         const invData = {
-          customerId: selectedCustomer.value, customerName: selectedCustomer.label, items: checkout, 
+          customerId: selectedCustomer.value, customerName: selectedCustomer.label, 
+          items: itemsToSave, // ✅ SAVING MERGED ITEMS (Normal + Free)
           total, deliveryCharge: Number(deliveryCharge) || 0,
           received: Number(receivedAmount) || 0,
           balance: balance,
@@ -805,16 +887,13 @@ const Invoice = ({ internalUser }) => {
       } else { alert("Saved!"); await resetForm(); }
     } catch (e) { console.error(e); alert("Save failed: " + e.message); } finally { setIsSaving(false); }
   };
-  
-  const handleSaveAttempt = () => {
-    if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
-    if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
-    setConfirmPaymentMethod('Cash'); 
-    setShowPaymentConfirm(true);
-  };
 
   useEffect(() => {
     const handleKey = (e) => {
+        if (showFreeIssuePopup) {
+            if (e.key === 'Enter') handleFreeIssueConfirm();
+            return;
+        }
         if (!showPaymentConfirm) return;
         const idx = paymentOptions.indexOf(confirmPaymentMethod);
         if (e.key === 'ArrowRight') setConfirmPaymentMethod(paymentOptions[(idx + 1) % 3]);
@@ -824,7 +903,7 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [showPaymentConfirm, confirmPaymentMethod, executeSaveInvoice]); 
+  }, [showPaymentConfirm, showFreeIssuePopup, confirmPaymentMethod, executeSaveInvoice]); 
 
   const subtotal = checkout.reduce((s, i) => s + i.price * i.quantity, 0);
   const total = subtotal + (Number(deliveryCharge) || 0);
@@ -889,6 +968,40 @@ const Invoice = ({ internalUser }) => {
         </div>
       </div>
       
+      {/* ✅ NEW: BUY X GET Y POPUP */}
+      {showFreeIssuePopup && (
+        <div style={styles.confirmOverlay}>
+          <div style={styles.confirmPopup}>
+            <h3 style={{color: '#e67e22', marginBottom: '10px'}}>🎉 Free Issues Available!</h3>
+            <p style={{marginBottom: '15px'}}>Based on "Buy X Get Y" offers, you get the following items for free:</p>
+            <div style={{maxHeight: '200px', overflowY: 'auto', textAlign: 'left', marginBottom: '20px', border: '1px solid #eee', borderRadius: '6px', padding: '10px'}}>
+                {calculatedFreeItems.map((item, index) => (
+                    <div key={index} style={{display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #f9f9f9'}}>
+                        {/* ✅ ADDED OFFER DETAILS IN BRACKETS */}
+                        <span>{item.itemName} <span style={{fontSize: '0.9em', color: '#666'}}>(Buy {item.buyQty} Get {item.getQty})</span></span>
+                        <span style={{fontWeight: 'bold', color: '#27ae60'}}>+ {item.freeQty} Free</span>
+                    </div>
+                ))}
+            </div>
+            <button 
+                onClick={handleFreeIssueConfirm}
+                style={{
+                    padding: '12px 30px', 
+                    background: '#e67e22', // Orange Button
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '6px', 
+                    fontSize: '16px', 
+                    fontWeight: 'bold', 
+                    cursor: 'pointer'
+                }}
+            >
+                OK
+            </button>
+          </div>
+        </div>
+      )}
+
       {showPaymentConfirm && (
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmPopup}>

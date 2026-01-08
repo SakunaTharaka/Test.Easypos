@@ -42,9 +42,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
     return null;
   }
 
-  // ✅ Check Language Setting
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
-
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
 
@@ -54,30 +52,24 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const invTotal = invSubtotal + deliveryCharge;
   const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
   
-  // ✅ LOGIC UPDATE: If received is 0, Balance is 0
   const invBalance = invReceived === 0 ? 0 : (invTotal - invReceived);
 
-  // Service Job Specific Calculations
   const jobTotal = serviceJob ? Number(serviceJob.totalCharge || 0) : invTotal;
   const jobAdvance = serviceJob ? Number(serviceJob.advanceAmount || 0) : invReceived;
-  
-  // ✅ LOGIC UPDATE: If advance is 0, Balance is 0
   const jobBalance = jobAdvance === 0 ? 0 : (jobTotal - jobAdvance);
 
-  // Order Specific Calculations
   const orderTotal = orderDetails ? Number(orderDetails.totalAmount || 0) : invTotal;
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
-  
-  // ✅ LOGIC UPDATE: If advance is 0, Balance is 0
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
-  // Calculate Total Savings if discountable
+  // Calculate Total Savings
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
+    // Don't double count free items as savings unless desired. 
+    // Usually Free items price is 0, so diff is 0 unless original price is set.
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
   }, 0) : 0;
 
-  // Format Date Helper
   const formatDate = (dateVal) => {
       if (!dateVal) return 'N/A';
       if (dateVal.toDate) return dateVal.toDate().toLocaleDateString(); 
@@ -113,14 +105,12 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
-            {/* SHOW DELIVERY DATE FOR ORDERS */}
             {isOrder && orderDetails && orderDetails.deliveryDate && (
                  <p style={{marginTop: 5, fontWeight: 'bold'}}>
                     <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
                  </p>
             )}
 
-            {/* SERVICE DETAILS */}
             {isServiceOrder && serviceJob && (
                 <div style={{marginTop: 10, padding: 8, background: '#f9f9f9', border: '1px dashed #ccc', textAlign: 'left'}}>
                     <p style={{fontSize: '1.1em'}}><strong>Type:</strong> {serviceJob.jobType}</p>
@@ -137,44 +127,46 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
-      {/* --- ITEMS TABLE (Hidden in Print for Service Orders only) --- */}
+      {/* --- ITEMS TABLE --- */}
       <div className={isServiceOrder ? "no-print" : ""}>
           {isServiceOrder && <h4 style={{marginTop: 20, marginBottom: 5, color: '#444'}}>Billing Details (Office View)</h4>}
           
           <table style={styles.itemsTable}>
             <thead>
               <tr>
-                {/* ✅ TRANSLATION: Item / Service */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
                     {isSinhala ? "අයිතමය" : "Item / Service"}
                 </th>
                 <th style={styles.th}>Qty</th>
                 
-                {/* Conditional Columns for Discountable Categories */}
                 {invoice.isDiscountable && (
-                    /* ✅ TRANSLATION: Orig. Price */
                     <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
                 )}
 
                 <th style={styles.th}>
-                    {/* ✅ TRANSLATION: Our Price (Also handles 'Rate') */}
                     {invoice.isDiscountable 
                         ? (isSinhala ? "අපේ මිල" : "Our Price") 
                         : (isSinhala ? "මිල" : "Rate")
                     }
                 </th>
 
-                {/* ✅ TRANSLATION: Total */}
                 <th style={styles.th}>{isSinhala ? "එකතුව" : "Total"}</th>
               </tr>
             </thead>
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
                 <tr key={index}>
-                  <td style={styles.td}>{item.itemName}</td>
+                  <td style={styles.td}>
+                      {item.itemName}
+                      {/* ✅ VISUAL INDICATOR FOR FREE ITEMS */}
+                      {item.isFreeIssue && (
+                          <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
+                              {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                          </div>
+                      )}
+                  </td>
                   <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
                   
-                  {/* Conditional Cells for Discountable Categories */}
                   {invoice.isDiscountable && (
                       <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                   )}
@@ -192,7 +184,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         <div style={styles.totalsContainer}>
             <div style={styles.totals}>
                 
-                {/* 1. SERVICE ORDER TOTALS */}
                 {isServiceOrder ? (
                     <div style={{border: '2px solid #000', padding: '10px', marginTop: '15px', borderRadius: '4px'}}>
                         <div style={styles.totalRow}>
@@ -210,7 +201,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                         </div>
                     </div>
                 ) : isOrder ? (
-                    /* 2. ORDER TOTALS */
                      <div style={{border: '1px dashed #000', padding: '10px', marginTop: '15px'}}>
                         <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
                         {deliveryCharge > 0 && (
@@ -228,18 +218,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                         </div>
                      </div>
                 ) : (
-                    /* 3. STANDARD INVOICE TOTALS (Translating this section) */
                     <>
                         <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Subtotal */}
                             <strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong>
                             <span>Rs. {invSubtotal.toFixed(2)}</span>
                         </div>
                         
-                        {/* Show Total Save */}
                         {invoice.isDiscountable && totalSave > 0 && (
                             <div style={styles.totalRow}>
-                                {/* ✅ TRANSLATION: Your Total Save */}
                                 <span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span>
                                 <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
                             </div>
@@ -249,18 +235,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                             <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
                         )}
                         <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Grand Total */}
                             <strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong>
                             <span>Rs. {invTotal.toFixed(2)}</span>
                         </div>
                         <hr style={styles.hr} />
                         <div style={styles.totalRow}>
-                            {/* ✅ TRANSLATION: Amount Received */}
                             <strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong>
                             <span>Rs. {invReceived.toFixed(2)}</span>
                         </div>
                         <div style={{ ...styles.totalRow, fontSize: '1.1em' }}>
-                            {/* ✅ TRANSLATION: Balance */}
                             <strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong>
                             <span>Rs. {invBalance.toFixed(2)}</span>
                         </div>
@@ -270,7 +253,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
-      {/* ✅ ADDED ORDER NUMBER DISPLAY (CONDITIONAL) */}
       {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
         <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
             <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
@@ -280,7 +262,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       )}
 
-      {/* Footer Disclaimer */}
       {isServiceOrder ? (
           <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
             <p><strong>Terms:</strong> Please bring this receipt when collecting your item. Items not collected within 30 days may be disposed of.</p>
@@ -326,14 +307,12 @@ const InvoiceViewer = () => {
             const invData = invoiceSnap.data();
             setInvoice(invData); 
             
-            // Check for Service Order 
             if (invData.invoiceNumber?.startsWith('SRV') && invData.relatedJobId) {
                 const jobRef = doc(db, user.uid, 'data', 'service_jobs', invData.relatedJobId);
                 const jobSnap = await getDoc(jobRef);
                 if (jobSnap.exists()) setServiceJob(jobSnap.data());
             }
 
-            // Check for Customer Order (ORD)
             if (invData.invoiceNumber?.startsWith('ORD') && invData.relatedOrderId) {
                 const orderRef = doc(db, user.uid, 'data', 'orders', invData.relatedOrderId);
                 const orderSnap = await getDoc(orderRef);
@@ -389,9 +368,7 @@ const InvoiceViewer = () => {
         .format-80mm { width: 80mm; transform: scale(1.1); }
         .format-a5 { width: 148mm; transform: scale(1.0); }
         
-        /* ✅ SCREEN-ONLY CSS TO FIX PREVIEW OVERFLOW 
-           This compacts the table padding ONLY on screen so it fits 80mm. 
-           Physical print ignores this and uses the standard inline styles. */
+        /* ✅ SCREEN-ONLY CSS TO FIX PREVIEW OVERFLOW */
         @media screen {
             .format-80mm .print-area table th, 
             .format-80mm .print-area table td {

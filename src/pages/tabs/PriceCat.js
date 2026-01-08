@@ -12,7 +12,7 @@ import {
   serverTimestamp,
   writeBatch,
 } from "firebase/firestore";
-import { AiOutlinePlus, AiOutlineDelete, AiOutlineSearch, AiOutlineEdit } from "react-icons/ai";
+import { AiOutlinePlus, AiOutlineDelete, AiOutlineSearch, AiOutlineEdit, AiFillTag } from "react-icons/ai";
 
 const PriceCat = ({ internalUser }) => {
   const [categories, setCategories] = useState([]);
@@ -31,7 +31,12 @@ const PriceCat = ({ internalUser }) => {
   const [price, setPrice] = useState(""); // Final Selling Price
   const [originalPrice, setOriginalPrice] = useState(""); 
   const [discountPercentage, setDiscountPercentage] = useState(""); 
-  const [saveAmount, setSaveAmount] = useState(""); // New State for "Save" amount
+  const [saveAmount, setSaveAmount] = useState(""); 
+  
+  // --- NEW: Buy X Get Y States ---
+  const [isBuyXGetY, setIsBuyXGetY] = useState(false);
+  const [buyQty, setBuyQty] = useState("");
+  const [getQty, setGetQty] = useState("");
 
   const [search, setSearch] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
@@ -137,13 +142,10 @@ const PriceCat = ({ internalUser }) => {
     const disc = parseFloat(discountPercentage);
     
     if (!isNaN(orig) && !isNaN(disc)) {
-        // If discount exists, recalculate Save and Price
         const saved = orig * (disc / 100);
         setSaveAmount(saved.toFixed(2));
         setPrice((orig - saved).toFixed(2));
     } else if (!isNaN(orig)) {
-        // If no discount, Price = Orig, Save = 0 or empty? 
-        // Let's assume empty discount means full price
         setPrice(orig.toFixed(2));
         setSaveAmount(""); 
     } else {
@@ -160,12 +162,10 @@ const PriceCat = ({ internalUser }) => {
     const disc = parseFloat(val);
     
     if (!isNaN(orig) && !isNaN(disc)) {
-        // Calculate Save Amount and Price
         const saved = orig * (disc / 100);
         setSaveAmount(saved.toFixed(2));
         setPrice((orig - saved).toFixed(2));
     } else if (!isNaN(orig) && val === "") {
-        // Discount cleared -> Revert to Original Price
         setSaveAmount("");
         setPrice(orig.toFixed(2));
     }
@@ -179,12 +179,10 @@ const PriceCat = ({ internalUser }) => {
     const saved = parseFloat(val);
     
     if (!isNaN(orig) && !isNaN(saved) && orig > 0) {
-        // Calculate Discount % and Price
         const disc = (saved / orig) * 100;
         setDiscountPercentage(disc.toFixed(2));
         setPrice((orig - saved).toFixed(2));
     } else if (!isNaN(orig) && val === "") {
-        // Save Amount cleared -> Revert to Original Price
         setDiscountPercentage("");
         setPrice(orig.toFixed(2));
     }
@@ -266,10 +264,17 @@ const PriceCat = ({ internalUser }) => {
   };
 
   const handleAddItem = async () => {
-    if (!selectedItem || !price || !selectedCategory) return alert("Fill all fields");
+    if (!selectedItem || !price || !selectedCategory) return alert("Fill all required fields");
     
     if (selectedCategory.isDiscountable) {
         if(!originalPrice) return alert("Please enter original price.");
+    }
+
+    // New Offer Validation
+    if (isBuyXGetY) {
+        if (!buyQty || !getQty || Number(buyQty) <= 0 || Number(getQty) <= 0) {
+            return alert("Please enter valid Buy and Get quantities greater than 0.");
+        }
     }
 
     const uid = auth.currentUser.uid;
@@ -280,6 +285,9 @@ const PriceCat = ({ internalUser }) => {
         price: Number(price), 
         originalPrice: selectedCategory.isDiscountable ? Number(originalPrice) : null,
         discountPercentage: selectedCategory.isDiscountable ? Number(discountPercentage) : null,
+        // ✅ Saving Offer Data
+        buyQty: isBuyXGetY ? Number(buyQty) : null,
+        getQty: isBuyXGetY ? Number(getQty) : null,
         editedBy: username, 
         editedAt: serverTimestamp() 
     };
@@ -308,7 +316,6 @@ const PriceCat = ({ internalUser }) => {
           itemSKU: selectedItem.sku || "",
           itemBrand: selectedItem.brand || "",
           itemType: selectedItem.type || "",
-          // ✅ ADDED PID HERE
           pid: selectedItem.pid || "",
           createdBy: username,
           createdAt: serverTimestamp(),
@@ -320,13 +327,7 @@ const PriceCat = ({ internalUser }) => {
         setPricedItems((prev) => [...prev, { id: docRef.id, ...newItemData }]);
       }
       
-      setSelectedItem(null);
-      setPrice("");
-      setOriginalPrice("");
-      setDiscountPercentage("");
-      setSaveAmount("");
-      setShowItemPopup(false);
-      setDropdownSearch("");
+      closePopup();
     } catch (err) {
       alert("Error saving item: " + err.message);
     }
@@ -342,6 +343,20 @@ const PriceCat = ({ internalUser }) => {
     } catch (err) {
       alert("Error deleting item: " + err.message);
     }
+  };
+
+  const closePopup = () => {
+    setShowItemPopup(false);
+    setSelectedItem(null);
+    setPrice("");
+    setOriginalPrice("");
+    setDiscountPercentage("");
+    setSaveAmount("");
+    setDropdownSearch("");
+    // Reset Offer States
+    setIsBuyXGetY(false);
+    setBuyQty("");
+    setGetQty("");
   };
 
   const filteredItems = pricedItems
@@ -406,7 +421,18 @@ const PriceCat = ({ internalUser }) => {
         setPrice(existingItem.price);
         setOriginalPrice(existingItem.originalPrice || "");
         setDiscountPercentage(existingItem.discountPercentage || "");
-        // Calculate Save Amount on open
+        
+        // Load Offer Data
+        if (existingItem.buyQty && existingItem.getQty) {
+            setIsBuyXGetY(true);
+            setBuyQty(existingItem.buyQty);
+            setGetQty(existingItem.getQty);
+        } else {
+            setIsBuyXGetY(false);
+            setBuyQty("");
+            setGetQty("");
+        }
+
         if(existingItem.originalPrice && existingItem.price) {
              const saved = existingItem.originalPrice - existingItem.price;
              setSaveAmount(saved.toFixed(2));
@@ -420,6 +446,10 @@ const PriceCat = ({ internalUser }) => {
         setDiscountPercentage("");
         setSaveAmount("");
         setDropdownSearch("");
+        // Reset Offer
+        setIsBuyXGetY(false);
+        setBuyQty("");
+        setGetQty("");
     }
     setShowItemPopup(true);
   };
@@ -450,7 +480,6 @@ const PriceCat = ({ internalUser }) => {
             <input type="text" placeholder="New category name..." value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8, boxSizing: 'border-box' }} />
             <button 
               onClick={initiateSaveCategory} 
-              // ✅ Disable logic based on limit
               disabled={isSavingCategory || (!editingCategory && categories.length >= MAX_CATEGORIES)}
               style={{ 
                 width: "100%", 
@@ -515,6 +544,7 @@ const PriceCat = ({ internalUser }) => {
                         </>
                     )}
                     <th style={{ padding: 10, textAlign: 'left' }}>{selectedCategory.isDiscountable ? 'Final Price' : 'Price'} (Rs.)</th>
+                    <th style={{ padding: 10, textAlign: 'left' }}>Offers</th> {/* ✅ New Column */}
                     <th style={{ padding: 10, textAlign: 'left' }}>Last Updated By</th>
                     <th style={{ padding: 10, textAlign: 'left' }}>Actions</th>
                 </tr>
@@ -533,6 +563,23 @@ const PriceCat = ({ internalUser }) => {
                     )}
 
                     <td style={{ padding: 10, fontWeight: 'bold' }}>{Number(i.price).toFixed(2)}</td>
+                    
+                    {/* ✅ Display Offer Logic */}
+                    <td style={{ padding: 10 }}>
+                        {(i.buyQty && i.getQty) ? (
+                            <span style={{ 
+                                background: '#8e44ad', 
+                                color: 'white', 
+                                padding: '2px 8px', 
+                                borderRadius: '12px', 
+                                fontSize: '11px',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                Buy {i.buyQty} Get {i.getQty}
+                            </span>
+                        ) : '-'}
+                    </td>
+
                     <td style={{ padding: 10, color: '#555' }}>{i.editedBy || i.createdBy || '-'}</td>
                     <td style={{ padding: 10 }}>
                       {isAdmin && (
@@ -544,7 +591,7 @@ const PriceCat = ({ internalUser }) => {
                     </td>
                   </tr>
                 ))}
-                {filteredItems.length === 0 && (<tr><td colSpan={selectedCategory.isDiscountable ? 7 : 5} style={{ textAlign: "center", padding: 20, color: "#777" }}>No items found in this category.</td></tr>)}
+                {filteredItems.length === 0 && (<tr><td colSpan={selectedCategory.isDiscountable ? 8 : 6} style={{ textAlign: "center", padding: 20, color: "#777" }}>No items found in this category.</td></tr>)}
               </tbody>
             </table>
           </>
@@ -577,7 +624,8 @@ const PriceCat = ({ internalUser }) => {
         {/* Modal: Add Item */}
         {showItemPopup && (
           <div style={popupStyle}>
-            <div style={popupInnerStyle}>
+            {/* ✅ Increased Height for PopupInnerStyle via spreading logic or style adjustments */}
+            <div style={{...popupInnerStyle, width: 480}}> 
               <h3>{selectedItem?.pricedItemId ? "Edit Item Price" : "Add Item"} to {selectedCategory?.name}</h3>
               
               <div ref={dropdownRef} style={{ position: 'relative', marginBottom: 12 }}>
@@ -605,7 +653,6 @@ const PriceCat = ({ internalUser }) => {
                           }}
                           onClick={() => handleItemSelect(item)}
                         >
-                          {/* UPDATED LIST ITEM LAYOUT: PID ON RIGHT */}
                           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                                 <span>{item.name} {item.sku ? `(SKU: ${item.sku})` : ''}</span>
                                 {item.pid && <span style={{fontWeight: 'bold', color: '#555', fontSize: '13px'}}>{item.pid}</span>}
@@ -661,7 +708,6 @@ const PriceCat = ({ internalUser }) => {
                     </div>
                 </>
               ) : (
-                // REGULAR CATEGORY UI
                 <input
                     ref={priceInputRef}
                     onKeyDown={handlePriceInputKeyDown}
@@ -673,17 +719,52 @@ const PriceCat = ({ internalUser }) => {
                 />
               )}
 
+              {/* ✅ NEW: BUY X GET Y SECTION */}
+              <div style={{marginBottom: '20px', borderTop: '1px solid #eee', paddingTop: '15px'}}>
+                  <div style={{display: 'flex', alignItems: 'center', marginBottom: '10px', cursor: 'pointer'}} onClick={() => setIsBuyXGetY(!isBuyXGetY)}>
+                      <div style={{
+                          width: '40px', height: '22px', background: isBuyXGetY ? '#8e44ad' : '#ccc', borderRadius: '20px', position: 'relative', transition: '0.3s', marginRight: '10px'
+                      }}>
+                          <div style={{
+                              width: '18px', height: '18px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: isBuyXGetY ? '20px' : '2px', transition: '0.3s'
+                          }}></div>
+                      </div>
+                      <span style={{fontWeight: 'bold', fontSize: '14px', color: '#555'}}><AiFillTag style={{marginRight: '5px'}}/> Buy X Get Y Offer</span>
+                  </div>
+
+                  {isBuyXGetY && (
+                      <div style={{display: 'flex', gap: '15px', background: '#f8f4fc', padding: '12px', borderRadius: '6px', border: '1px solid #e1d2f0'}}>
+                          <div style={{flex: 1}}>
+                              <label style={{fontSize: '12px', fontWeight: 'bold', color: '#8e44ad'}}>Buy Qty</label>
+                              <input 
+                                  type="text" 
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  placeholder="Ex: 2"
+                                  value={buyQty}
+                                  onChange={(e) => setBuyQty(e.target.value.replace(/\D/, ''))} // Digits only
+                                  style={{width: '100%', padding: '8px', marginTop: '4px', borderRadius: '4px', border: '1px solid #dcdcdc'}}
+                              />
+                          </div>
+                          <div style={{flex: 1}}>
+                              <label style={{fontSize: '12px', fontWeight: 'bold', color: '#8e44ad'}}>Get Qty (Free)</label>
+                              <input 
+                                  type="text" 
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  placeholder="Ex: 1"
+                                  value={getQty}
+                                  onChange={(e) => setGetQty(e.target.value.replace(/\D/, ''))} // Digits only
+                                  style={{width: '100%', padding: '8px', marginTop: '4px', borderRadius: '4px', border: '1px solid #dcdcdc'}}
+                              />
+                          </div>
+                      </div>
+                  )}
+              </div>
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button 
-                    onClick={() => { 
-                        setShowItemPopup(false); 
-                        setSelectedItem(null); 
-                        setPrice(""); 
-                        setOriginalPrice("");
-                        setDiscountPercentage("");
-                        setSaveAmount("");
-                        setDropdownSearch("");
-                    }} 
+                    onClick={closePopup} 
                     style={popupBtnStyle}>Cancel</button>
                 <button 
                   ref={saveButtonRef}
@@ -702,7 +783,7 @@ const PriceCat = ({ internalUser }) => {
 };
 
 const popupStyle = { position: "fixed", zIndex: 1001, top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" };
-const popupInnerStyle = { background: "#fff", padding: 24, borderRadius: 8, width: 450, boxShadow: '0 5px 15px rgba(0,0,0,0.3)' };
+const popupInnerStyle = { background: "#fff", padding: 24, borderRadius: 8, width: 450, boxShadow: '0 5px 15px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' };
 const popupBtnStyle = { padding: "10px 16px", border: "none", borderRadius: 4, cursor: "pointer" };
 
 const styles = {
