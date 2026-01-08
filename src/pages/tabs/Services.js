@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../../firebase'; 
 import { 
@@ -179,8 +178,8 @@ const Services = ({ internalUser }) => {
 
   const handleSaveClick = (e) => {
     e.preventDefault();
-    if (!customerName || !jobType || !totalCharge) { 
-        setError('Customer Name, Job Type, and Total Charge are required.'); 
+    if (!customerName || !customerPhone || !jobType || !jobCompleteDate || !totalCharge) { 
+        setError('Customer Name, Phone, Job Type, Est. Completion, and Total Charge are required.'); 
         return; 
     }
     setPendingAction({ type: 'SAVE' });
@@ -407,7 +406,7 @@ const Services = ({ internalUser }) => {
       finally { setIsUpdating(false); setPendingAction(null); }
   };
 
-  // --- DELETE JOB ---
+  // --- DELETE JOB (FIXED: SEPARATED READS AND WRITES) ---
   const handleDeleteJob = (jobId) => {
     if (!uid) { setError("Authentication error."); return; }
     setJobToDelete(jobId);
@@ -420,13 +419,21 @@ const Services = ({ internalUser }) => {
 
     try {
         await runTransaction(db, async (transaction) => {
+            // =========================================================
+            // PHASE 1: ALL READS FIRST (To satisfy Firestore rules)
+            // =========================================================
+
             // 1. Get Job Data
             const jobRef = doc(db, uid, 'data', 'service_jobs', jobToDelete);
             const jobSnap = await transaction.get(jobRef);
             if (!jobSnap.exists()) throw "Job not found";
             const jobData = jobSnap.data();
 
-            // 2. Find Linked Advance Invoice
+            // 2. Find Invoices (Using a Query outside transaction for IDs, then Transaction Get for Locking)
+            // Note: We can't do a query inside a transaction, but we can query then GET.
+            // Since we need to ensure consistency, we rely on the ID matching pattern or stored IDs.
+            
+            // Advance Invoice
             let advInvoiceRef = null;
             let advInvoiceData = null;
             if (jobData.linkedInvoiceId) {
@@ -435,24 +442,32 @@ const Services = ({ internalUser }) => {
                 if (advSnap.exists()) advInvoiceData = advSnap.data();
             }
 
-            // 3. Find Potential Balance Invoice
+            // Balance Invoice Query (Fetch ID first)
             let balInvoiceRef = null;
             let balInvoiceData = null;
             if (jobData.generatedInvoiceNumber) {
                 const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
                 const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
-                const balSnaps = await getDocs(q);
+                // We must await getDocs here (Reads outside transaction context are allowed, but we need to lock via get)
+                // However, we can't lock what we haven't found. 
+                // Getting the doc ref is fine. 
+                const balSnaps = await getDocs(q); 
                 if (!balSnaps.empty) {
                     balInvoiceRef = balSnaps.docs[0].ref;
+                    // NOW LOCK IT
                     const balSnap = await transaction.get(balInvoiceRef);
                     if (balSnap.exists()) balInvoiceData = balSnap.data();
                 }
             }
 
-            // 4. Helper to Deduct (Wallet & Daily Sales)
-            const reverseFinancials = async (invoice) => {
+            // 3. Prepare Financial Reads (Wallets and Stats)
+            // We use maps to prevent reading the same doc twice
+            const walletReads = {}; // path -> { ref, data, deduction }
+            const statsReads = {};  // path -> { ref, data, deductionTotal, deductionMethod, methodField }
+
+            const queueReads = async (invoice) => {
                 if (!invoice || !invoice.received || invoice.received <= 0) return;
-                
+
                 let wId = null;
                 let salesMethodField = null;
 
@@ -460,49 +475,79 @@ const Services = ({ internalUser }) => {
                 else if (invoice.paymentMethod === 'Card') { wId = 'card'; salesMethodField = 'totalSales_card'; }
                 else if (invoice.paymentMethod === 'Online') { wId = 'online'; salesMethodField = 'totalSales_online'; }
 
-                // A. Wallet Deduction
+                // Wallet Ref
                 if (wId) {
                     const wRef = doc(db, uid, "wallet", "accounts", wId);
-                    const wDoc = await transaction.get(wRef);
-                    if (wDoc.exists()) {
-                        const currentBal = Number(wDoc.data().balance) || 0;
-                        transaction.set(wRef, { 
-                            balance: currentBal - Number(invoice.received),
-                            lastUpdated: serverTimestamp()
-                        }, { merge: true });
+                    if (!walletReads[wRef.path]) {
+                        // READ NOW
+                        const wSnap = await transaction.get(wRef);
+                        walletReads[wRef.path] = { ref: wRef, data: wSnap.exists() ? wSnap.data() : null, deduction: 0 };
                     }
+                    walletReads[wRef.path].deduction += Number(invoice.received);
                 }
 
-                // B. Daily Sales Reversal
+                // Stats Ref
                 if (invoice.createdAt) {
                     const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
                     const dailyDateString = getSriLankaDate(dateVal);
                     const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
-                    const dailyStatsSnap = await transaction.get(dailyStatsRef);
                     
-                    if (dailyStatsSnap.exists()) {
-                        const currentSales = Number(dailyStatsSnap.data().totalSales) || 0;
-                        const currentMethodSales = salesMethodField ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
-                        
-                        const updateData = {
-                            totalSales: currentSales - Number(invoice.received),
-                            lastUpdated: serverTimestamp()
+                    if (!statsReads[dailyStatsRef.path]) {
+                        // READ NOW
+                        const sSnap = await transaction.get(dailyStatsRef);
+                        statsReads[dailyStatsRef.path] = { 
+                            ref: dailyStatsRef, 
+                            data: sSnap.exists() ? sSnap.data() : null, 
+                            deductionTotal: 0, 
+                            deductionMethod: 0, 
+                            methodField: salesMethodField 
                         };
-                        
-                        if (salesMethodField) {
-                            updateData[salesMethodField] = currentMethodSales - Number(invoice.received);
-                        }
-
-                        transaction.set(dailyStatsRef, updateData, { merge: true });
+                    }
+                    // Accumulate deductions
+                    statsReads[dailyStatsRef.path].deductionTotal += Number(invoice.received);
+                    if (statsReads[dailyStatsRef.path].methodField === salesMethodField) {
+                        statsReads[dailyStatsRef.path].deductionMethod += Number(invoice.received);
                     }
                 }
             };
 
-            // 5. Execute Reversals
-            if (advInvoiceData) await reverseFinancials(advInvoiceData);
-            if (balInvoiceData) await reverseFinancials(balInvoiceData);
+            // Execute Queued Reads
+            if (advInvoiceData) await queueReads(advInvoiceData);
+            if (balInvoiceData) await queueReads(balInvoiceData);
 
-            // 6. Delete Documents
+            // =========================================================
+            // PHASE 2: ALL WRITES (Now that all reads are done)
+            // =========================================================
+
+            // 1. Update Wallets
+            Object.values(walletReads).forEach(item => {
+                if (item.data) {
+                    const currentBal = Number(item.data.balance) || 0;
+                    transaction.set(item.ref, { 
+                        balance: currentBal - item.deduction,
+                        lastUpdated: serverTimestamp()
+                    }, { merge: true });
+                }
+            });
+
+            // 2. Update Stats
+            Object.values(statsReads).forEach(item => {
+                if (item.data) {
+                    const currentSales = Number(item.data.totalSales) || 0;
+                    const updateData = {
+                        totalSales: currentSales - item.deductionTotal,
+                        lastUpdated: serverTimestamp()
+                    };
+                    
+                    if (item.methodField) {
+                        const currentMethod = Number(item.data[item.methodField]) || 0;
+                        updateData[item.methodField] = currentMethod - item.deductionMethod;
+                    }
+                    transaction.set(item.ref, updateData, { merge: true });
+                }
+            });
+
+            // 3. Delete Docs
             transaction.delete(jobRef);
             if (advInvoiceRef) transaction.delete(advInvoiceRef);
             if (balInvoiceRef) transaction.delete(balInvoiceRef);
@@ -567,7 +612,8 @@ const Services = ({ internalUser }) => {
                 <input type="text" style={styles.input} value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Enter name" />
              </div>
              <div style={styles.inputGroup}>
-                <label style={styles.label}>Phone Number</label>
+                {/* ✅ MODIFIED: Added Asterisk */}
+                <label style={styles.label}>Phone Number *</label>
                 <input 
                     type="text" 
                     style={styles.input} 
@@ -584,7 +630,8 @@ const Services = ({ internalUser }) => {
                 <input type="text" style={styles.input} value={jobType} onChange={(e) => setJobType(e.target.value)} placeholder="e.g. Phone Repair" />
              </div>
              <div style={styles.inputGroup}>
-                <label style={styles.label}>Est. Completion</label>
+                {/* ✅ MODIFIED: Added Asterisk */}
+                <label style={styles.label}>Est. Completion *</label>
                 <input type="datetime-local" style={styles.input} value={jobCompleteDate} onChange={(e) => setJobCompleteDate(e.target.value)} />
              </div>
           </div>

@@ -1,4 +1,3 @@
-
 /* global qz */
 import React, { useEffect, useState, useRef } from "react";
 import { auth, db } from "../../firebase"; 
@@ -57,6 +56,8 @@ const Orders = ({ internalUser }) => {
   // Inputs
   const [itemInput, setItemInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
+  const [priceInput, setPriceInput] = useState("");
+
   const [filteredItems, setFilteredItems] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -72,14 +73,27 @@ const Orders = ({ internalUser }) => {
     if(!uid) return;
     const initialize = async () => {
       fetchProvisionalInvoiceNumber();
+      
+      // 1. Fetch Categories first
+      const catCol = collection(db, uid, "price_categories", "categories");
+      const snap = await getDocs(catCol);
+      const categoriesList = snap.docs.map(d => ({ value: d.id, label: d.data().name }));
+      setPriceCategories(categoriesList);
+
+      // 2. Fetch Settings and apply Default
       const settingsSnap = await getDoc(doc(db, uid, "settings"));
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setSettings(data);
+        
+        // Check if there is a default category saved in settings
+        if (data.serviceJobPriceCategory) {
+            const defaultCat = categoriesList.find(c => c.value === data.serviceJobPriceCategory);
+            if (defaultCat) {
+                setSelectedCategory(defaultCat);
+            }
+        }
       }
-      const catCol = collection(db, uid, "price_categories", "categories");
-      const snap = await getDocs(catCol);
-      setPriceCategories(snap.docs.map(d => ({ value: d.id, label: d.data().name })));
     };
     initialize();
     fetchSavedOrders();
@@ -157,20 +171,33 @@ const Orders = ({ internalUser }) => {
     else if (e.key === 'Enter') { e.preventDefault(); if (filteredItems.length > 0 && selectedIndex >= 0) selectItemAndJumpToQty(filteredItems[selectedIndex]); }
   };
   const handleQtyKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddItem(); } };
-  const selectItemAndJumpToQty = (item) => { setItemInput(item.itemName); setTempSelectedItem(item); setShowDropdown(false); qtyInputRef.current.focus(); qtyInputRef.current.select(); };
+  
+  const selectItemAndJumpToQty = (item) => { 
+      setItemInput(item.itemName); 
+      setTempSelectedItem(item); 
+      setPriceInput(item.price); // Auto-fill price
+      setShowDropdown(false); 
+      qtyInputRef.current.focus(); 
+      qtyInputRef.current.select(); 
+  };
 
   const handleAddItem = (overrideItem = null) => {
       const itemToAdd = overrideItem || tempSelectedItem || (filteredItems.length > 0 ? filteredItems[selectedIndex] : null);
       if (!itemToAdd || !qtyInput || qtyInput <= 0) return;
-      const existingIdx = checkout.findIndex(i => i.itemId === itemToAdd.itemId);
+
+      const finalPrice = priceInput !== "" ? parseFloat(priceInput) : itemToAdd.price;
+
+      const existingIdx = checkout.findIndex(i => i.itemId === itemToAdd.itemId && i.price === finalPrice);
+      
       if (existingIdx > -1) {
           const newCheckout = [...checkout];
           newCheckout[existingIdx].quantity += Number(qtyInput);
           setCheckout(newCheckout);
       } else {
-          setCheckout([...checkout, { ...itemToAdd, quantity: Number(qtyInput) }]);
+          setCheckout([...checkout, { ...itemToAdd, quantity: Number(qtyInput), price: finalPrice }]);
       }
-      setItemInput(""); setQtyInput(1); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
+
+      setItemInput(""); setQtyInput(1); setPriceInput(""); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
   };
 
   // Helper: Get Date in Sri Lanka Time
@@ -179,11 +206,20 @@ const Orders = ({ internalUser }) => {
   };
 
   const handleSaveClick = () => {
-    if (!selectedCategory || checkout.length === 0) return alert("Category and Items are required.");
+    // ✅ VALIDATION: Check for Category, Items, Name, Phone, and Delivery Date
+    if (!selectedCategory) return alert("Please select a Price Category.");
+    if (checkout.length === 0) return alert("Please add at least one item.");
+    
+    // Check Mandatory Fields
+    if (!customerName.trim()) return alert("Customer Name is mandatory.");
+    if (!customerPhone.trim()) return alert("Phone Number is mandatory.");
+    if (!deliveryDate) return alert("Delivery Date is mandatory.");
+
     setPendingAction({ type: 'SAVE' });
     setConfirmPaymentMethod('Cash');
     setShowPaymentConfirm(true);
   };
+
   const handleCompleteClick = (order) => { setPendingAction({ type: 'COMPLETE', order }); setConfirmPaymentMethod('Cash'); setShowPaymentConfirm(true); };
   
   // View Handler
@@ -549,15 +585,18 @@ const Orders = ({ internalUser }) => {
         <div style={styles.formContent}>
             <div style={styles.gridThree}>
                 <div style={styles.inputGroup}>
-                    <label style={styles.label}>Customer Name</label>
+                    {/* ✅ MODIFIED: Added Asterisk */}
+                    <label style={styles.label}>Customer Name *</label>
                     <input style={styles.input} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Walk-in Customer" />
                 </div>
                 <div style={styles.inputGroup}>
-                    <label style={styles.label}>Phone Number</label>
+                    {/* ✅ MODIFIED: Added Asterisk */}
+                    <label style={styles.label}>Phone Number *</label>
                     <input type="text" style={styles.input} value={customerPhone} onChange={(e) => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 10) setCustomerPhone(val); }} placeholder="07xxxxxxxx" />
                 </div>
                 <div style={styles.inputGroup}>
-                    <label style={styles.label}>Delivery Date</label>
+                    {/* ✅ MODIFIED: Added Asterisk */}
+                    <label style={styles.label}>Delivery Date *</label>
                     <input type="datetime-local" style={styles.input} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} />
                 </div>
             </div>
@@ -582,6 +621,10 @@ const Orders = ({ internalUser }) => {
                 <div style={{ flex: 1 }}>
                     <label style={styles.label}>Qty</label>
                     <input ref={qtyInputRef} type="number" style={styles.input} value={qtyInput} onChange={e => setQtyInput(e.target.value)} onKeyDown={handleQtyKeyDown} />
+                </div>
+                <div style={{ flex: 1 }}>
+                    <label style={styles.label}>Price (Rs.)</label>
+                    <input type="number" style={styles.input} value={priceInput} onChange={e => setPriceInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddItem()} placeholder="Auto" />
                 </div>
                 <div style={{ alignSelf: 'flex-end' }}>
                     <button style={styles.btnAdd} onClick={() => handleAddItem()}><FaPlus /> Add</button>

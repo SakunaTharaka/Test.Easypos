@@ -50,15 +50,17 @@ const Settings = () => {
   
   const [autoPrintInvoice, setAutoPrintInvoice] = useState(false);
   
-  // ✅ **1. New state for the new toggles**
   const [offerDelivery, setOfferDelivery] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
   const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false);
-  const [showOrderNo, setShowOrderNo] = useState(false); // ✅ New State for Order Number
+  const [showOrderNo, setShowOrderNo] = useState(false); 
 
   // --- NEW STATE FOR SERVICE & ORDERS ---
   const [priceCategories, setPriceCategories] = useState([]);
   const [servicePriceCategory, setServicePriceCategory] = useState("");
+  
+  // ✅ NEW TOGGLE STATE
+  const [enableServiceOrders, setEnableServiceOrders] = useState(false);
 
 
   useEffect(() => {
@@ -97,9 +99,10 @@ const Settings = () => {
           setOfferDelivery(data.offerDelivery || false);
           setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
           setUseSinhalaInvoice(data.useSinhalaInvoice || false); 
-          setShowOrderNo(data.showOrderNo || false); // ✅ Load saved setting
-          // --- LOAD SERVICE PRICE CATEGORY ---
+          setShowOrderNo(data.showOrderNo || false); 
           setServicePriceCategory(data.serviceJobPriceCategory || "");
+          // ✅ Load new setting
+          setEnableServiceOrders(data.enableServiceOrders || false);
 
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
@@ -137,9 +140,10 @@ const Settings = () => {
             offerDelivery: false,
             openCashDrawerWithPrint: false,
             useSinhalaInvoice: false,
-            showOrderNo: false, // ✅ Set default
-            // --- ADD TO DEFAULT SETTINGS ---
+            showOrderNo: false,
             serviceJobPriceCategory: "",
+            // ✅ Default new setting
+            enableServiceOrders: false,
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -164,9 +168,10 @@ const Settings = () => {
           setOfferDelivery(defaultSettings.offerDelivery);
           setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
           setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice);
-          setShowOrderNo(defaultSettings.showOrderNo); // ✅ Set default state
-          // --- LOAD FROM DEFAULT SETTINGS ---
+          setShowOrderNo(defaultSettings.showOrderNo);
           setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
+          // ✅ Set default state
+          setEnableServiceOrders(defaultSettings.enableServiceOrders);
         }
 
         // --- FETCH CUSTOMERS ---
@@ -312,7 +317,6 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { useSinhalaInvoice: value });
   };
 
-  // ✅ Handler for Order Number Toggle
   const handleShowOrderNoChange = async (value) => {
     setShowOrderNo(value);
     await updateDoc(getSettingsDocRef(), { showOrderNo: value });
@@ -321,6 +325,12 @@ const Settings = () => {
   const handleServicePriceCategoryChange = async (value) => {
     setServicePriceCategory(value);
     await updateDoc(getSettingsDocRef(), { serviceJobPriceCategory: value });
+  };
+  
+  // ✅ Handler for Service & Future Orders Toggle
+  const handleEnableServiceOrdersChange = async (value) => {
+    setEnableServiceOrders(value);
+    await updateDoc(getSettingsDocRef(), { enableServiceOrders: value });
   };
 
 
@@ -415,7 +425,6 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to print invoices using the Sinhala language format.</p>
         </div>
         
-        {/* ✅ **Added Order Number Toggle** */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Add Order Number to Invoice</label>
             <div style={styles.toggleContainer}>
@@ -429,8 +438,19 @@ const Settings = () => {
       {/* --- NEW SERVICE AND ORDERS SECTION --- */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Service and Orders</h3>
+        {/* ✅ NEW TOGGLE ADDED HERE */}
         <div style={styles.formGroup}>
-            <label style={styles.label}>Select Price Category for Service Jobs</label>
+            <label style={styles.label}>Enable Services & Future Orders Facility</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleEnableServiceOrdersChange(true)} style={enableServiceOrders ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleEnableServiceOrdersChange(false)} style={!enableServiceOrders ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to manage services, repair jobs, and future orders in the dashboard.</p>
+        </div>
+
+        <div style={styles.formGroup}>
+            {/* ✅ MODIFIED LABEL */}
+            <label style={styles.label}>Select Price Category for Orders</label>
             <select value={servicePriceCategory} onChange={(e) => handleServicePriceCategoryChange(e.target.value)} style={styles.select}>
                 <option value="">Select a Price Category</option>
                 {priceCategories.map((cat) => (

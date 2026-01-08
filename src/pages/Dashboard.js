@@ -67,6 +67,9 @@ const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
 
+  // ✅ NEW STATE FOR FEATURE TOGGLE
+  const [enableServiceOrders, setEnableServiceOrders] = useState(false);
+
   const [maintenanceStatus, setMaintenanceStatus] = useState({
     loading: true,
     isActive: false,
@@ -164,6 +167,10 @@ const Dashboard = () => {
             const inventoryType = settingsData.inventoryType || "Buy and Sell only";
             setShowProductionTabs(inventoryType === "Production Selling only" || inventoryType === "We doing both");
             setMaintainCreditCustomers(settingsData.maintainCreditCustomers === true);
+            
+            // ✅ LOAD THE NEW SETTING
+            setEnableServiceOrders(settingsData.enableServiceOrders === true);
+
         } else {
             setUserInfo({ companyName: "My Business" });
         }
@@ -242,7 +249,12 @@ const Dashboard = () => {
   
   // --- FIXED VISIBILITY LOGIC ---
   const visibleTabs = allTabs.filter(tab => {
-    // If user is Admin, they see everything
+    // ✅ 1. CHECK FEATURE TOGGLE FIRST
+    if (tab === "Service and Orders" && !enableServiceOrders) {
+      return false; // Hide completely if setting is off
+    }
+
+    // If user is Admin, they see everything (that is enabled)
     if (internalLoggedInUser?.isAdmin) return true;
 
     // If user is NOT Admin, hide these specific tabs
@@ -319,6 +331,12 @@ const Dashboard = () => {
         // Fallback to Invoicing if they somehow land on a restricted tab
         if(activeTab !== "Invoicing") setActiveTab("Invoicing");
         return null;
+    }
+
+    // ✅ Safety Check for Disabled Feature
+    if (activeTab === "Service and Orders" && !enableServiceOrders) {
+       setActiveTab("Dashboard");
+       return null;
     }
 
     switch (activeTab) {
