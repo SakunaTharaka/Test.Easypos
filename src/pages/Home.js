@@ -195,6 +195,12 @@ const Home = () => {
             <span onClick={() => openModal('features')}>Features</span>
             <span onClick={() => openModal('pricing')}>Pricing</span>
             <span onClick={() => openModal('contact')}>Contact</span>
+            
+            {/* ✅ NEW: POS Terminal Button */}
+            <button className="nav-pos-btn" onClick={() => navigate('/pos')}>
+              POS Terminal
+            </button>
+
             <a href="https://qz.io/download/" target="_blank" rel="noopener noreferrer" className="nav-download">
               QZ Tray
             </a>
@@ -375,7 +381,6 @@ const Home = () => {
 
         .logo-section { display: flex; align-items: center; gap: 12px; cursor: pointer; }
         
-        /* UPDATED: Increased size to 64px (2x) */
         .logo-icon {
           width: 64px; 
           height: 64px;
@@ -392,12 +397,33 @@ const Home = () => {
           transition: color 0.2s;
         }
         .nav-links span:hover { color: var(--primary); }
+        
         .nav-download {
           color: var(--primary); font-weight: 600; text-decoration: none;
           padding: 8px 16px; background: rgba(99, 102, 241, 0.1); border-radius: 20px;
           transition: all 0.2s;
         }
         .nav-download:hover { background: var(--primary); color: white; }
+
+        /* ✅ NEW: POS Button Style */
+        .nav-pos-btn {
+          border: none;
+          background: var(--text-main);
+          color: white;
+          font-family: 'Inter', sans-serif;
+          font-weight: 600;
+          font-size: 0.9rem;
+          padding: 8px 18px;
+          border-radius: 20px;
+          cursor: pointer;
+          transition: all 0.2s;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .nav-pos-btn:hover {
+          background: var(--primary);
+          transform: translateY(-1px);
+          box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
+        }
 
         /* --- HERO --- */
         .hero-section {
@@ -645,6 +671,7 @@ const Home = () => {
           .pricing-card.featured { transform: scale(1); }
           .nav-links span { display: none; } /* Hide text links on mobile, keep CTA if needed */
           .nav-download { display: block; }
+          .nav-pos-btn { display: block; } /* ✅ Ensure button shows on mobile */
           .cta-group { flex-direction: column; width: 100%; }
           .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
           .modal-box { padding: 24px; }

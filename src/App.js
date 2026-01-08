@@ -11,10 +11,13 @@ import InvoiceViewer from './pages/InvoiceViewer';
 import MasterAdmin from './pages/MasterAdmin';
 import BillingPage from './pages/BillingPage';
 import MaintenancePage from './pages/MaintenancePage';
-import VerifyEmail from "./pages/VerifyEmail"; // <--- IMPORT THIS
+import VerifyEmail from "./pages/VerifyEmail"; 
 
 // Import the Terms and Conditions page
 import TermsAndConditions from "./pages/TermsAndConditions";
+
+// ✅ UPDATED: Import POSPortal from the 'components' folder
+import POSPortal from "./components/POSPortal";
 
 function App() {
   return (
@@ -35,6 +38,9 @@ function App() {
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/terms" element={<TermsAndConditions />} />
+
+        {/* ✅ NEW: Route for the separate POS Screen */}
+        <Route path="/pos" element={<POSPortal />} />
       </Routes>
     </Router>
   );

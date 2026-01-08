@@ -36,6 +36,11 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
   const handleAddUser = async () => {
     if (!newUser.username || !newUser.password) return alert("Enter username and password");
 
+    // ✅ NEW CHECK: Password Minimum Length
+    if (newUser.password.length < 6) {
+      return alert("Password must be at least 6 characters long.");
+    }
+
     // --- CHECK: Limit max users to 6 ---
     if (internalUsers.length >= 6) {
       return alert("Maximum limit reached. You cannot add more than 6 users.");
@@ -148,7 +153,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
             <input 
               type="password" 
               style={styles.input} 
-              placeholder="Enter password" 
+              placeholder="Enter password (min 6 chars)" 
               value={newUser.password} 
               onChange={e => setNewUser({ ...newUser, password: e.target.value })} 
               disabled={internalUsers.length >= 6} // Disable input if full

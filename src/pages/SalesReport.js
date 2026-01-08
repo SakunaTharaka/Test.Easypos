@@ -87,13 +87,19 @@ const SalesReport = ({ internalUser }) => {
 
   // --- DELETE HANDLER (UPDATED: REVERSES SPECIFIC SALES FIELDS AND INVOICE COUNT) ---
   const handleDelete = async (invoice) => {
+      // ✅ SECURITY CHECK: Only Admins can delete
+      if (!internalUser?.isAdmin) {
+          alert("Access Denied: You do not have permission to delete invoices.");
+          return;
+      }
+
       const user = auth.currentUser;
       if (!user) return;
 
       if (invoice.createdAt) {
           const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
           const dateStr = dateVal.toISOString().split('T')[0];
-          if (reconciledDates.has(dateStr)) {
+          if (reconciledDates && reconciledDates.has(dateStr)) {
               alert(`Cannot delete invoice from ${dateStr} because it has been reconciled and locked.`);
               return;
           }
@@ -103,17 +109,12 @@ const SalesReport = ({ internalUser }) => {
 
       try {
           await runTransaction(db, async (transaction) => {
-              // =========================================================
-              // PHASE 1: ALL READS (Must be done before any write)
-              // =========================================================
-
-              // 1. Read Invoice
+              // PHASE 1: ALL READS
               const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoice.id);
               const invoiceSnap = await transaction.get(invoiceRef);
               if (!invoiceSnap.exists()) throw "Invoice does not exist.";
               const invData = invoiceSnap.data();
 
-              // Determine references needed for secondary reads
               let dailyStatsRef = null;
               if (invData.createdAt) {
                   const dateVal = invData.createdAt.toDate ? invData.createdAt.toDate() : new Date(invData.createdAt);
@@ -122,20 +123,16 @@ const SalesReport = ({ internalUser }) => {
               }
 
               let walletRef = null;
-              let salesMethodField = null; // Field to deduct from (totalSales_cash, etc.)
+              let salesMethodField = null;
               let amountToReverseSales = 0;
               let amountToReverseCOGS = Number(invData.totalCOGS) || 0;
 
-              // Calculate reversal amounts
               if (!invData.type) { 
-                  // Standard Invoice
                   amountToReverseSales = Number(invData.total) || 0;
               } else {
-                  // Service/Order (Usually reversed based on received/advance amount)
                   amountToReverseSales = Number(invData.received) || 0;
               }
 
-              // Determine Wallet & Sales Field Logic
               if (amountToReverseSales > 0) {
                   let walletDocId = null;
                   if (invData.paymentMethod === 'Cash') { walletDocId = 'cash'; salesMethodField = 'totalSales_cash'; }
@@ -147,23 +144,17 @@ const SalesReport = ({ internalUser }) => {
                   }
               }
 
-              // 2. Read Daily Stats (if applicable)
               let dailyStatsSnap = null;
               if (dailyStatsRef) {
                   dailyStatsSnap = await transaction.get(dailyStatsRef);
               }
 
-              // 3. Read Wallet (if applicable)
               let walletSnap = null;
               if (walletRef) {
                   walletSnap = await transaction.get(walletRef);
               }
 
-              // =========================================================
               // PHASE 2: ALL WRITES
-              // =========================================================
-
-              // 4. Update Daily Stats
               if (dailyStatsRef && dailyStatsSnap && dailyStatsSnap.exists()) {
                   const currentStats = dailyStatsSnap.data();
                   const currentSales = Number(currentStats.totalSales) || 0;
@@ -173,11 +164,10 @@ const SalesReport = ({ internalUser }) => {
                   const updateData = {
                       totalSales: currentSales - amountToReverseSales,
                       totalCOGS: currentCOGS - amountToReverseCOGS,
-                      invoiceCount: Math.max(0, currentInvoiceCount - 1), // ✅ Decrement Invoice Count
+                      invoiceCount: Math.max(0, currentInvoiceCount - 1),
                       lastUpdated: serverTimestamp()
                   };
 
-                  // Deduct from specific method field if it exists
                   if (salesMethodField) {
                       const currentMethodSales = Number(currentStats[salesMethodField]) || 0;
                       updateData[salesMethodField] = currentMethodSales - amountToReverseSales;
@@ -186,7 +176,6 @@ const SalesReport = ({ internalUser }) => {
                   transaction.set(dailyStatsRef, updateData, { merge: true });
               }
 
-              // 5. Update Wallet
               if (walletRef && walletSnap && walletSnap.exists()) {
                   const currentBalance = Number(walletSnap.data().balance) || 0;
                   transaction.set(walletRef, {
@@ -195,7 +184,6 @@ const SalesReport = ({ internalUser }) => {
                   }, { merge: true });
               }
 
-              // 6. Delete Related Documents (Jobs/Orders)
               if (invData.type === 'SERVICE' && invData.relatedJobId) {
                   const jobRef = doc(db, user.uid, "data", "service_jobs", invData.relatedJobId);
                   transaction.delete(jobRef);
@@ -205,11 +193,9 @@ const SalesReport = ({ internalUser }) => {
                   transaction.delete(orderRef);
               }
 
-              // 7. Delete the Invoice
               transaction.delete(invoiceRef);
           });
 
-          // Update UI
           setCurrentInvoices(prev => prev.filter(i => i.id !== invoice.id));
 
       } catch (err) {
@@ -238,16 +224,37 @@ const SalesReport = ({ internalUser }) => {
 
       <div style={styles.tableContainer}>
         <table style={styles.table}>
-          <thead><tr><th style={styles.th}>Invoice #</th><th style={styles.th}>Date</th><th style={styles.th}>Customer</th><th style={styles.th}>Amount</th><th style={styles.th}>Status</th><th style={{...styles.th, textAlign: 'right'}}>Actions</th></tr></thead>
+          <thead>
+            <tr>
+                <th style={styles.th}>Invoice #</th>
+                <th style={styles.th}>Date</th>
+                <th style={styles.th}>Customer</th>
+                <th style={styles.th}>User</th>
+                <th style={styles.th}>Amount</th>
+                <th style={styles.th}>Status</th>
+                <th style={{...styles.th, textAlign: 'right'}}>Actions</th>
+            </tr>
+          </thead>
           <tbody>
-            {loading ? <tr><td colSpan={6} style={{padding:20, textAlign:'center'}}>Loading...</td></tr> : currentInvoices.map((inv) => (
+            {loading ? <tr><td colSpan={7} style={{padding:20, textAlign:'center'}}>Loading...</td></tr> : currentInvoices.map((inv) => (
                 <tr key={inv.id} style={styles.tr}>
                     <td style={styles.td}>{inv.invoiceNumber}</td>
                     <td style={styles.td}>{inv.createdAt?.toDate ? inv.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>
                     <td style={styles.td}>{inv.customerName}</td>
+                    <td style={styles.td}>{inv.issuedBy || 'System'}</td>
                     <td style={styles.td}><strong>{inv.total?.toFixed(2)}</strong></td>
                     <td style={styles.td}><span style={{padding:'4px 8px', borderRadius:4, fontSize:11, background: inv.status==='Paid'?'#d1fae5':'#fee2e2', color: inv.status==='Paid'?'#065f46':'#991b1b'}}>{inv.status}</span></td>
-                    <td style={{...styles.td, textAlign: 'right'}}><button style={styles.iconBtn} onClick={() => handleView(inv.id)}><AiOutlineEye size={18} color="#3b82f6" /></button><button style={styles.iconBtn} onClick={() => handleDelete(inv)}><AiOutlineDelete size={18} color="#ef4444" /></button></td>
+                    <td style={{...styles.td, textAlign: 'right'}}>
+                        <button style={styles.iconBtn} onClick={() => handleView(inv.id)}><AiOutlineEye size={18} color="#3b82f6" /></button>
+                        {/* The Delete Button is still visible but functionality is blocked for non-admins */}
+                        <button 
+                            style={{...styles.iconBtn, opacity: internalUser?.isAdmin ? 1 : 0.5, cursor: internalUser?.isAdmin ? 'pointer' : 'not-allowed'}} 
+                            onClick={() => handleDelete(inv)}
+                            title={internalUser?.isAdmin ? "Delete Invoice" : "Only Admins can delete"}
+                        >
+                            <AiOutlineDelete size={18} color="#ef4444" />
+                        </button>
+                    </td>
                 </tr>
             ))}
           </tbody>
