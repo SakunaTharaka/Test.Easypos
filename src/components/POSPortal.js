@@ -192,10 +192,15 @@ const POSPortal = () => {
     }
   };
 
+  // ✅ UPDATED LOGOUT HANDLER
   const handleLogout = () => {
     setIsAuthenticated(false);
     setInternalUser(null);
     localStorage.removeItem("posInternalUser");
+    
+    // Clear the inputs so they don't persist on the login screen
+    setUsername("");
+    setPassword("");
   };
 
   const handleSystemLogout = async () => {
