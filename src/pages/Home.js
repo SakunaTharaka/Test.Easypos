@@ -143,7 +143,7 @@ const Home = () => {
             <h2 className="modal-title">Contact Support</h2>
             <p className="modal-subtitle">We are here to help you set up.</p>
             <div className="contact-container">
-              <a href="mailto:sakuna.wayne.easyerp@gmail.com" className="contact-card">
+              <a href="mailto:sakuna.wayne@gmail.com" className="contact-card">
                 <div className="contact-icon email"><FaEnvelope /></div>
                 <div>
                   <h4>Email Us</h4>
@@ -259,7 +259,7 @@ const Home = () => {
             {isAdminButtonVisible && (
               <button onClick={openMasterAdmin} className="admin-btn">Master Admin</button>
             )}
-            <a href="mailto:sakuna.wayne.easyerp@gmail.com">Support</a>
+            <a href="mailto:sakuna.wayne@gmail.com">Support</a>
           </div>
         </div>
       </footer>
