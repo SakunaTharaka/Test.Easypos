@@ -54,6 +54,9 @@ const Settings = () => {
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
   const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false);
   const [showOrderNo, setShowOrderNo] = useState(false); 
+  
+  // ✅ NEW STATE FOR DOUBLE LINE
+  const [doubleLineInvoiceItem, setDoubleLineInvoiceItem] = useState(false);
 
   // --- NEW STATE FOR SERVICE & ORDERS ---
   const [priceCategories, setPriceCategories] = useState([]);
@@ -101,8 +104,10 @@ const Settings = () => {
           setUseSinhalaInvoice(data.useSinhalaInvoice || false); 
           setShowOrderNo(data.showOrderNo || false); 
           setServicePriceCategory(data.serviceJobPriceCategory || "");
-          // ✅ Load new setting
           setEnableServiceOrders(data.enableServiceOrders || false);
+          
+          // ✅ Load new setting
+          setDoubleLineInvoiceItem(data.doubleLineInvoiceItem || false);
 
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
@@ -142,8 +147,9 @@ const Settings = () => {
             useSinhalaInvoice: false,
             showOrderNo: false,
             serviceJobPriceCategory: "",
-            // ✅ Default new setting
             enableServiceOrders: false,
+            // ✅ Default new setting
+            doubleLineInvoiceItem: false,
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -170,8 +176,9 @@ const Settings = () => {
           setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice);
           setShowOrderNo(defaultSettings.showOrderNo);
           setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
-          // ✅ Set default state
           setEnableServiceOrders(defaultSettings.enableServiceOrders);
+          // ✅ Set default state
+          setDoubleLineInvoiceItem(defaultSettings.doubleLineInvoiceItem);
         }
 
         // --- FETCH CUSTOMERS ---
@@ -322,12 +329,17 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { showOrderNo: value });
   };
 
+  // ✅ HANDLER FOR DOUBLE LINE INVOICE
+  const handleDoubleLineInvoiceChange = async (value) => {
+    setDoubleLineInvoiceItem(value);
+    await updateDoc(getSettingsDocRef(), { doubleLineInvoiceItem: value });
+  };
+
   const handleServicePriceCategoryChange = async (value) => {
     setServicePriceCategory(value);
     await updateDoc(getSettingsDocRef(), { serviceJobPriceCategory: value });
   };
   
-  // ✅ Handler for Service & Future Orders Toggle
   const handleEnableServiceOrdersChange = async (value) => {
     setEnableServiceOrders(value);
     await updateDoc(getSettingsDocRef(), { enableServiceOrders: value });
@@ -433,12 +445,22 @@ const Settings = () => {
             </div>
             <p style={styles.helpText}>Enable this to display the Order Number on your printed invoices.</p>
         </div>
+
+        {/* ✅ NEW TOGGLE: Double line for single item */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Double line for single item in invoice print</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleDoubleLineInvoiceChange(true)} style={doubleLineInvoiceItem ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleDoubleLineInvoiceChange(false)} style={!doubleLineInvoiceItem ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to split item details into two lines on the printed invoice.</p>
+        </div>
+
       </div>
 
       {/* --- NEW SERVICE AND ORDERS SECTION --- */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Service and Orders</h3>
-        {/* ✅ NEW TOGGLE ADDED HERE */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Enable Services & Future Orders Facility</label>
             <div style={styles.toggleContainer}>
@@ -449,7 +471,6 @@ const Settings = () => {
         </div>
 
         <div style={styles.formGroup}>
-            {/* ✅ MODIFIED LABEL */}
             <label style={styles.label}>Select Price Category for Orders</label>
             <select value={servicePriceCategory} onChange={(e) => handleServicePriceCategoryChange(e.target.value)} style={styles.select}>
                 <option value="">Select a Price Category</option>

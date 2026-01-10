@@ -43,6 +43,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   }
 
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
+  const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; // ✅ Check Double Line Setting
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
 
@@ -64,8 +65,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
   // Calculate Total Savings
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
-    // Don't double count free items as savings unless desired. 
-    // Usually Free items price is 0, so diff is 0 unless original price is set.
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
   }, 0) : 0;
@@ -74,6 +73,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       if (!dateVal) return 'N/A';
       if (dateVal.toDate) return dateVal.toDate().toLocaleDateString(); 
       return new Date(dateVal).toLocaleDateString();
+  };
+
+  // ✅ Helper to count columns for colspan
+  const getColumnCount = () => {
+      let count = 2; // Qty + Total
+      if (invoice.isDiscountable) count += 1; // Original Price
+      count += 1; // Rate
+      return count; 
   };
 
   return (
@@ -134,10 +141,16 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           <table style={styles.itemsTable}>
             <thead>
               <tr>
+                {/* ✅ DYNAMIC HEADER LOGIC */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
-                    {isSinhala ? "අයිතමය" : "Item / Service"}
+                    {isDoubleLine 
+                        ? (isSinhala ? "අයිතමය/ ප්‍රමාණය" : "Item/ Qty") 
+                        : (isSinhala ? "අයිතමය" : "Item/ Service")
+                    }
                 </th>
-                <th style={styles.th}>Qty</th>
+
+                {/* If NOT Double Line, Show Qty Column Header explicitly */}
+                {!isDoubleLine && <th style={styles.th}>Qty</th>}
                 
                 {invoice.isDiscountable && (
                     <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
@@ -155,25 +168,58 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             </thead>
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
-                <tr key={index}>
-                  <td style={styles.td}>
-                      {item.itemName}
-                      {/* ✅ VISUAL INDICATOR FOR FREE ITEMS */}
-                      {item.isFreeIssue && (
-                          <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
-                              {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
-                          </div>
-                      )}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
-                  
-                  {invoice.isDiscountable && (
-                      <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
-                  )}
+                <React.Fragment key={index}>
+                    {/* ✅ DOUBLE LINE MODE RENDER */}
+                    {isDoubleLine ? (
+                        <>
+                            {/* Line 1: Item Name (Full Width) */}
+                            <tr>
+                                <td colSpan={getColumnCount()} style={{ ...styles.td, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
+                                    {item.itemName}
+                                    {item.isFreeIssue && (
+                                        <span style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold', marginLeft: '5px'}}>
+                                            {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                                        </span>
+                                    )}
+                                </td>
+                            </tr>
+                            {/* Line 2: Qty | Prices | Total */}
+                            <tr>
+                                <td style={{ ...styles.td, paddingTop: '0px' }}>
+                                   {/* Qty is shown in the first column under Item Name */}
+                                   <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
+                                </td>
 
-                  <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
-                  <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
-                </tr>
+                                {invoice.isDiscountable && (
+                                    <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                                )}
+
+                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{item.price.toFixed(2)}</td>
+                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px', fontWeight: 'bold' }}>{(item.quantity * item.price).toFixed(2)}</td>
+                            </tr>
+                        </>
+                    ) : (
+                        /* ✅ STANDARD SINGLE LINE MODE */
+                        <tr>
+                            <td style={styles.td}>
+                                {item.itemName}
+                                {item.isFreeIssue && (
+                                    <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
+                                        {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                                    </div>
+                                )}
+                            </td>
+                            <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
+                            
+                            {invoice.isDiscountable && (
+                                <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                            )}
+
+                            <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
+                            <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+                        </tr>
+                    )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

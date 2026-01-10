@@ -35,10 +35,29 @@ const styles = {
     dropdownItemSelected: { backgroundColor: '#e0e7ff', color: '#3730a3' },
     dropdownPrice: { color: '#6b7280', fontSize: '12px' },
     addButton: { padding: '12px 24px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' },
-    checkoutCard: { backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', flex: 1, display: 'flex', flexDirection: 'column', border: '2px solid transparent', transition: 'border-color 0.3s ease' },
+    
+    // ✅ MODIFIED: Added overflow hidden to prevent card growth
+    checkoutCard: { 
+        backgroundColor: 'white', 
+        borderRadius: '8px', 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)', 
+        flex: 1, 
+        display: 'flex', 
+        flexDirection: 'column', 
+        border: '2px solid transparent', 
+        transition: 'border-color 0.3s ease',
+        overflow: 'hidden' 
+    },
     activeCard: { borderColor: '#3b82f6' },
     checkoutTitle: { textAlign: 'center', fontSize: '18px', fontWeight: '700', padding: '16px', borderBottom: '1px solid #e5e7eb', color: '#111827' },
-    tableContainer: { flex: 1, overflowY: 'auto', padding: '0 8px 8px 8px' },
+    
+    // ✅ MODIFIED: Added minHeight: 0 to enable flex scrolling
+    tableContainer: { 
+        flex: 1, 
+        overflowY: 'auto', 
+        padding: '0 8px 8px 8px', 
+        minHeight: 0 
+    },
     table: { width: '100%', borderCollapse: 'collapse' },
     th: { padding: '10px', textAlign: 'left', color: '#6b7280', fontSize: '12px', fontWeight: '600', borderBottom: '1px solid #e5e7eb' },
     td: { padding: '10px', borderBottom: '1px solid #e5e7eb' },
@@ -95,12 +114,11 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   }
 
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
+  // ✅ Check for Double Line Setting
+  const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; 
+  
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
-
-  // Filter out normal items vs Free Issue items for distinct display if needed, 
-  // but standard table flow is usually better. 
-  // We will handle them inside the map.
 
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
@@ -119,9 +137,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
-  // Calculate Save: Only for Paid Items where Orig > Price
+  // Calculate Save
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
-    if(item.isFreeIssue) return sum; // Don't count free issue as "saved" in this logic unless requested
+    if(item.isFreeIssue) return sum; 
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
   }, 0) : 0;
@@ -130,6 +148,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       if (!dateVal) return 'N/A';
       if (dateVal.toDate) return dateVal.toDate().toLocaleDateString(); 
       return new Date(dateVal).toLocaleDateString();
+  };
+
+  // ✅ Helper to count columns for colspan
+  const getColumnCount = () => {
+      let count = 2; // Qty + Total
+      if (invoice.isDiscountable) count += 1; // Original Price
+      count += 1; // Rate
+      return count; 
   };
 
   return (
@@ -187,10 +213,16 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           <table style={styles.itemsTable}>
             <thead>
               <tr>
+                {/* ✅ DYNAMIC HEADER LOGIC */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
-                    {isSinhala ? "අයිතමය" : "Item / Service"}
+                    {isDoubleLine 
+                        ? (isSinhala ? "අයිතමය / ප්‍රමාණය" : "Item / Qty") 
+                        : (isSinhala ? "අයිතමය" : "Item / Service")
+                    }
                 </th>
-                <th style={styles.th}>Qty</th>
+                
+                {!isDoubleLine && <th style={styles.th}>Qty</th>}
+
                 {invoice.isDiscountable && (
                     <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
                 )}
@@ -205,23 +237,57 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             </thead>
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
-                <tr key={index}>
-                  <td style={styles.td}>
-                      {item.itemName}
-                      {/* ✅ SHOW FREE ISSUE LABEL */}
-                      {item.isFreeIssue && (
-                          <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
-                              {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
-                          </div>
-                      )}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
-                  {invoice.isDiscountable && (
-                      <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
-                  )}
-                  <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
-                  <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
-                </tr>
+                <React.Fragment key={index}>
+                    {/* ✅ DOUBLE LINE MODE RENDER */}
+                    {isDoubleLine ? (
+                        <>
+                            {/* Line 1: Item Name (Full Width) */}
+                            <tr>
+                                <td colSpan={getColumnCount()} style={{ ...styles.td, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
+                                    {item.itemName}
+                                    {item.isFreeIssue && (
+                                        <span style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold', marginLeft: '5px'}}>
+                                            {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                                        </span>
+                                    )}
+                                </td>
+                            </tr>
+                            {/* Line 2: Qty | Prices | Total */}
+                            <tr>
+                                <td style={{ ...styles.td, paddingTop: '0px' }}>
+                                   <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
+                                </td>
+
+                                {invoice.isDiscountable && (
+                                    <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                                )}
+
+                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{item.price.toFixed(2)}</td>
+                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px', fontWeight: 'bold' }}>{(item.quantity * item.price).toFixed(2)}</td>
+                            </tr>
+                        </>
+                    ) : (
+                        /* ✅ STANDARD SINGLE LINE MODE */
+                        <tr>
+                            <td style={styles.td}>
+                                {item.itemName}
+                                {item.isFreeIssue && (
+                                    <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
+                                        {item.buyQty && item.getQty ? `(Buy ${item.buyQty} Get ${item.getQty} Offer)` : '(Free Issue)'}
+                                    </div>
+                                )}
+                            </td>
+                            <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
+                            
+                            {invoice.isDiscountable && (
+                                <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                            )}
+
+                            <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
+                            <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+                        </tr>
+                    )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
