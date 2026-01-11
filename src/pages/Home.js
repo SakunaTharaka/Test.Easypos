@@ -143,11 +143,11 @@ const Home = () => {
             <h2 className="modal-title">Contact Support</h2>
             <p className="modal-subtitle">We are here to help you set up.</p>
             <div className="contact-container">
-              <a href="mailto:sakuna.wayne@gmail.com" className="contact-card">
+              <a href="mailto:admin@quickpos.site" className="contact-card">
                 <div className="contact-icon email"><FaEnvelope /></div>
                 <div>
                   <h4>Email Us</h4>
-                  <span>sakuna.wayne.easyerp@gmail.com</span>
+                  <span>admin@quickpos.site</span>
                 </div>
               </a>
               <a href="tel:0787223407" className="contact-card">
@@ -189,7 +189,7 @@ const Home = () => {
         <div className="nav-content">
           <div className="logo-section">
             <img src="/my-logo.png" alt="EasyPOS Logo" className="logo-icon" />
-            <h1>EasyPOS<span className="highlight">.lk</span></h1>
+            <h1>QuickPOS<span className="highlight">.site</span></h1>
           </div>
           <nav className="nav-links">
             <span onClick={() => openModal('features')}>Features</span>
@@ -259,7 +259,7 @@ const Home = () => {
             {isAdminButtonVisible && (
               <button onClick={openMasterAdmin} className="admin-btn">Master Admin</button>
             )}
-            <a href="mailto:sakuna.wayne@gmail.com">Support</a>
+            <a href="mailto:admin@quickpos.site">Support</a>
           </div>
         </div>
       </footer>

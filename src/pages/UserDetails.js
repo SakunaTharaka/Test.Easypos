@@ -149,7 +149,7 @@ const UserDetails = () => {
   return (
     <div style={styles.pageContainer}>
       <div style={styles.leftPanel}>
-        <h1 style={styles.brandTitle}>EasyPOS LK</h1>
+        <h1 style={styles.brandTitle}>QuickPOS SITE</h1>
         <p style={styles.brandSubtitle}>The complete Point of Sale solution for your growing business.</p>
       </div>
       <div style={styles.rightPanel}>
