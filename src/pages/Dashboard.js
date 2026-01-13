@@ -45,6 +45,14 @@ const Services = lazy(() => import("./tabs/Services"));
 const Orders = lazy(() => import("./tabs/Orders"));
 const Timeline = lazy(() => import("./tabs/Timeline"));
 
+// --- SECURITY UTILITY: HASH FUNCTION ---
+async function hashPassword(string) {
+  const utf8 = new TextEncoder().encode(string);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((bytes) => bytes.toString(16).padStart(2, '0')).join('');
+}
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -175,31 +183,45 @@ const Dashboard = () => {
             setUserInfo({ companyName: "My Business" });
         }
 
-        // Internal Users
+        // --- INTERNAL USER SETUP (UPDATED FOR HASH & DEFAULT PASSWORD) ---
         const internalUsersColRef = collection(db, uid, "admin", "admin_details");
-        const internalUsersSnap = await getDocs(internalUsersColRef);
-        const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
+        
+        // 1. Check specifically if the "admin" user exists
+        const adminUserRef = doc(internalUsersColRef, "admin");
+        const adminUserSnap = await getDoc(adminUserRef);
 
-        if (internalUsersSnap.empty) {
-            const masterUser = { username: "admin", password: "123", isAdmin: true, isMaster: true };
-            await setDoc(doc(internalUsersColRef, "admin"), masterUser);
-            const newAdminUser = { id: "admin", ...masterUser };
-            setInternalUsers([newAdminUser]);
-            setInternalLoggedInUser(newAdminUser);
-            localStorage.setItem("internalLoggedInUser", JSON.stringify(newAdminUser));
+        if (!adminUserSnap.exists()) {
+            // ✅ CREATE DEFAULT ADMIN IF MISSING
+            // Using "123456" as default, HASHED
+            const defaultPassHash = await hashPassword("123456");
+            const masterUser = { 
+                username: "admin", 
+                password: defaultPassHash, // Save the HASH, not plain text
+                isAdmin: true, 
+                isMaster: true 
+            };
+            await setDoc(adminUserRef, masterUser);
+        }
+
+        // 2. Now fetch all users to populate state
+        const internalUsersSnap = await getDocs(internalUsersColRef);
+        const users = internalUsersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setInternalUsers(users);
+
+        // 3. Handle Session
+        const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
+        if (savedInternalUser) {
+            setInternalLoggedInUser(savedInternalUser);
         } else {
-            const users = internalUsersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setInternalUsers(users);
-            if (savedInternalUser) {
-                setInternalLoggedInUser(savedInternalUser);
-            } else {
-                if (users.length > 1) setShowLoginPopup(true);
-                else if (users.length === 1) {
-                    setInternalLoggedInUser(users[0]);
-                    localStorage.setItem("internalLoggedInUser", JSON.stringify(users[0]));
-                }
+            if (users.length > 1) {
+                setShowLoginPopup(true);
+            } else if (users.length === 1) {
+                // Auto-login if only one user (the admin)
+                setInternalLoggedInUser(users[0]);
+                localStorage.setItem("internalLoggedInUser", JSON.stringify(users[0]));
             }
         }
+
       } catch (error) {
         console.error("Dashboard Load Error:", error);
       }
@@ -221,8 +243,13 @@ const Dashboard = () => {
   }, [navigate, maintenanceStatus]);
 
   // Helper Functions
-  const handleInternalLogin = () => {
-    const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === loginInput.password);
+  const handleInternalLogin = async () => {
+    // --- SECURE LOGIN: HASH INPUT ---
+    const hashedPassword = await hashPassword(loginInput.password);
+
+    // Compare with Hashed Password
+    const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === hashedPassword);
+    
     if (!matchedUser) { alert("Invalid credentials"); return; }
     setInternalLoggedInUser(matchedUser);
     localStorage.setItem("internalLoggedInUser", JSON.stringify(matchedUser));

@@ -36,7 +36,6 @@ const styles = {
     dropdownPrice: { color: '#6b7280', fontSize: '12px' },
     addButton: { padding: '12px 24px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' },
     
-    // ✅ MODIFIED: Added overflow hidden to prevent card growth
     checkoutCard: { 
         backgroundColor: 'white', 
         borderRadius: '8px', 
@@ -51,7 +50,6 @@ const styles = {
     activeCard: { borderColor: '#3b82f6' },
     checkoutTitle: { textAlign: 'center', fontSize: '18px', fontWeight: '700', padding: '16px', borderBottom: '1px solid #e5e7eb', color: '#111827' },
     
-    // ✅ MODIFIED: Added minHeight: 0 to enable flex scrolling
     tableContainer: { 
         flex: 1, 
         overflowY: 'auto', 
@@ -114,7 +112,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   }
 
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
-  // ✅ Check for Double Line Setting
   const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; 
   
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
@@ -137,7 +134,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
-  // Calculate Save
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
     if(item.isFreeIssue) return sum; 
     const orig = item.originalPrice || item.price;
@@ -150,7 +146,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       return new Date(dateVal).toLocaleDateString();
   };
 
-  // ✅ Helper to count columns for colspan
   const getColumnCount = () => {
       let count = 2; // Qty + Total
       if (invoice.isDiscountable) count += 1; // Original Price
@@ -213,7 +208,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           <table style={styles.itemsTable}>
             <thead>
               <tr>
-                {/* ✅ DYNAMIC HEADER LOGIC */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
                     {isDoubleLine 
                         ? (isSinhala ? "අයිතමය / ප්‍රමාණය" : "Item / Qty") 
@@ -238,10 +232,8 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
                 <React.Fragment key={index}>
-                    {/* ✅ DOUBLE LINE MODE RENDER */}
                     {isDoubleLine ? (
                         <>
-                            {/* Line 1: Item Name (Full Width) */}
                             <tr>
                                 <td colSpan={getColumnCount()} style={{ ...styles.td, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
                                     {item.itemName}
@@ -252,7 +244,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                     )}
                                 </td>
                             </tr>
-                            {/* Line 2: Qty | Prices | Total */}
                             <tr>
                                 <td style={{ ...styles.td, paddingTop: '0px' }}>
                                    <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
@@ -267,7 +258,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                             </tr>
                         </>
                     ) : (
-                        /* ✅ STANDARD SINGLE LINE MODE */
                         <tr>
                             <td style={styles.td}>
                                 {item.itemName}
@@ -330,7 +320,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
-      {/* ORDER NO DISPLAY */}
       {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
         <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
             <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
@@ -523,8 +512,9 @@ const Invoice = ({ internalUser }) => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [checkout, setCheckout] = useState([]);
   
-  // ✅ RESTORED: 'items' state to allow Client-Side Caching (Download Once)
+  // ✅ CACHING STATE
   const [items, setItems] = useState([]); 
+  const [currentCategoryId, setCurrentCategoryId] = useState(null); // Keeps track of loaded category
   const [filteredItems, setFilteredItems] = useState([]);
   const [selectedDbItem, setSelectedDbItem] = useState(null); 
 
@@ -546,8 +536,8 @@ const Invoice = ({ internalUser }) => {
   
   // Payment & Offer Popups
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
-  const [showFreeIssuePopup, setShowFreeIssuePopup] = useState(false); // ✅ NEW STATE
-  const [calculatedFreeItems, setCalculatedFreeItems] = useState([]); // ✅ NEW STATE
+  const [showFreeIssuePopup, setShowFreeIssuePopup] = useState(false); 
+  const [calculatedFreeItems, setCalculatedFreeItems] = useState([]); 
   
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const paymentOptions = ['Cash', 'Card', 'Online'];
@@ -636,22 +626,31 @@ const Invoice = ({ internalUser }) => {
   
   useEffect(() => { if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); }, [selectedShift]);
 
-  // ✅ UPDATED: Download ALL items once when customer changes (Client-Side Caching)
+  // ✅ SMART CACHING: Only download if category changes
   useEffect(() => {
     const fetchCustomerData = async () => {
-      // 1. Reset inputs & clear old items
+      // 1. Reset inputs & clear specific selections
       setItemInput("");
       setFilteredItems([]);
       setSelectedDbItem(null); 
-      setItems([]); 
       
       if (!selectedCustomer || !auth.currentUser) { 
           setIsCustomerDiscountable(false); 
+          setItems([]);
+          setCurrentCategoryId(null);
           return; 
       }
 
+      // 🛑 OPTIMIZATION: If category is same as last time, DO NOT DOWNLOAD AGAIN
+      if (selectedCustomer.priceCategoryId === currentCategoryId && items.length > 0) {
+          return; // Skip fetch (Cost = 0 Reads)
+      }
+
+      // If category is different, clear list and fetch new ones
+      setItems([]);
+
       try {
-        // 2. Fetch Category Settings
+        // 2. Fetch Category Settings (Discountable Status)
         if(selectedCustomer.priceCategoryId) {
            const catRef = doc(db, auth.currentUser.uid, "price_categories", "categories", selectedCustomer.priceCategoryId);
            getDoc(catRef).then(catSnap => setIsCustomerDiscountable(catSnap.exists() && catSnap.data().isDiscountable));
@@ -659,7 +658,7 @@ const Invoice = ({ internalUser }) => {
           setIsCustomerDiscountable(false); 
         }
 
-        // 3. Download ALL items for this category (The Cache)
+        // 3. Download items for this NEW category
         const pricedItemsColRef = collection(db, auth.currentUser.uid, "price_categories", "priced_items");
         const q = query(pricedItemsColRef, where("categoryId", "==", selectedCustomer.priceCategoryId));
         
@@ -667,14 +666,15 @@ const Invoice = ({ internalUser }) => {
         const allItems = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
         
         setItems(allItems); // Store in memory
+        setCurrentCategoryId(selectedCustomer.priceCategoryId); // Update cache key
       } catch (error) {
         console.error("Error fetching items:", error);
       }
     };
     fetchCustomerData();
-  }, [selectedCustomer]);
+  }, [selectedCustomer]); // Trigger only when customer changes
 
-  // ✅ UPDATED: Client-Side Search (Instant Filtering)
+  // ✅ Client-Side Search (Instant)
   useEffect(() => {
     if (!itemInput.trim()) {
       setFilteredItems([]);
@@ -684,7 +684,7 @@ const Invoice = ({ internalUser }) => {
 
     const lowerTerm = itemInput.toLowerCase();
     
-    // Filter the 'items' array we already downloaded
+    // Filter from MEMORY (items array)
     const results = items.filter(item => 
       (item.itemName && item.itemName.toLowerCase().includes(lowerTerm)) ||
       (item.itemSKU && item.itemSKU.toLowerCase().includes(lowerTerm)) || 
@@ -746,10 +746,8 @@ const Invoice = ({ internalUser }) => {
   const addItemToCheckout = () => {
     if (!itemInput || !qtyInput || isNaN(qtyInput) || qtyInput <= 0) return;
     
-    // 1. Try to use the explicitly selected item
     let itemData = selectedDbItem; 
 
-    // 2. Fallback: If user typed "Apple" and hit Enter without selecting, find it in the memory array
     if (!itemData) {
         itemData = items.find(i => i.itemName.toLowerCase() === itemInput.toLowerCase());
     }
@@ -777,14 +775,12 @@ const Invoice = ({ internalUser }) => {
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
   const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); setCalculatedFreeItems([]); itemInputRef.current?.focus(); };
   
-  // ✅ LOGIC: Calculate Buy X Get Y Offers
   const handleSaveAttempt = () => {
     if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
     if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
 
     const freeItems = [];
 
-    // Iterate through current checkout items
     checkout.forEach(item => {
         if (item.buyQty && item.getQty && Number(item.buyQty) > 0) {
             const billedQty = Number(item.quantity);
@@ -792,9 +788,9 @@ const Invoice = ({ internalUser }) => {
             if (sets > 0) {
                 const freeQty = sets * Number(item.getQty);
                 freeItems.push({
-                    ...item, // Clone original item data
-                    freeQty: freeQty, // Calculate specific free amount
-                    isFreeIssue: true // Mark as free
+                    ...item,
+                    freeQty: freeQty, 
+                    isFreeIssue: true 
                 });
             }
         }
@@ -803,16 +799,13 @@ const Invoice = ({ internalUser }) => {
     setCalculatedFreeItems(freeItems);
 
     if (freeItems.length > 0) {
-        // Show Free Issue Popup
         setShowFreeIssuePopup(true);
     } else {
-        // Proceed directly to payment
         setConfirmPaymentMethod('Cash'); 
         setShowPaymentConfirm(true);
     }
   };
 
-  // ✅ Confirms Free Issue Popup
   const handleFreeIssueConfirm = () => {
       setShowFreeIssuePopup(false);
       setConfirmPaymentMethod('Cash'); 
@@ -844,23 +837,17 @@ const Invoice = ({ internalUser }) => {
 
       const finalInvoiceData = await runTransaction(db, async (t) => {
         
-        // ✅ MERGE FREE ITEMS INTO CHECKOUT DATA FOR SAVING
         let itemsToSave = [...checkout];
         
-        // Re-calculate based on state just to be safe, or use state
-        // We use the previously calculated array or recalculate to ensure safety
-        // Here we append the free items as NEW ROWS with Price 0.
         calculatedFreeItems.forEach(freeItem => {
             itemsToSave.push({
                 ...freeItem,
-                quantity: freeItem.freeQty, // The calculated free amount
-                price: 0, // FREE
-                originalPrice: 0, // No value for customer view
+                quantity: freeItem.freeQty,
+                price: 0,
+                originalPrice: 0,
                 isFreeIssue: true,
                 buyQty: freeItem.buyQty,
                 getQty: freeItem.getQty,
-                // ✅ CORRECTED: SAVE WITH ORIGINAL ITEM NAME
-                // We rely on 'isFreeIssue' flag for UI distinction, but keep DB name same for aggregation.
                 itemName: freeItem.itemName 
             });
         });
@@ -923,7 +910,7 @@ const Invoice = ({ internalUser }) => {
         const newInvNum = `INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`;
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, 
-          items: itemsToSave, // ✅ SAVING MERGED ITEMS (Normal + Free)
+          items: itemsToSave,
           total, deliveryCharge: Number(deliveryCharge) || 0,
           received: Number(receivedAmount) || 0,
           balance: balance,
@@ -1034,7 +1021,6 @@ const Invoice = ({ internalUser }) => {
         </div>
       </div>
       
-      {/* ✅ NEW: BUY X GET Y POPUP */}
       {showFreeIssuePopup && (
         <div style={styles.confirmOverlay}>
           <div style={styles.confirmPopup}>
@@ -1043,7 +1029,6 @@ const Invoice = ({ internalUser }) => {
             <div style={{maxHeight: '200px', overflowY: 'auto', textAlign: 'left', marginBottom: '20px', border: '1px solid #eee', borderRadius: '6px', padding: '10px'}}>
                 {calculatedFreeItems.map((item, index) => (
                     <div key={index} style={{display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px solid #f9f9f9'}}>
-                        {/* ✅ ADDED OFFER DETAILS IN BRACKETS */}
                         <span>{item.itemName} <span style={{fontSize: '0.9em', color: '#666'}}>(Buy {item.buyQty} Get {item.getQty})</span></span>
                         <span style={{fontWeight: 'bold', color: '#27ae60'}}>+ {item.freeQty} Free</span>
                     </div>
@@ -1053,7 +1038,7 @@ const Invoice = ({ internalUser }) => {
                 onClick={handleFreeIssueConfirm}
                 style={{
                     padding: '12px 30px', 
-                    background: '#e67e22', // Orange Button
+                    background: '#e67e22', 
                     color: 'white', 
                     border: 'none', 
                     borderRadius: '6px', 
@@ -1074,8 +1059,7 @@ const Invoice = ({ internalUser }) => {
             <h4>Select Payment Method</h4>
             <p>Use ← → arrow keys and press Enter to confirm.</p>
             <div style={styles.confirmButtons}>
-                {paymentOptions.map(m => ( <button key={m} onClick={() => executeSaveInvoice(m)} style={confirmPaymentMethod === m ? styles.confirmButtonActive : styles.confirmButton}>{m === 'Online' ? 'Online Transfer' : `${m} Payment`}</button> ))}
-            </div>
+                {paymentOptions.map(m => ( <button key={m} onClick={() => executeSaveInvoice(m)} style={confirmPaymentMethod === m ? styles.confirmButtonActive : styles.confirmButton}>{m === 'Online' ? 'Online Transfer' : `${m} Payment`}</button> ))}\r\n            </div>
           </div>
         </div>
       )}

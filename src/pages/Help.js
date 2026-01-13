@@ -50,7 +50,7 @@ const Help = () => {
         </div>
          <div style={styles.faqItem}>
             <p style={styles.faqQuestion}>Q: Where can I find a video tutorial?</p>
-            <p style={styles.faqAnswer}>A: A quick video guide is available when you first log in. You can also access it anytime at this link: <a href="https://youtu.be/DiA2LuJcN4A?si=gOhg0jRYo8ANvZkI" target="_blank" rel="noopener noreferrer">Watch Tutorial</a></p>
+            <p style={styles.faqAnswer}>A: A quick video guide is available when you first log in. You can also access it anytime at this link: <a href="https://youtube.com" target="_blank" rel="noopener noreferrer">Watch Tutorial</a></p>
         </div>
       </div>
 

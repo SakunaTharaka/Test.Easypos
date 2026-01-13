@@ -26,7 +26,7 @@ const CashBook = () => {
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-    const [pageCursors, setPageCursors] = useState([null]);
+    const [pageCursors, setPageCursors] = useState([null]); // Stores TIMESTAMPS, not Snapshots
     const [hasNextPage, setHasNextPage] = useState(false);
     const [balanceCarry, setBalanceCarry] = useState([0]);
     const PAGE_SIZE = 65;
@@ -35,7 +35,6 @@ const CashBook = () => {
     const handleCreateCashBook = async () => {
         if (!newCashBookName.trim()) return alert("Cash book name cannot be empty.");
         
-        // Constraint: Max 4 Books
         if (cashBooks.length >= 4) {
             return alert("Limit Reached: You can only create up to 4 Cash Books.");
         }
@@ -43,7 +42,6 @@ const CashBook = () => {
         const user = auth.currentUser;
         if (!user) return;
 
-        // Constraint: Unique Name
         if (cashBooks.some(book => book.name.toLowerCase() === newCashBookName.trim().toLowerCase())) {
             return alert("A cash book with this name already exists.");
         }
@@ -83,7 +81,6 @@ const CashBook = () => {
 
     // --- 3. DELETE BOOK (Protected Default & Balance 0 Check) ---
     const handleDeleteBook = async (book) => {
-        // Constraint: Cannot delete default book
         if (book.name === DEFAULT_BOOK_NAME) {
             return alert("Restricted: The Main Account Cashier cannot be deleted.");
         }
@@ -95,7 +92,6 @@ const CashBook = () => {
             const user = auth.currentUser;
             const balance = await calculateTotalBalance(user.uid, book.id);
 
-            // Constraint: Balance must be exactly 0
             if (Math.abs(balance) > 0.01) { 
                 alert(`Cannot Delete: This cash book has a remaining balance of Rs. ${balance.toFixed(2)}. Please clear the balance first.`);
                 setLoading(false);
@@ -130,7 +126,7 @@ const CashBook = () => {
         return total;
     };
 
-    // --- 4. FETCH TRANSACTIONS ---
+    // --- 4. FETCH TRANSACTIONS (PAGINATION FIXED) ---
     useEffect(() => {
         const fetchTransactions = async () => {
             if (!selectedBook) {
@@ -141,9 +137,15 @@ const CashBook = () => {
             const uid = auth.currentUser.uid;
             
             try {
+                // ✅ FIXED: Use Timestamp Value for Pagination, NOT Document Snapshot
                 const buildQuery = (path, sortField) => {
                     let q = query(collection(db, uid, ...path), where('cashBookId', '==', selectedBook.id), orderBy(sortField, 'asc'));
-                    if (pageCursors[currentPage - 1]) q = query(q, startAfter(pageCursors[currentPage - 1]));
+                    
+                    const cursorTime = pageCursors[currentPage - 1]; // Get the stored Timestamp
+                    if (cursorTime) {
+                        q = query(q, startAfter(cursorTime));
+                    }
+                    
                     return query(q, limit(PAGE_SIZE + 1));
                 };
 
@@ -165,7 +167,11 @@ const CashBook = () => {
                 const cashInTxs = cashInSnap.docs.map(d => normalize(d, d.data().details?.startsWith('Transfer from') ? 'Transfer In' : 'Cash In', 'createdAt', 'addedBy', 'details'));
 
                 const combined = [...expenseTxs, ...stockPaymentTxs, ...cashInTxs]
-                    .sort((a, b) => a.timestamp?.toMillis() - b.timestamp?.toMillis());
+                    .sort((a, b) => {
+                        const tA = a.timestamp?.toMillis() || 0;
+                        const tB = b.timestamp?.toMillis() || 0;
+                        return tA - tB;
+                    });
 
                 const hasMore = combined.length > PAGE_SIZE;
                 const pageData = combined.slice(0, PAGE_SIZE);
@@ -173,6 +179,7 @@ const CashBook = () => {
                 setHasNextPage(hasMore);
 
                 if (pageData.length > 0) {
+                    // Calculate running balance for display
                     let currentRunningBalance = balanceCarry[currentPage - 1] || 0;
                     pageData.forEach(tx => {
                         const isCredit = ['Expense', 'Stock Payment', 'Transfer Out'].includes(tx.type);
@@ -183,10 +190,10 @@ const CashBook = () => {
                     newCarry[currentPage] = currentRunningBalance;
                     setBalanceCarry(newCarry);
 
+                    // ✅ FIXED: Save the TIMESTAMP of the last item for the next cursor
                     const lastDoc = pageData[pageData.length - 1];
                     const newCursors = [...pageCursors];
-                    const allDocs = [...expensesSnap.docs, ...paymentsSnap.docs, ...cashInSnap.docs];
-                    newCursors[currentPage] = allDocs.find(d => d.id === lastDoc.id);
+                    newCursors[currentPage] = lastDoc.timestamp; // Storing the Date/Timestamp object
                     setPageCursors(newCursors);
                 }
             } catch (error) {
@@ -197,7 +204,8 @@ const CashBook = () => {
         };
 
         fetchTransactions();
-    }, [selectedBook, currentPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedBook, currentPage]); // Removing pageCursors from dependency to prevent loop
 
     useEffect(() => {
         if (selectedBook) {

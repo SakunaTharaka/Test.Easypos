@@ -53,7 +53,7 @@ const PriceCat = ({ internalUser }) => {
   const saveButtonRef = useRef(null);
 
   // ✅ Defined Constant for Limit
-  const MAX_CATEGORIES = 35;
+  const MAX_CATEGORIES = 50;
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;

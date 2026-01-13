@@ -85,7 +85,7 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
-  // --- DELETE HANDLER (UPDATED: REVERSES SPECIFIC SALES FIELDS AND INVOICE COUNT) ---
+  // --- DELETE HANDLER ---
   const handleDelete = async (invoice) => {
       // ✅ SECURITY CHECK: Only Admins can delete
       if (!internalUser?.isAdmin) {
@@ -236,27 +236,44 @@ const SalesReport = ({ internalUser }) => {
             </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan={7} style={{padding:20, textAlign:'center'}}>Loading...</td></tr> : currentInvoices.map((inv) => (
-                <tr key={inv.id} style={styles.tr}>
-                    <td style={styles.td}>{inv.invoiceNumber}</td>
-                    <td style={styles.td}>{inv.createdAt?.toDate ? inv.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>
-                    <td style={styles.td}>{inv.customerName}</td>
-                    <td style={styles.td}>{inv.issuedBy || 'System'}</td>
-                    <td style={styles.td}><strong>{inv.total?.toFixed(2)}</strong></td>
-                    <td style={styles.td}><span style={{padding:'4px 8px', borderRadius:4, fontSize:11, background: inv.status==='Paid'?'#d1fae5':'#fee2e2', color: inv.status==='Paid'?'#065f46':'#991b1b'}}>{inv.status}</span></td>
-                    <td style={{...styles.td, textAlign: 'right'}}>
-                        <button style={styles.iconBtn} onClick={() => handleView(inv.id)}><AiOutlineEye size={18} color="#3b82f6" /></button>
-                        {/* The Delete Button is still visible but functionality is blocked for non-admins */}
-                        <button 
-                            style={{...styles.iconBtn, opacity: internalUser?.isAdmin ? 1 : 0.5, cursor: internalUser?.isAdmin ? 'pointer' : 'not-allowed'}} 
-                            onClick={() => handleDelete(inv)}
-                            title={internalUser?.isAdmin ? "Delete Invoice" : "Only Admins can delete"}
-                        >
-                            <AiOutlineDelete size={18} color="#ef4444" />
-                        </button>
-                    </td>
-                </tr>
-            ))}
+            {loading ? <tr><td colSpan={7} style={{padding:20, textAlign:'center'}}>Loading...</td></tr> : currentInvoices.map((inv) => {
+                
+                // ✅ UPDATED STATUS LOGIC
+                // If it's a SERVICE or ORDER, show its actual status.
+                // If it's a Standard Invoice (type is undefined/null), show "Walk-in Paid".
+                const isServiceOrOrder = inv.type === 'SERVICE' || inv.type === 'ORDER';
+                const displayStatus = isServiceOrOrder ? (inv.status || 'Pending') : "Walk-in Paid";
+                
+                // Determine color based on the display text
+                const isPaid = displayStatus === 'Paid' || displayStatus === 'Walk-in Paid' || displayStatus === 'Completed';
+                const statusBg = isPaid ? '#d1fae5' : '#fee2e2';
+                const statusColor = isPaid ? '#065f46' : '#991b1b';
+
+                return (
+                    <tr key={inv.id} style={styles.tr}>
+                        <td style={styles.td}>{inv.invoiceNumber}</td>
+                        <td style={styles.td}>{inv.createdAt?.toDate ? inv.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>
+                        <td style={styles.td}>{inv.customerName}</td>
+                        <td style={styles.td}>{inv.issuedBy || 'System'}</td>
+                        <td style={styles.td}><strong>{inv.total?.toFixed(2)}</strong></td>
+                        <td style={styles.td}>
+                            <span style={{ padding:'4px 8px', borderRadius:4, fontSize:11, background: statusBg, color: statusColor }}>
+                                {displayStatus}
+                            </span>
+                        </td>
+                        <td style={{...styles.td, textAlign: 'right'}}>
+                            <button style={styles.iconBtn} onClick={() => handleView(inv.id)}><AiOutlineEye size={18} color="#3b82f6" /></button>
+                            <button 
+                                style={{...styles.iconBtn, opacity: internalUser?.isAdmin ? 1 : 0.5, cursor: internalUser?.isAdmin ? 'pointer' : 'not-allowed'}} 
+                                onClick={() => handleDelete(inv)}
+                                title={internalUser?.isAdmin ? "Delete Invoice" : "Only Admins can delete"}
+                            >
+                                <AiOutlineDelete size={18} color="#ef4444" />
+                            </button>
+                        </td>
+                    </tr>
+                );
+            })}
           </tbody>
         </table>
       </div>

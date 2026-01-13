@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-// ✅ ADD Navigate to imports
+// ✅ FIXED: Added 'Navigate' to the import list
 import { useNavigate, Navigate } from "react-router-dom"; 
 import { auth, db, provider } from "../firebase"; 
-import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth"; 
+import { signInWithEmailAndPassword, signInWithPopup, onAuthStateChanged } from "firebase/auth"; 
 import { collection, query, where, getDocs, doc, getDoc, onSnapshot } from "firebase/firestore"; 
 import { FaCalculator, FaFileInvoice, FaTools, FaChartLine, FaSignOutAlt } from "react-icons/fa";
 import { CashBookProvider } from "../context/CashBookContext";
@@ -13,6 +13,14 @@ import SalesReport from "../pages/SalesReport";
 import Orders from "../pages/tabs/Orders";
 import Services from "../pages/tabs/Services";
 import companyLogoImg from '../logo.jpeg'; 
+
+// --- SECURITY UTILITY: HASH FUNCTION ---
+async function hashPassword(string) {
+  const utf8 = new TextEncoder().encode(string);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((bytes) => bytes.toString(16).padStart(2, '0')).join('');
+}
 
 const themeColors = { 
   primary: '#00A1FF', 
@@ -27,11 +35,12 @@ const themeColors = {
 const POSPortal = () => {
   const navigate = useNavigate(); 
 
-  // --- ACCESS CONTROL STATE ---
+  // --- APP STATE ---
   const [maintenanceMode, setMaintenanceMode] = useState({ active: false, loading: true });
-  const [trialStatus, setTrialStatus] = useState({ expired: false });
+  const [currentUser, setCurrentUser] = useState(null); // Tracks Firebase Auth User
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // Auth State
+  // --- INTERNAL USER STATE ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [internalUser, setInternalUser] = useState(null);
   const [adminUid, setAdminUid] = useState(null);
@@ -39,14 +48,13 @@ const POSPortal = () => {
   // Settings
   const [settings, setSettings] = useState(null);
   const [enableServiceOrders, setEnableServiceOrders] = useState(false); 
+  const [trialExpired, setTrialExpired] = useState(false);
 
-  // Admin Login State
+  // Login Inputs
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState("");
-
-  // Staff Login State
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -54,89 +62,113 @@ const POSPortal = () => {
 
   const [currentTab, setCurrentTab] = useState("POS");
 
-  // 1. MAINTENANCE CHECK
+  // ==========================================
+  // 1. AUTH OBSERVER (Step 1: Check who is logged in)
+  // ==========================================
   useEffect(() => {
-    const maintRef = doc(db, 'global_settings', 'maintenance');
-    const unsubscribe = onSnapshot(maintRef, (docSnap) => {
-      if (docSnap.exists() && docSnap.data().isActive) {
-        setMaintenanceMode({ active: true, loading: false });
-      } else {
-        setMaintenanceMode({ active: false, loading: false });
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. AUTH & TRIAL CHECK
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
       if (user) {
         setAdminUid(user.uid);
-        await Promise.all([fetchSettings(user.uid), checkTrialStatus(user)]);
       } else {
         setAdminUid(null);
         setSettings(null);
-        setTrialStatus({ expired: false });
-        localStorage.removeItem("posInternalUser");
+        setInternalUser(null);
         setIsAuthenticated(false);
+        localStorage.removeItem("posInternalUser");
       }
+      setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const fetchSettings = async (uid) => {
-      try {
-          const settingsRef = doc(db, uid, "settings");
-          const settingsSnap = await getDoc(settingsRef);
-          if (settingsSnap.exists()) {
-              const data = settingsSnap.data();
-              setSettings(data);
-              setEnableServiceOrders(data.enableServiceOrders === true);
-          }
-      } catch (err) {
-          console.error("Error loading settings:", err);
-      }
-  };
-
-  const checkTrialStatus = async (user) => {
-      try {
-          const userRef = doc(db, 'Userinfo', user.uid);
-          const docSnap = await getDoc(userRef);
-
-          if (docSnap.exists()) {
-              const userData = docSnap.data();
-              const trialEndDate = userData.trialEndDate?.toDate();
-
-              if (trialEndDate) {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0); 
-                  if (today > trialEndDate) {
-                      setTrialStatus({ expired: true });
-                  }
-              }
-          }
-      } catch (err) {
-          console.error("Error checking trial:", err);
-      }
-  };
-
-  // 3. PERSISTENCE
+  // ==========================================
+  // 2. DATA LISTENERS (Step 2: Only run if User Exists)
+  // ==========================================
   useEffect(() => {
-      const savedUser = localStorage.getItem("posInternalUser");
-      if (savedUser) {
-          try {
-              const parsed = JSON.parse(savedUser);
-              if (parsed?.username) {
-                  setInternalUser(parsed);
-                  setIsAuthenticated(true);
-              }
-          } catch (e) {
-              localStorage.removeItem("posInternalUser");
-          }
-      }
-  }, []);
+    // 🛑 STOP: If we are still loading auth or no user, DO NOT connect to DB
+    if (authLoading) return;
 
-  // Handlers
+    if (!currentUser) {
+        // If not logged in, we assume maintenance is false or we can't check it safely
+        setMaintenanceMode({ active: false, loading: false });
+        return;
+    }
+
+    // A. MAINTENANCE LISTENER (Safe because currentUser exists)
+    const maintRef = doc(db, 'global_settings', 'maintenance');
+    const maintUnsub = onSnapshot(maintRef, 
+      (docSnap) => {
+        if (docSnap.exists() && docSnap.data().isActive) {
+          setMaintenanceMode({ active: true, loading: false });
+        } else {
+          setMaintenanceMode({ active: false, loading: false });
+        }
+      }, 
+      (err) => {
+        console.warn("Maintenance listener warning (Permissions):", err.code);
+        setMaintenanceMode({ active: false, loading: false });
+      }
+    );
+
+    // B. LOAD SETTINGS & TRIAL
+    const fetchData = async () => {
+        try {
+            // 1. Settings
+            const settingsRef = doc(db, currentUser.uid, "settings");
+            const settingsSnap = await getDoc(settingsRef);
+            if (settingsSnap.exists()) {
+                const data = settingsSnap.data();
+                setSettings(data);
+                setEnableServiceOrders(data.enableServiceOrders === true);
+            }
+
+            // 2. Trial Status
+            const userRef = doc(db, 'Userinfo', currentUser.uid);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                const userData = userSnap.data();
+                const trialEndDate = userData.trialEndDate?.toDate();
+                if (trialEndDate) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0); 
+                    if (today > trialEndDate) {
+                        setTrialExpired(true);
+                    }
+                }
+            }
+
+            // 3. Restore Internal User Session
+            const savedUser = localStorage.getItem("posInternalUser");
+            if (savedUser) {
+                try {
+                    const parsed = JSON.parse(savedUser);
+                    if (parsed?.username) {
+                        setInternalUser(parsed);
+                        setIsAuthenticated(true);
+                    }
+                } catch (e) {
+                    localStorage.removeItem("posInternalUser");
+                }
+            }
+
+        } catch (err) {
+            console.error("Error loading POS data:", err);
+        }
+    };
+
+    fetchData();
+
+    return () => {
+        maintUnsub();
+    };
+  }, [currentUser, authLoading]); 
+
+
+  // ==========================================
+  // HANDLERS
+  // ==========================================
+
   const handleAdminLogin = async (e) => {
     e.preventDefault();
     setAdminError("");
@@ -173,8 +205,12 @@ const POSPortal = () => {
     }
 
     try {
+      // HASH PASSWORD
+      const hashedPassword = await hashPassword(password);
+
       const usersRef = collection(db, adminUid, "admin", "admin_details");
-      const q = query(usersRef, where("username", "==", username), where("password", "==", password));
+      const q = query(usersRef, where("username", "==", username), where("password", "==", hashedPassword));
+      
       const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
@@ -182,6 +218,8 @@ const POSPortal = () => {
         setInternalUser(fullUser); 
         setIsAuthenticated(true);
         localStorage.setItem("posInternalUser", JSON.stringify(fullUser));
+        setUsername("");
+        setPassword("");
       } else {
         setError("Invalid username or password.");
       }
@@ -192,15 +230,10 @@ const POSPortal = () => {
     }
   };
 
-  // ✅ UPDATED LOGOUT HANDLER
   const handleLogout = () => {
     setIsAuthenticated(false);
     setInternalUser(null);
     localStorage.removeItem("posInternalUser");
-    
-    // Clear the inputs so they don't persist on the login screen
-    setUsername("");
-    setPassword("");
   };
 
   const handleSystemLogout = async () => {
@@ -212,15 +245,15 @@ const POSPortal = () => {
   };
 
   // ==========================================
-  // 🛑 BLOCKING LOGIC
+  // RENDER
   // ==========================================
 
-  // 1. Loading
-  if (maintenanceMode.loading) {
+  // 1. Loading State
+  if (authLoading || maintenanceMode.loading) {
       return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div></div>;
   }
 
-  // 2. MAINTENANCE
+  // 2. Maintenance Screen
   if (maintenanceMode.active) {
       return (
         <div style={styles.pageContainer}>
@@ -233,18 +266,12 @@ const POSPortal = () => {
       );
   }
 
-  // 3. 🛡️ TRIAL EXPIRED -> REDIRECT TO BILLING PAGE
-  // If the admin is logged in (device authorized) AND trial is expired...
-  if (adminUid && trialStatus.expired) {
-      // ✅ FORCE REDIRECT: This prevents staying on /pos
-      // 'replace' ensures they can't click "Back" to return here.
+  // 3. Trial Expired Redirect
+  if (adminUid && trialExpired) {
       return <Navigate to="/billing" replace />;
   }
 
-  // ==========================================
-  // 🚀 NORMAL FLOW
-  // ==========================================
-
+  // 4. Login / Authorization Screens
   if (!isAuthenticated) {
     return (
       <div style={styles.pageContainer}>
@@ -297,10 +324,7 @@ const POSPortal = () => {
     );
   }
 
-  if (isAuthenticated && !adminUid) {
-      return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p>Restoring Session...</p></div>;
-  }
-
+  // 5. Main POS Interface (Only renders if authenticated)
   return (
     <CashBookProvider>
         <div style={styles.portalContainer}>

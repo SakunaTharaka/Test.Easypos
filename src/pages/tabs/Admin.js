@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
-import {
-  doc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  collection,
-  deleteDoc,
-} from "firebase/firestore";
+import { doc, getDocs, setDoc, updateDoc, collection, deleteDoc } from "firebase/firestore";
 import { FaKey, FaTrash } from 'react-icons/fa';
 
-const Admin = ({ internalUsers, setInternalUsers }) => {
+// --- SECURITY UTILITY: HASH FUNCTION ---
+async function hashPassword(string) {
+  const utf8 = new TextEncoder().encode(string);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((bytes) => bytes.toString(16).padStart(2, '0')).join('');
+}
+
+const Admin = () => {
   const [loading, setLoading] = useState(true);
+  const [internalUsers, setInternalUsers] = useState([]);
   const [newUser, setNewUser] = useState({ username: "", password: "", isAdmin: false });
   const [showPasswordPopup, setShowPasswordPopup] = useState(false);
   const [changePasswordUser, setChangePasswordUser] = useState(null);
@@ -21,40 +23,56 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
     try {
       const stored = localStorage.getItem("internalLoggedInUser");
       return stored ? JSON.parse(stored) : null;
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { return null; }
   };
   const loggedInUser = getCurrentInternal();
 
+  // 1. FETCH USERS LOCALLY (Securely limited to Admin Page)
   useEffect(() => {
-    if (internalUsers) {
-      setLoading(false);
-    }
-  }, [internalUsers]);
+    const fetchUsers = async () => {
+      try {
+        const uid = auth.currentUser.uid;
+        const colRef = collection(db, uid, "admin", "admin_details");
+        const snapshot = await getDocs(colRef);
+        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setInternalUsers(users);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUsers();
+  }, []);
 
   const handleAddUser = async () => {
     if (!newUser.username || !newUser.password) return alert("Enter username and password");
-
-    // ✅ NEW CHECK: Password Minimum Length
-    if (newUser.password.length < 6) {
-      return alert("Password must be at least 6 characters long.");
+    if (newUser.password.length < 6) return alert("Password must be at least 6 characters.");
+    if (internalUsers.length >= 6) return alert("Maximum limit reached.");
+    
+    // Case-insensitive duplicate check
+    if (internalUsers.some(u => u.id.toLowerCase() === newUser.username.toLowerCase())) {
+        return alert("Username already exists");
     }
-
-    // --- CHECK: Limit max users to 6 ---
-    if (internalUsers.length >= 6) {
-      return alert("Maximum limit reached. You cannot add more than 6 users.");
-    }
-    // -----------------------------------
-
-    if (internalUsers.some(u => u.username.toLowerCase() === newUser.username.toLowerCase())) return alert("Username already exists");
 
     const uid = auth.currentUser.uid;
+    // Use Username as Doc ID
     const newUserDocRef = doc(db, uid, "admin", "admin_details", newUser.username);
 
     try {
-      await setDoc(newUserDocRef, { ...newUser, isMaster: false });
-      setInternalUsers([...internalUsers, { id: newUser.username, ...newUser, isMaster: false }]);
+      // 2. HASH PASSWORD BEFORE SAVING
+      const hashedPassword = await hashPassword(newUser.password);
+
+      const userPayload = { 
+          username: newUser.username, 
+          password: hashedPassword, // Store Hash
+          isAdmin: newUser.isAdmin,
+          isMaster: false 
+      };
+
+      await setDoc(newUserDocRef, userPayload);
+      
+      setInternalUsers([...internalUsers, { id: newUser.username, ...userPayload }]);
       setNewUser({ username: "", password: "", isAdmin: false });
       alert("User added successfully!");
     } catch (error) {
@@ -65,14 +83,10 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
   const handleDeleteUser = async (user) => {
     if (user.isMaster) return alert("Cannot delete the master admin account.");
     if (user.id === loggedInUser?.id) return alert("You cannot delete your own account.");
-    
     if (!window.confirm(`Delete user ${user.username}?`)) return;
 
-    const uid = auth.currentUser.uid;
-    const userDocRef = doc(db, uid, "admin", "admin_details", user.id);
-
     try {
-      await deleteDoc(userDocRef);
+      await deleteDoc(doc(db, auth.currentUser.uid, "admin", "admin_details", user.id));
       setInternalUsers(internalUsers.filter(u => u.id !== user.id));
       alert("User deleted successfully!");
     } catch (error) {
@@ -85,7 +99,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
       alert("Only the master admin can change their own password.");
       return;
     }
-    
     if (!passwordInput.newPassword || passwordInput.newPassword !== passwordInput.confirmPassword) {
       return alert("Passwords do not match or are empty.");
     }
@@ -93,13 +106,15 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
         return alert("Password must be at least 6 characters long.");
     }
 
-    const uid = auth.currentUser.uid;
-    const userDocRef = doc(db, uid, "admin", "admin_details", changePasswordUser.id);
-    
     try {
-        await updateDoc(userDocRef, { password: passwordInput.newPassword });
+        // 3. HASH NEW PASSWORD BEFORE UPDATING
+        const hashedPassword = await hashPassword(passwordInput.newPassword);
+        
+        const userDocRef = doc(db, auth.currentUser.uid, "admin", "admin_details", changePasswordUser.id);
+        await updateDoc(userDocRef, { password: hashedPassword });
+
         setInternalUsers(internalUsers.map(u => 
-            u.id === changePasswordUser.id ? { ...u, password: passwordInput.newPassword } : u
+            u.id === changePasswordUser.id ? { ...u, password: hashedPassword } : u
         ));
         setShowPasswordPopup(false);
         alert("Password updated successfully!");
@@ -114,12 +129,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
     setShowPasswordPopup(true);
   };
 
-  if (loading) return (
-    <div style={styles.loadingContainer}>
-      <div style={styles.loadingSpinner}></div>
-      <p>Loading Admin Panel...</p>
-    </div>
-  );
+  if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p>Loading Admin Panel...</p></div> );
   
   return (
     <div style={styles.container}>
@@ -131,7 +141,6 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
       <div style={styles.section}>
         <div style={styles.sectionHeaderRow}>
             <h3 style={styles.sectionTitle}>Add New User</h3>
-            {/* Visual Counter for User Limit */}
             <span style={internalUsers.length >= 6 ? styles.limitReached : styles.limitBadge}>
                 Current: {internalUsers.length}/6
             </span>
@@ -140,43 +149,19 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
         <div style={styles.formRow}>
           <div style={styles.inputGroup}>
             <label style={styles.label}>Username</label>
-            <input 
-              style={styles.input} 
-              placeholder="Enter username" 
-              value={newUser.username} 
-              onChange={e => setNewUser({ ...newUser, username: e.target.value })} 
-              disabled={internalUsers.length >= 6} // Disable input if full
-            />
+            <input style={styles.input} placeholder="Enter username" value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} disabled={internalUsers.length >= 6} />
           </div>
           <div style={styles.inputGroup}>
             <label style={styles.label}>Password</label>
-            <input 
-              type="password" 
-              style={styles.input} 
-              placeholder="Enter password (min 6 chars)" 
-              value={newUser.password} 
-              onChange={e => setNewUser({ ...newUser, password: e.target.value })} 
-              disabled={internalUsers.length >= 6} // Disable input if full
-            />
+            <input type="password" style={styles.input} placeholder="Enter password (min 6 chars)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} disabled={internalUsers.length >= 6} />
           </div>
           <div style={styles.checkboxGroup}>
             <label style={styles.checkboxLabel}>
-              <input 
-                type="checkbox" 
-                checked={newUser.isAdmin} 
-                onChange={e => setNewUser({ ...newUser, isAdmin: e.target.checked })} 
-                style={styles.checkbox}
-                disabled={internalUsers.length >= 6}
-              /> 
+              <input type="checkbox" checked={newUser.isAdmin} onChange={e => setNewUser({ ...newUser, isAdmin: e.target.checked })} style={styles.checkbox} disabled={internalUsers.length >= 6} /> 
               Admin Privileges
             </label>
           </div>
-          <button 
-            onClick={handleAddUser} 
-            style={internalUsers.length >= 6 ? styles.addButtonDisabled : styles.addButton}
-            disabled={internalUsers.length >= 6}
-            title={internalUsers.length >= 6 ? "User limit reached (Max 6)" : "Add User"}
-          >
+          <button onClick={handleAddUser} style={internalUsers.length >= 6 ? styles.addButtonDisabled : styles.addButton} disabled={internalUsers.length >= 6} title={internalUsers.length >= 6 ? "User limit reached (Max 6)" : "Add User"}>
             Add User
           </button>
         </div>
@@ -209,21 +194,11 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
                   </td>
                   <td style={styles.td}>
                     <div style={styles.actionButtons}>
-                      <button 
-                        onClick={() => openChangePasswordPopup(user)} 
-                        style={user.isMaster && !loggedInUser?.isMaster ? styles.changePasswordButtonDisabled : styles.changePasswordButton}
-                        title={user.isMaster && !loggedInUser?.isMaster ? "Only the master admin can change this password" : "Change password"}
-                        disabled={user.isMaster && !loggedInUser?.isMaster}
-                      >
+                      <button onClick={() => openChangePasswordPopup(user)} style={user.isMaster && !loggedInUser?.isMaster ? styles.changePasswordButtonDisabled : styles.changePasswordButton} title={user.isMaster && !loggedInUser?.isMaster ? "Only the master admin can change this password" : "Change password"} disabled={user.isMaster && !loggedInUser?.isMaster}>
                         <FaKey />
                       </button>
                       {!user.isMaster && (
-                        <button 
-                          onClick={() => handleDeleteUser(user)} 
-                          style={user.id === loggedInUser?.id ? styles.deleteButtonDisabled : styles.deleteButton}
-                          title={user.id === loggedInUser?.id ? "You cannot delete your own account" : "Delete user"}
-                          disabled={user.id === loggedInUser?.id}
-                        >
+                        <button onClick={() => handleDeleteUser(user)} style={user.id === loggedInUser?.id ? styles.deleteButtonDisabled : styles.deleteButton} title={user.id === loggedInUser?.id ? "You cannot delete your own account" : "Delete user"} disabled={user.id === loggedInUser?.id}>
                           <FaTrash />
                         </button>
                       )}
@@ -241,49 +216,22 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
           <div style={styles.modal}>
             <div style={styles.modalHeader}>
               <h3 style={styles.modalTitle}>Change Password</h3>
-              <span 
-                style={styles.closeButton}
-                onClick={() => setShowPasswordPopup(false)}
-              >
-                &times;
-              </span>
+              <span style={styles.closeButton} onClick={() => setShowPasswordPopup(false)}>&times;</span>
             </div>
             <div style={styles.modalContent}>
               <p style={styles.modalText}>Changing password for: <strong>{changePasswordUser?.username}</strong></p>
               <div style={styles.inputGroup}>
                 <label style={styles.label}>New Password</label>
-                <input 
-                  type="password" 
-                  style={styles.input} 
-                  placeholder="Enter new password (min. 6 characters)" 
-                  value={passwordInput.newPassword} 
-                  onChange={e => setPasswordInput({ ...passwordInput, newPassword: e.target.value })} 
-                />
+                <input type="password" style={styles.input} placeholder="Enter new password (min. 6 characters)" value={passwordInput.newPassword} onChange={e => setPasswordInput({ ...passwordInput, newPassword: e.target.value })} />
               </div>
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Confirm Password</label>
-                <input 
-                  type="password" 
-                  style={styles.input} 
-                  placeholder="Confirm new password" 
-                  value={passwordInput.confirmPassword} 
-                  onChange={e => setPasswordInput({ ...passwordInput, confirmPassword: e.target.value })} 
-                />
+                <input type="password" style={styles.input} placeholder="Confirm new password" value={passwordInput.confirmPassword} onChange={e => setPasswordInput({ ...passwordInput, confirmPassword: e.target.value })} />
               </div>
             </div>
             <div style={styles.modalActions}>
-              <button 
-                onClick={() => setShowPasswordPopup(false)} 
-                style={styles.cancelButton}
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleChangePassword} 
-                style={styles.saveButton}
-              >
-                Update Password
-              </button>
+              <button onClick={() => setShowPasswordPopup(false)} style={styles.cancelButton}>Cancel</button>
+              <button onClick={handleChangePassword} style={styles.saveButton}>Update Password</button>
             </div>
           </div>
         </div>
@@ -293,12 +241,7 @@ const Admin = ({ internalUsers, setInternalUsers }) => {
 };
 
 const styles = {
-  container: {
-    padding: "24px",
-    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
-    backgroundColor: "#f8f9fa",
-    minHeight: "100vh",
-  },
+  container: { padding: "24px", fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif", backgroundColor: "#f8f9fa", minHeight: "100vh", },
   header: { marginBottom: "30px" },
   title: { fontSize: "28px", fontWeight: "600", color: "#2c3e50", margin: "0 0 8px 0" },
   subtitle: { fontSize: "16px", color: "#7f8c8d", margin: 0 },

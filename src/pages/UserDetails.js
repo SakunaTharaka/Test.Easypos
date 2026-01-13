@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
-import { FaCheckCircle } from 'react-icons/fa';
+// ✅ 1. Import signOut
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { FaCheckCircle, FaSignOutAlt } from 'react-icons/fa';
 
 const UserDetails = () => {
   const navigate = useNavigate();
@@ -89,6 +90,17 @@ const UserDetails = () => {
     }
   };
 
+  // ✅ 2. Handle Logout Function
+  const handleLogout = async () => {
+    try {
+        await signOut(auth);
+        navigate("/");
+    } catch (error) {
+        console.error("Error logging out:", error);
+        alert("Failed to log out. Please try again.");
+    }
+  };
+
   const handleSaveUserInfo = async () => {
     if (!formData.fullName || !formData.phone || !formData.companyName || !formData.companyAddress) {
       alert("Please fill all fields to continue.");
@@ -127,7 +139,7 @@ const UserDetails = () => {
     try {
       const trialStartDate = new Date();
       const trialEndDate = new Date(trialStartDate);
-      // ✅ **FIX: Changed trial period from 30 days to 7 days**
+      // Trial period: 7 days
       trialEndDate.setDate(trialStartDate.getDate() + 7);
 
       const userRef = doc(db, "Userinfo", user.uid);
@@ -153,6 +165,12 @@ const UserDetails = () => {
         <p style={styles.brandSubtitle}>The complete Point of Sale solution for your growing business.</p>
       </div>
       <div style={styles.rightPanel}>
+        
+        {/* ✅ 3. Logout Button (Top Right) */}
+        <button onClick={handleLogout} style={styles.logoutButton} title="Sign out from this account">
+            <FaSignOutAlt style={{ marginRight: '8px' }} /> Logout
+        </button>
+
         {step === 1 && (
           <div style={styles.formContainer}>
             <h2 style={styles.formTitle}>Tell Us About Yourself</h2>
@@ -193,7 +211,6 @@ const UserDetails = () => {
           <div style={styles.formContainer}>
             <div style={styles.flashOffer}>⚡ Flash Offer</div>
             <h2 style={styles.formTitle}>Choose Your Plan</h2>
-            {/* ✅ **FIX: Updated text to reflect 1-week trial** */}
             <p style={styles.formSubtitle}>All plans begin with a 1-week free trial.</p>
             <div style={styles.optionsContainer}>
               <div style={selectedPlan === 'monthly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('monthly')}>
@@ -217,13 +234,17 @@ const UserDetails = () => {
     </div>
   );
 };
+
 // Styles
 const styles = {
     pageContainer: { display: 'flex', width: '100vw', height: '100vh', fontFamily: "'Inter', sans-serif" },
     leftPanel: { flex: 1, background: 'linear-gradient(135deg, #2c3e50, #1a2530)', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '40px', boxSizing: 'border-box' },
     brandTitle: { fontSize: '48px', fontWeight: 'bold', margin: 0 },
     brandSubtitle: { fontSize: '18px', color: '#bdc3c7', marginTop: '10px', lineHeight: '1.6' },
-    rightPanel: { flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px', background: '#f8f9fa' },
+    
+    // Updated Right Panel to allow absolute positioning of logout button
+    rightPanel: { flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px', background: '#f8f9fa', position: 'relative' },
+    
     loadingOverlay: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '18px' },
     formContainer: { width: '100%', maxWidth: '500px', backgroundColor: '#fff', borderRadius: '16px', padding: '40px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', textAlign: 'center', position: 'relative' },
     formTitle: { fontSize: '28px', fontWeight: 'bold', color: '#111827', margin: '0 0 10px 0' },
@@ -244,6 +265,26 @@ const styles = {
     checkbox: { margin: '0 10px 0 0', width: '16px', height: '16px', cursor: 'pointer' },
     termsLabel: { fontSize: '14px', color: '#6b7280', lineHeight: '1.5' },
     termsLink: { color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer' },
+    
+    // ✅ 4. Style for Logout Button
+    logoutButton: {
+        position: 'absolute',
+        top: '20px',
+        right: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '8px 16px',
+        background: '#fff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        color: '#64748b',
+        fontWeight: '600',
+        fontSize: '14px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+        transition: 'all 0.2s ease',
+        zIndex: 10
+    }
 };
 
 export default UserDetails;

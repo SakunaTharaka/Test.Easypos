@@ -31,7 +31,7 @@ const Customers = ({ internalUser, maintainCreditCustomers }) => {
   const [isSaving, setIsSaving] = useState(false);
   
   // ✅ Defined Constant for Limit
-  const MAX_CUSTOMERS = 50;
+  const MAX_CUSTOMERS = 100;
 
   const getCurrentInternal = () => {
     if (internalUser && Object.keys(internalUser).length) return internalUser;
