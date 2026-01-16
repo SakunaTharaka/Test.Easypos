@@ -1,0 +1,71 @@
+[33m1bb2d98[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m most critical - removed unwanted parts in stock out stock balance utils files 2026/01/16 night
+[33m795736b[m User details page improved
+[33m8e51147[m critical 2026/01/16
+[33m6ff5e4e[m critical 01/15************
+[33mb956716[m critical 2026/01/14 posportal invoices dashboard many pages updated
+[33m9f9ef1a[m name changed
+[33mfb5adad[m invoice page and invoice viwer fixed
+[33md1bb474[m mail fixed
+[33mb5547d3[m pos portal few improvements
+[33m6d1fc09[m restore point critical 01/09
+[33m86161d8[m pos prtal
+[33m6a6cb51[m pos terminal feature added
+[33m71e048f[m service page delete prob fixed
+[33m4221955[m few pages fixed
+[33m7c89a34[m new verification process added
+[33me2d9303[m home page
+[33m54b328e[m update almost evey page
+[33mda49d0f[m homepage
+[33mf5a84bc[m fewed some pages
+[33maefd345[m Few changes made
+[33m3b56f6a[m removed an emoji in finance page
+[33m1bb5ab8[m Account page add deposits and withdrawal options
+[33mc06736d[m inv page fixed print issue
+[33m456fa45[m Billing page fixed
+[33m42205b1[m Order number added
+[33m03d63c9[m Critical restore point 26/01/02
+[33m87d59f2[m Critical restore point 26-01-01
+[33m2410aab[m critical restore point
+[33m61ace62[m ui and finance page fixed
+[33m4c3df6f[m Sinhala added
+[33md75f4e9[m few updates
+[33mf67d93f[m item page / cat page updated
+[33m2e5d8f9[m main updt
+[33m646fd61[m po page fixed
+[33md8fb960[m Feature: ordrs add to calndr
+[33mc43bd99[m Refactor: Implement monthly calendar grid view for timeline
+[33m13f1a05[m add new 2 pages
+[33m7d15a2f[m quotation print ready
+[33m807b005[m quotation page added
+[33m88dd4df[m Few bugs fixed
+[33m4e8e820[m adjusted wayne logo size
+[33m0f3706a[m changed dashboard view
+[33mcfc3f22[m saas ready update
+[33m5a47ed5[m some bugs fixed
+[33m35e80fb[m invoice page print preview fixed
+[33m340d42c[m invoice page kick v1
+[33me804897[m invoice page kick
+[33m5f5c3f6[m invoice print double page error fixed
+[33m90434b0[m invoice print
+[33ma3a20a8[m almost done
+[33m413f815[m buysell summary page finished
+[33m5b6dad4[m restore point 10/14 12pm
+[33m5cc2263[m restore point 10/14
+[33m7281886[m productions add page visibility
+[33mb909896[m ovrdue added with graphs
+[33m7ffe9f8[m credit customer added
+[33ma0fda20[m main update**
+[33m07e3f23[m billing page and few updates
+[33m3e36a88[m maintain and master admin
+[33m93b32d0[m billing expired
+[33m4445183[m master admin added
+[33mdfc70d1[m user details page updated and invoice page
+[33mfdfdd1c[m item page store radio button logic changed
+[33m8d587ff[m icon changed
+[33mc0291ae[m user deail page/ settings page updated
+[33m1497fba[m Dashboard view update
+[33mc43e3ae[m Invoice view page Update
+[33mbbdf9fe[m Main Update
+[33m8dbe9c4[m Update
+[33mca77a9d[m Update
+[33mcf40d5e[m Initial commit

@@ -5,16 +5,15 @@ import {
   getDocs, 
   query, 
   serverTimestamp, 
-  deleteDoc, 
   doc, 
-  getDoc, // Added getDoc for fetching settings
+  getDoc, 
   runTransaction, 
   orderBy, 
   limit, 
   startAfter, 
   where 
 } from "firebase/firestore";
-import { Link } from "react-router-dom";
+// Removed unused 'Link' import
 import { 
   AiOutlinePlus, 
   AiOutlineDelete, 
@@ -263,6 +262,7 @@ const StockOut = ({ internalUser }) => {
   
   useEffect(() => {
     fetchStockOuts('initial');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- MODAL HANDLER ---

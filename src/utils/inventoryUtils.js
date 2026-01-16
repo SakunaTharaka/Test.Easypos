@@ -18,7 +18,6 @@ export const calculateStockBalances = async (db, uid, lastVisible = null, pageSi
     // Handle Search vs Default Pagination
     if (searchTerm) {
         // Firestore simple search (Case sensitive prefix search)
-        // Note: For advanced fuzzy search, you normally need Algolia/Typesense.
         const searchEnd = searchTerm + "\uf8ff";
         itemsQuery = query(
             itemsRef, 
@@ -48,34 +47,6 @@ export const calculateStockBalances = async (db, uid, lastVisible = null, pageSi
     const processedItems = await Promise.all(itemsSnap.docs.map(async (doc) => {
         const data = doc.data();
         const itemId = doc.id;
-        const lastReconciled = data.lastReconciledAt ? data.lastReconciledAt.toDate() : new Date(0);
-
-        // Fetch Period IN for this item specifically
-        // (Only fetch documents created AFTER the last reconcile date)
-        const stockInQuery = query(
-            collection(db, uid, "inventory", "stock_in"),
-            where("lineItems", "array-contains", { itemId: itemId }) // Assuming structured properly, or see logic below
-            // Note: Querying inside arrays of objects is tricky in Firestore. 
-            // A more robust way without changing your DB structure is fetching transactions 
-            // where we rely on the Item Master's "qtyOnHand" as truth, 
-            // and only calculate period stats if critical.
-        );
-        
-        // --- OPTIMIZED CALCULATION STRATEGY ---
-        // Instead of 100 queries (which is slow), we rely on the Item Master's live data.
-        // Your Inventory.js ALREADY updates 'qtyOnHand' and 'averageCost'.
-        // We will calculate Period In/Out mathematically if possible, 
-        // or strictly fetch relevant logs if you need exact 'In' vs 'Out' columns.
-        
-        // Let's do the lightweight robust method:
-        // We will query the collections strictly for these items.
-        // To avoid 100 network requests per page, we can assume the user 
-        // trusts "Available Qty" (from Item Master) the most.
-        // We will skip the heavy sub-query unless necessary. 
-        
-        // HOWEVER, to keep "Period In" accurate without heavy reads:
-        // We will return 0 for period flows if we don't want to hammer the DB,
-        // OR we execute the reads. Let's execute the reads but optimized.
         
         // REVISED: Fetching sub-transactions for 50 items is heavy.
         // Better approach: Just return the Item Master data. 
