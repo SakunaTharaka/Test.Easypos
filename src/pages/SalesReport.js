@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useContext } from "react";
 import { auth, db } from "../firebase";
 import { 
-    collection, query, where, orderBy, getDocs, Timestamp, doc, deleteDoc,
+    collection, query, where, orderBy, getDocs, Timestamp, doc,
     limit, startAfter, endBefore, limitToLast, runTransaction, serverTimestamp
 } from "firebase/firestore";
 import Select from "react-select";
-import { AiOutlineEye, AiOutlineDelete, AiOutlineLock } from "react-icons/ai";
+import { AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
 import { CashBookContext } from "../context/CashBookContext";
 
 const SalesReport = ({ internalUser }) => {
@@ -41,7 +41,10 @@ const SalesReport = ({ internalUser }) => {
     fetchCustomers();
   }, []);
 
-  useEffect(() => { fetchInvoices(); }, [selectedCustomers, dateFrom, dateTo, searchTerm, statusFilter, internalUser]); 
+  useEffect(() => { 
+      fetchInvoices(); 
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomers, dateFrom, dateTo, searchTerm, statusFilter, internalUser]); 
 
   const fetchInvoices = async (direction = "first") => {
     const user = auth.currentUser;
@@ -112,7 +115,7 @@ const SalesReport = ({ internalUser }) => {
               // PHASE 1: ALL READS
               const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoice.id);
               const invoiceSnap = await transaction.get(invoiceRef);
-              if (!invoiceSnap.exists()) throw "Invoice does not exist.";
+              if (!invoiceSnap.exists()) throw new Error("Invoice does not exist."); // ✅ Fixed
               const invData = invoiceSnap.data();
 
               let dailyStatsRef = null;

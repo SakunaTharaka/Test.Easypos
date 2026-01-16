@@ -7,9 +7,9 @@ import {
   query,
   orderBy,
   where,
-  limit,
+  limit, 
   startAfter,
-  doc,
+  doc, 
   runTransaction 
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
@@ -182,9 +182,9 @@ const Accounts = () => {
             if (transferFrom.type === 'WALLET') {
                 sourceWalletRef = doc(db, uid, "wallet", "accounts", transferFrom.walletId);
                 const sDoc = await transaction.get(sourceWalletRef);
-                if (!sDoc.exists()) throw "Source wallet not found.";
+                if (!sDoc.exists()) throw new Error("Source wallet not found."); // ✅ Fixed
                 currentSourceBalance = Number(sDoc.data().balance) || 0;
-                if (currentSourceBalance < amt) throw `Insufficient funds in ${transferFrom.label}.`;
+                if (currentSourceBalance < amt) throw new Error(`Insufficient funds in ${transferFrom.label}.`); // ✅ Fixed
                 
                 transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
             } 
