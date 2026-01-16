@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
@@ -26,8 +26,13 @@ const UserDetails = () => {
   // --- OTP STATE ---
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpInput, setOtpInput] = useState("");
+  
+  // ✅ CHANGED: OTP is now an array of 6 strings
+  const [otp, setOtp] = useState(new Array(6).fill(""));
   const [otpLoading, setOtpLoading] = useState(false);
+  
+  // ✅ REF: To manage focus between boxes
+  const inputRefs = useRef([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -85,7 +90,6 @@ const UserDetails = () => {
       const numericValue = value.replace(/[^0-9]/g, '');
       if (numericValue.length <= 10) {
         setFormData({ ...formData, [name]: numericValue });
-        // Reset verification if user changes number
         setIsPhoneVerified(false);
       }
     } else {
@@ -93,7 +97,8 @@ const UserDetails = () => {
     }
   };
 
-  // --- OTP HANDLERS ---
+  // --- OTP LOGIC START ---
+
   const handleRequestOtp = async () => {
     const phoneRegex = /^0\d{9}$/;
     if (!phoneRegex.test(formData.phone)) {
@@ -107,7 +112,7 @@ const UserDetails = () => {
     try {
         await requestOtpFn({ mobile: formData.phone });
         setOtpLoading(false);
-        setOtpInput("");
+        setOtp(new Array(6).fill("")); // Reset OTP boxes
         setShowOtpModal(true);
     } catch (error) {
         console.error(error);
@@ -117,8 +122,9 @@ const UserDetails = () => {
   };
 
   const handleVerifyOtp = async () => {
-    if (!otpInput || otpInput.length < 6) {
-        alert("Please enter the 6-digit code.");
+    const code = otp.join(""); // Join array to string
+    if (code.length < 6) {
+        alert("Please enter the complete 6-digit code.");
         return;
     }
 
@@ -126,7 +132,7 @@ const UserDetails = () => {
     const verifyOtpFn = httpsCallable(functions, 'verifyOtp');
 
     try {
-        await verifyOtpFn({ mobile: formData.phone, code: otpInput });
+        await verifyOtpFn({ mobile: formData.phone, code: code });
         setIsPhoneVerified(true);
         setShowOtpModal(false);
         alert("Phone Verified Successfully! ✅");
@@ -137,7 +143,51 @@ const UserDetails = () => {
         setOtpLoading(false);
     }
   };
-  // --- END OTP HANDLERS ---
+
+  // ✅ 1. Handle Typing in Boxes
+  const handleOtpChange = (element, index) => {
+    if (isNaN(element.value)) return false;
+
+    const newOtp = [...otp];
+    newOtp[index] = element.value;
+    setOtp(newOtp);
+
+    // Auto-focus next box
+    if (element.value && index < 5) {
+        inputRefs.current[index + 1].focus();
+    }
+  };
+
+  // ✅ 2. Handle Backspace (Jump to previous)
+  const handleOtpKeyDown = (e, index) => {
+    if (e.key === "Backspace" && !otp[index] && index > 0) {
+        inputRefs.current[index - 1].focus();
+    }
+    if (e.key === "Enter") {
+        handleVerifyOtp();
+    }
+  };
+
+  // ✅ 3. Handle Paste (Fill all boxes)
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const data = e.clipboardData.getData("text");
+    const splitData = data.split("").slice(0, 6); // Take first 6 chars
+    
+    // Only process if it's numbers
+    if (splitData.every(char => !isNaN(char))) {
+        const newOtp = [...otp];
+        splitData.forEach((char, i) => {
+            newOtp[i] = char;
+        });
+        setOtp(newOtp);
+        // Focus the box after the last pasted digit
+        const focusIndex = Math.min(splitData.length, 5);
+        inputRefs.current[focusIndex].focus();
+    }
+  };
+
+  // --- OTP LOGIC END ---
 
   const handleLogout = async () => {
     try {
@@ -154,13 +204,10 @@ const UserDetails = () => {
       alert("Please fill all fields to continue.");
       return;
     }
-    
-    // Double check logic (even though button is disabled)
     if (!isPhoneVerified) {
         alert("Please verify your phone number to continue.");
         return;
     }
-    
     if (!agreedToTerms) {
       alert("You must agree to the Terms and Conditions to continue.");
       return;
@@ -207,7 +254,6 @@ const UserDetails = () => {
 
   if (loading) return <div style={styles.loadingOverlay}><p>Loading...</p></div>;
 
-  // Logic to determine if "Next" button is strictly disabled
   const isNextDisabled = loading || !agreedToTerms || !isPhoneVerified;
 
   return (
@@ -274,7 +320,6 @@ const UserDetails = () => {
               </label>
             </div>
 
-            {/* 🔴 MODIFIED BUTTON: Strictly Disabled until Verified AND Agreed */}
             <button 
               onClick={handleSaveUserInfo} 
               style={isNextDisabled ? styles.buttonDisabled : styles.button} 
@@ -320,14 +365,25 @@ const UserDetails = () => {
                 </div>
                 <p style={styles.modalText}>We sent a 6-digit code to <strong>{formData.phone}</strong></p>
                 
-                <input 
-                    type="text" 
-                    placeholder="Enter Code (e.g. 123456)" 
-                    value={otpInput}
-                    onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, '').slice(0,6))}
-                    style={styles.modalInput}
-                    autoFocus
-                />
+                {/* ✅ MODERN OTP BOXES */}
+                <div style={styles.otpContainer}>
+                    {otp.map((data, index) => {
+                        return (
+                            <input
+                                key={index}
+                                type="text"
+                                maxLength="1"
+                                value={data}
+                                ref={(el) => (inputRefs.current[index] = el)}
+                                onChange={(e) => handleOtpChange(e.target, index)}
+                                onKeyDown={(e) => handleOtpKeyDown(e, index)}
+                                onPaste={handleOtpPaste}
+                                onFocus={(e) => e.target.select()}
+                                style={styles.otpBox}
+                            />
+                        );
+                    })}
+                </div>
                 
                 <button 
                     onClick={handleVerifyOtp} 
@@ -381,10 +437,14 @@ const styles = {
     verifiedBadge: { display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: 'bold', fontSize: '14px', padding: '14px 20px', background: '#ecfdf5', borderRadius: '8px' },
     
     modalOverlay: { position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 },
-    modalContent: { background: "white", padding: "30px", borderRadius: "16px", width: "90%", maxWidth: "400px", textAlign: "center", boxShadow: '0 20px 50px rgba(0,0,0,0.3)' },
+    modalContent: { background: "white", padding: "30px", borderRadius: "16px", width: "90%", maxWidth: "420px", textAlign: "center", boxShadow: '0 20px 50px rgba(0,0,0,0.3)' },
     modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: '1px solid #eee', paddingBottom: '10px' },
     modalText: { color: "#64748b", marginBottom: "20px" },
-    modalInput: { width: "100%", padding: "14px", fontSize: "20px", textAlign: "center", letterSpacing: "4px", borderRadius: "8px", border: "2px solid #3b82f6", outline: "none", boxSizing: 'border-box' },
+    
+    // ✅ NEW OTP STYLES
+    otpContainer: { display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '10px' },
+    otpBox: { width: '45px', height: '55px', fontSize: '24px', textAlign: 'center', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', transition: 'border-color 0.2s', fontWeight: 'bold' },
+    
     modalButton: { width: "100%", marginTop: "20px", padding: "14px", background: "#3b82f6", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: "bold", cursor: "pointer" },
     modalButtonDisabled: { width: "100%", marginTop: "20px", padding: "14px", background: "#93c5fd", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: "bold", cursor: "not-allowed" },
 };
