@@ -358,7 +358,26 @@ const Settings = () => {
   return (
     <div style={styles.container}>
       <div style={styles.headerContainer}><h2 style={styles.header}>Settings</h2><p style={styles.subHeader}>Manage your account and application preferences</p></div>
-      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>{["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (<div style={styles.formGroup} key={field}><label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>{editMode ? (field === "email" ? (<input type="email" value={formInput[field]} style={styles.inputDisabled} readOnly/>) : (<input type="text" value={formInput[field]} onChange={(e) => setFormInput({ ...formInput, [field]: e.target.value })} style={styles.input} placeholder={`Enter your ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}/>)) : (<p style={styles.value}>{userInfo?.[field] || "Not provided"}</p>)}</div>))}{editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
+      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>
+      
+      {/* --- FORM FIELDS MAPPING --- */}
+      {["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (
+        <div style={styles.formGroup} key={field}>
+            <label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>
+            {editMode ? (
+                // 🔒 Lock Phone Number just like Email
+                (field === "email" || field === "phone") ? (
+                    <input type="text" value={formInput[field]} style={styles.inputDisabled} readOnly/>
+                ) : (
+                    <input type="text" value={formInput[field]} onChange={(e) => setFormInput({ ...formInput, [field]: e.target.value })} style={styles.input} placeholder={`Enter your ${field.replace(/([A-Z])/g, ' $1').toLowerCase()}`}/>
+                )
+            ) : (
+                <p style={styles.value}>{userInfo?.[field] || "Not provided"}</p>
+            )}
+        </div>
+      ))}
+      
+      {editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
 
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Inventory Settings</h3>
