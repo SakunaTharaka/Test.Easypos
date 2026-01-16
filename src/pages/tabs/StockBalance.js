@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { db, auth } from "../../firebase";
-import { doc, getDoc, writeBatch, serverTimestamp, collection, getDocs } from "firebase/firestore"; // Added writeBatch
+import { doc, getDoc, writeBatch, serverTimestamp, collection, getDocs } from "firebase/firestore"; 
 import { AiOutlineReload, AiOutlineDownload, AiOutlineExclamationCircle, AiOutlineFieldTime, AiOutlineArrowLeft, AiOutlineArrowRight } from "react-icons/ai";
 import { calculateStockBalances } from "../../utils/inventoryUtils";
 
@@ -175,25 +175,75 @@ const StockBalance = () => {
     ? sortedData.filter(item => item.availableQty < 0)
     : sortedData;
 
-  const exportToCSV = () => {
-    // Note: This only exports the CURRENT PAGE because that's all we have loaded.
-    const headers = ["Item", "Category", "Opening Stock", "Period In", "Period Out", "Available Qty"];
-    const csvContent = [
-      headers.join(","),
-      ...filteredData.map(item => [ 
-          `"${item.item}"`, `"${item.category}"`, item.openingStock, item.periodIn, item.periodOut, item.availableQty 
-      ].join(","))
-    ].join("\n");
+  // --- UPDATED EXPORT FUNCTION: Downloads ALL data, not just current page ---
+  const handleFullExport = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `stock_balance_page_${page}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Confirm with user because this costs reads
+    if (!window.confirm("Download full inventory report?\n\n(This will fetch ALL items from the database)")) {
+        return;
+    }
+
+    setProcessing(true);
+    try {
+      // 1. Fetch ALL items without limit
+      const itemsRef = collection(db, uid, "items", "item_list");
+      const snapshot = await getDocs(itemsRef);
+      
+      if (snapshot.empty) {
+        alert("No stock data found to export.");
+        setProcessing(false);
+        return;
+      }
+
+      // 2. Prepare CSV Header
+      const headers = ["Item Name", "Category", "Opening Stock", "Period In", "Period Out", "Available Qty"];
+      
+      // 3. Process Data & Calculate Balance
+      const rows = snapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // Ensure numbers are treated as numbers
+        const open = Number(data.openingStock) || 0;
+        const pIn = Number(data.periodIn) || 0;
+        const pOut = Number(data.periodOut) || 0;
+        
+        // Calculate Available Qty on the fly to match the table logic
+        const available = open + pIn - pOut; 
+
+        // Return CSV formatted row
+        return [
+          `"${data.item || 'Unknown'}"`, 
+          `"${data.category || '-'}"`, 
+          open, 
+          pIn, 
+          pOut, 
+          available
+        ].join(",");
+      });
+
+      // 4. Combine and Download
+      const csvContent = [headers.join(","), ...rows].join("\n");
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      
+      const dateStr = new Date().toISOString().slice(0,10);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Full_Stock_Balance_${dateStr}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } catch (error) {
+      console.error("Export Error:", error);
+      alert("Failed to export: " + error.message);
+    } finally {
+      setProcessing(false);
+    }
   };
+  // -------------------------------------------------------------------------
 
   return (
     <div style={styles.container}>
@@ -222,8 +272,10 @@ const StockBalance = () => {
           <button style={{...styles.refreshButton, backgroundColor: '#8e44ad'}} onClick={handleClosePeriod} disabled={processing || loading}>
               <AiOutlineFieldTime size={18} /> Close Period
           </button>
-          <button style={styles.exportButton} onClick={exportToCSV} disabled={processing || loading}>
-              <AiOutlineDownload size={18} /> Export Page
+          
+          {/* UPDATED EXPORT BUTTON */}
+          <button style={styles.exportButton} onClick={handleFullExport} disabled={processing || loading}>
+              <AiOutlineDownload size={18} /> Export All Data
           </button>
         </div>
       </div>
@@ -238,6 +290,10 @@ const StockBalance = () => {
                 </div>
             ) : (
               <table style={styles.table}>
+                {/* Added Caption for Sorting Clarity */}
+                <caption style={{captionSide: 'top', textAlign: 'right', fontSize: '12px', color: '#999', paddingBottom: '5px', paddingRight: '15px'}}>
+                   * Sorting applies to this page only
+                </caption>
                 <thead>
                   <tr>
                     <th style={styles.th} onClick={() => handleSort('item')}>Item {sortConfig.key === 'item' && (sortConfig.direction === 'ascending' ? '↑' : '↓')}</th>
@@ -251,7 +307,7 @@ const StockBalance = () => {
                 <tbody>
                   {filteredData.length > 0 ? (
                     filteredData.map((item, idx) => {
-                      // ✅ FIX: Calculate percentage using (Opening + PeriodIn)
+                      // Calculate percentage using (Opening + PeriodIn)
                       const throughput = (Number(item.openingStock) || 0) + (Number(item.periodIn) || 0);
                       const percentage = throughput > 0 ? (item.availableQty / throughput) * 100 : 100;
                       

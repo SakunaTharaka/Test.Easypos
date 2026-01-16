@@ -26,6 +26,7 @@ const StockBalance = () => {
     if (!user) return;
     fetchStockData('initial');
     fetchStockReminderSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Debounce search to prevent too many DB reads
@@ -36,6 +37,7 @@ const StockBalance = () => {
       }
     }, 800);
     return () => clearTimeout(delayDebounceFn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   const fetchStockReminderSettings = async () => {

@@ -12,11 +12,10 @@ import {
   addDoc,
   orderBy,
   updateDoc,
-  deleteDoc,
   runTransaction 
 } from "firebase/firestore";
 import Select from "react-select";
-import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaMoneyBillWave, FaEye } from 'react-icons/fa';
+import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaEye } from 'react-icons/fa';
 
 const Orders = ({ internalUser }) => {
   // Data State
@@ -97,6 +96,7 @@ const Orders = ({ internalUser }) => {
     };
     initialize();
     fetchSavedOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
   const fetchSavedOrders = async () => {
@@ -154,6 +154,7 @@ const Orders = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handlePaymentConfirmKeyDown);
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPaymentConfirm, confirmPaymentMethod]);
 
   const fetchProvisionalInvoiceNumber = async () => {
@@ -440,7 +441,7 @@ const Orders = ({ internalUser }) => {
               // 1. Get Order Data
               const orderRef = doc(db, uid, "data", "orders", orderId);
               const orderSnap = await transaction.get(orderRef);
-              if (!orderSnap.exists()) throw "Order not found";
+              if (!orderSnap.exists()) throw new Error("Order not found");
               const orderData = orderSnap.data();
 
               // 2. Find Linked Advance Invoice

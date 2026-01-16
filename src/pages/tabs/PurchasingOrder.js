@@ -22,7 +22,7 @@ const ITEMS_PER_PAGE = 20;
 
 const PurchasingOrder = ({ internalUser }) => {
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Removed unused 'loading' state
   const [itemsForDropdown, setItemsForDropdown] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(null);
 
@@ -64,12 +64,8 @@ const PurchasingOrder = ({ internalUser }) => {
   const isAdmin = getCurrentInternal()?.isAdmin === true;
 
   const fetchOrders = async (direction = 'initial') => {
-    setLoading(true);
     const user = auth.currentUser;
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+    if (!user) return;
     const uid = user.uid;
     const poColRef = collection(db, uid, "purchase_orders", "po_list");
 
@@ -110,8 +106,6 @@ const PurchasingOrder = ({ internalUser }) => {
 
     } catch (error) {
         console.error("Error fetching purchase orders:", error);
-    } finally {
-        setLoading(false);
     }
   };
 
@@ -139,6 +133,7 @@ const PurchasingOrder = ({ internalUser }) => {
         }
     };
     fetchInitialDropdowns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleApplyFilters = () => {
