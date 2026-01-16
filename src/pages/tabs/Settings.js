@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../../firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
+// Removed unused 'where'
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { AiOutlineEdit, AiOutlineDelete, AiOutlineUpload, AiOutlineLogout } from "react-icons/ai";
 

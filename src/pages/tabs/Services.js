@@ -9,9 +9,7 @@ import {
   limit, 
   startAfter,
   doc, 
-  deleteDoc, 
   updateDoc, 
-  getDoc,  
   where,
   getDocs,
   runTransaction 
@@ -167,6 +165,7 @@ const Services = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handlePaymentConfirmKeyDown);
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPaymentConfirm, confirmPaymentMethod]);
 
   // Helper: Get Date in Sri Lanka Time
@@ -336,7 +335,7 @@ const Services = ({ internalUser }) => {
 
             const serviceJobRef = doc(db, uid, 'data', 'service_jobs', jobToComplete.id);
             const jobSnap = await transaction.get(serviceJobRef);
-            if(!jobSnap.exists()) throw "Job does not exist";
+            if(!jobSnap.exists()) throw new Error("Job does not exist");
             
             if (walletRef) {
                 const wDoc = await transaction.get(walletRef);
@@ -426,7 +425,7 @@ const Services = ({ internalUser }) => {
             // 1. Get Job Data
             const jobRef = doc(db, uid, 'data', 'service_jobs', jobToDelete);
             const jobSnap = await transaction.get(jobRef);
-            if (!jobSnap.exists()) throw "Job not found";
+            if (!jobSnap.exists()) throw new Error("Job not found");
             const jobData = jobSnap.data();
 
             // 2. Find Invoices (Using a Query outside transaction for IDs, then Transaction Get for Locking)

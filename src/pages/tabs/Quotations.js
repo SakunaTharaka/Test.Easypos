@@ -15,7 +15,8 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import Select from "react-select";
-import { AiOutlinePlus, AiOutlineEye, AiOutlineDelete, AiOutlineSearch, AiOutlineLeft, AiOutlineRight } from "react-icons/ai";
+// Removed unused 'AiOutlinePlus'
+import { AiOutlineEye, AiOutlineDelete, AiOutlineSearch, AiOutlineLeft, AiOutlineRight } from "react-icons/ai";
 
 const ITEMS_PER_PAGE = 20; // Load 20 quotations at a time
 
@@ -574,7 +575,10 @@ const Quotations = ({ internalUser }) => {
   }, [lastVisible, page, pageHistory]); // Dependencies for pagination
 
   // Initial Fetch
-  useEffect(() => { fetchSavedQuotations('initial'); }, []);
+  useEffect(() => {
+    fetchSavedQuotations('initial');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!itemInput.trim() || !selectedCategory) {
