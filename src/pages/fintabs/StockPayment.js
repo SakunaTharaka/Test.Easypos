@@ -4,30 +4,27 @@ import {
   collection, 
   query, 
   getDocs, 
-  addDoc, 
+  // Removed unused 'getDoc'
   serverTimestamp, 
   orderBy, 
   doc, 
   limit, 
   startAfter, 
   where,
-  runTransaction,
-  endBefore, 
-  limitToLast
+  runTransaction
 } from "firebase/firestore";
 import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight } from "react-icons/ai";
 import Select from "react-select";
 import { CashBookContext } from "../../context/CashBookContext";
 
 const StockPayment = () => {
-  const { cashBooks, cashBookBalances, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
+  const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
 
   const [stockInRecords, setStockInRecords] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Pagination State
   const [page, setPage] = useState(1);
-  const [pageCursors, setPageCursors] = useState([null]); // Array to store the first doc of each page for reference
   const [lastVisible, setLastVisible] = useState(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const PAGE_SIZE = 20;
@@ -44,11 +41,38 @@ const StockPayment = () => {
   const [paymentsForHistory, setPaymentsForHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Debounce Search Input to prevent excessive reads while typing
+  // Wallets State (Stores Balance & Nickname for Card, Online, Cheque)
+  const [wallets, setWallets] = useState({});
+
+  // Fetch Wallets Data
+  const fetchWallets = async () => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      try {
+          const colRef = collection(db, uid, "wallet", "accounts");
+          const snapshot = await getDocs(colRef);
+          const walletData = {};
+          snapshot.forEach(doc => {
+              walletData[doc.id] = {
+                  balance: Number(doc.data().balance) || 0,
+                  nickname: doc.data().nickname || ''
+              };
+          });
+          setWallets(walletData);
+      } catch (err) {
+          console.error("Error fetching wallets:", err);
+      }
+  };
+
+  useEffect(() => {
+      fetchWallets();
+  }, []);
+
+  // Debounce Search Input
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearch(search);
-    }, 500); // Wait 500ms after user stops typing
+    }, 500); 
     return () => clearTimeout(handler);
   }, [search]);
 
@@ -59,7 +83,7 @@ const StockPayment = () => {
     } catch (e) { return null; }
   };
   
-  // --- FETCH DATA WITH SERVER-SIDE PAGINATION ---
+  // --- FETCH DATA ---
   const fetchData = useCallback(async (direction = 'initial') => {
     setLoading(true);
     const uid = auth.currentUser?.uid;
@@ -67,12 +91,8 @@ const StockPayment = () => {
 
     try {
       const stockInColRef = collection(db, uid, "inventory", "stock_in");
-      
-      // Base Query Constraints
       let constraints = [orderBy("createdAt", "desc")];
 
-      // Note: Firestore searching is limited. 'search' here strictly matches exact IDs or start strings if indexed properly.
-      // For 10k+ users, use Algolia/Typesense. For now, we only filter by Date server-side effectively.
       if (selectedDate) {
         const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999);
@@ -80,28 +100,16 @@ const StockPayment = () => {
         constraints.push(where("createdAt", "<=", endOfDay));
       }
 
-      // If Searching, we often can't paginate easily with 'orderBy createdAt' unless we use a specialized search index.
-      // This is a simplified "Search Mode" that might return fewer results or require exact matches.
       if (debouncedSearch) {
-          // Warning: This is a client-side filter fallback if server-side search isn't set up.
-          // Ideally, use: where('stockInId', '==', debouncedSearch)
-          // For this example, we will rely on fetching the page and filtering visualy, 
-          // or strictly filtering by ID if it looks like an ID.
           if(debouncedSearch.startsWith("SI-")) {
              constraints = [where("stockInId", "==", debouncedSearch)];
           }
       }
 
-      // Pagination Logic
       if (direction === 'next' && lastVisible) {
           constraints.push(startAfter(lastVisible));
-      } else if (direction === 'prev' && pageCursors[page - 2]) {
-          // To go back, we can start after the cursor of the page *before* the previous one
-          // Or strictly use endBefore() if we kept track of firstVisible. 
-          // Resetting to 'initial' logic for simplicity or using stack based history is safer.
       }
 
-      // Limit (+1 to check if next page exists)
       constraints.push(limit(PAGE_SIZE + 1));
 
       const q = query(stockInColRef, ...constraints);
@@ -109,11 +117,7 @@ const StockPayment = () => {
 
       const items = stockInSnap.docs.map((doc) => {
         const data = doc.data();
-        // Calculate Total Value
         const totalValue = (data.lineItems || []).reduce((sum, item) => sum + (item.quantity || 0) * (item.price || 0), 0);
-        
-        // SCALABILITY FIX: We rely on 'totalPaid' being stored on the document.
-        // If it's missing (legacy data), assume 0.
         const totalPaid = data.totalPaid || 0; 
 
         return { 
@@ -121,14 +125,10 @@ const StockPayment = () => {
             ...data, 
             totalValue,
             totalPaid,
-            // Calculate Balance here
             balance: totalValue - totalPaid
         };
       });
 
-      // Filter Client-Side for fuzzy string matches if strictly necessary (Not ideal for 10k items, but fine for 20 items)
-      // If search is complex (Company Name), we filter the 20 results. 
-      // *Production Tip: Use Algolia for real search.*
       let displayItems = items;
       if (debouncedSearch && !debouncedSearch.startsWith("SI-")) {
           const lower = debouncedSearch.toLowerCase();
@@ -138,10 +138,9 @@ const StockPayment = () => {
           );
       }
 
-      // Handle Pagination Limits
       const hasNext = displayItems.length > PAGE_SIZE;
       if (hasNext) {
-          displayItems.pop(); // Remove the 21st item
+          displayItems.pop(); 
           setLastVisible(stockInSnap.docs[PAGE_SIZE - 1]);
       } else {
           setLastVisible(stockInSnap.docs[stockInSnap.docs.length - 1]);
@@ -154,39 +153,34 @@ const StockPayment = () => {
       console.error("Error fetching stock payment data:", error);
     }
     setLoading(false);
-  }, [debouncedSearch, selectedDate, lastVisible, page, pageCursors]);
+  }, [debouncedSearch, selectedDate, lastVisible]);
 
-  // Initial Fetch & Reset on Filter Change
   useEffect(() => {
     setPage(1);
-    setPageCursors([null]);
     setLastVisible(null);
     fetchData('initial');
     // eslint-disable-next-line
   }, [debouncedSearch, selectedDate]);
 
-  // Handle Page Changes
   const handleNextPage = () => {
       setPage(p => p + 1);
-      // Save current lastVisible to cursors for potential back navigation logic
       fetchData('next');
   };
 
   const handlePrevPage = () => {
-     // Simplified Previous: Just reset for now or implement stack-based cursor history
      if(page > 1) {
          setPage(1);
          setLastVisible(null);
-         fetchData('initial'); // Reset to start for safety in this demo
+         fetchData('initial'); 
      }
   };
 
   const handleOpenPaymentModal = (record) => {
     setCurrentItemForPayment(record);
     setShowPaymentModal(true);
+    fetchWallets(); // Refresh balances when modal opens
   };
   
-  // --- ON-DEMAND HISTORY FETCH ---
   const handleOpenHistoryModal = async (stockInId, stockInDocId) => {
     setShowHistoryModal(true);
     setHistoryLoading(true);
@@ -195,7 +189,6 @@ const StockPayment = () => {
     const uid = auth.currentUser?.uid;
     try {
         const paymentsColRef = collection(db, uid, "stock_payments", "payments");
-        // Query only payments for this specific stock ID
         const q = query(paymentsColRef, where("stockInId", "==", stockInId), orderBy("paidAt", "desc"));
         const snap = await getDocs(q);
         const history = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -220,16 +213,41 @@ const StockPayment = () => {
             // 1. Get references
             const stockDocRef = doc(db, uid, "inventory", "stock_in", currentItemForPayment.id);
             const paymentsColRef = collection(db, uid, "stock_payments", "payments");
-            const newPaymentRef = doc(paymentsColRef); // Generate ID automatically
+            const newPaymentRef = doc(paymentsColRef); 
 
-            // 2. Read current Stock Document to ensure atomic balance update
+            // 2. Read current Stock Document
             const stockDoc = await transaction.get(stockDocRef);
             if (!stockDoc.exists()) throw new Error("Stock Document does not exist!");
             
             const currentTotalPaid = stockDoc.data().totalPaid || 0;
             const newTotalPaid = currentTotalPaid + paymentData.amount;
 
-            // 3. Create Payment Document
+            // 3. READ Source Wallet if applicable (Cheque or Online/Card)
+            let walletRef = null;
+            let currentWalletBalance = 0;
+            let walletLabelForError = "";
+
+            if (paymentData.method === 'Cheque') {
+                walletRef = doc(db, uid, "wallet", "accounts", "cheque");
+                walletLabelForError = "Cheque Account";
+            } 
+            else if (paymentData.method === 'Online Payment') {
+                // For Online Payment, we use the selected wallet ID (card, online, or cheque)
+                walletRef = doc(db, uid, "wallet", "accounts", paymentData.walletId);
+                walletLabelForError = paymentData.walletName; 
+            }
+
+            if (walletRef) {
+                const walletSnap = await transaction.get(walletRef);
+                if (!walletSnap.exists()) throw new Error(`${walletLabelForError} not found. Please initialize Accounts page first.`);
+                
+                currentWalletBalance = Number(walletSnap.data().balance) || 0;
+                if (currentWalletBalance < paymentData.amount) {
+                    throw new Error(`Insufficient funds in ${walletLabelForError}. Available: Rs. ${currentWalletBalance.toFixed(2)}`);
+                }
+            }
+
+            // 4. Create Payment Document
             const paymentDoc = {
                 paymentId: generatePaymentId(), 
                 stockInId: currentItemForPayment.stockInId,
@@ -241,26 +259,29 @@ const StockPayment = () => {
 
             transaction.set(newPaymentRef, paymentDoc);
 
-            // 4. Update Parent Stock Document (Denormalization)
+            // 5. Update Parent Stock Document
             transaction.update(stockDocRef, {
                 totalPaid: newTotalPaid,
                 lastPayer: user.username,
                 lastPaymentAt: serverTimestamp()
             });
 
-            // 5. If Cash, Update Cash Book (Optional: Add logic if you track cash book in DB)
-            // Note: Your context handles balances, but for strict consistency, 
-            // the cash book entry should also be part of this transaction.
+            // 6. Deduct from Wallet
+            if (walletRef) {
+                transaction.update(walletRef, {
+                    balance: currentWalletBalance - paymentData.amount,
+                    lastUpdated: serverTimestamp()
+                });
+            }
         });
         
         await refreshBalances();
-        // Refresh only the current view without resetting pagination
-        // Actually, for simplicity, we refresh the list to show updated balance
+        fetchWallets(); // Refresh local wallet state
         fetchData('current'); 
         
         alert("Payment saved successfully!");
     } catch (error) {
-        alert("Error saving payment: " + error.message);
+        alert("Transaction Failed: " + error.message);
     } finally {
         setShowPaymentModal(false);
         setCurrentItemForPayment(null);
@@ -286,7 +307,6 @@ const StockPayment = () => {
 
       <h2 style={styles.title}>Stock Payments</h2>
       
-      {/* Controls */}
       <div style={styles.controlsContainer}>
         <div style={{...styles.filterGroup, flexDirection: 'row', alignItems: 'center', gap: '10px'}}>
             <label>Select Date</label>
@@ -308,7 +328,6 @@ const StockPayment = () => {
         </div>
       </div>
       
-      {/* Table */}
       <div style={styles.tableContainer}>
         <table style={styles.table}>
           <thead>
@@ -325,8 +344,8 @@ const StockPayment = () => {
           </thead>
           <tbody>
             {stockInRecords.map((rec) => {
-              const balance = rec.balance; // Now pre-calculated from server data
-              const isPayable = balance > 1; // Small buffer for float math
+              const balance = rec.balance; 
+              const isPayable = balance > 1; 
 
               return (
                 <tr key={rec.id}>
@@ -353,7 +372,6 @@ const StockPayment = () => {
         </table>
       </div>
 
-      {/* Pagination Controls */}
       <div style={styles.paginationContainer}>
           <button onClick={handlePrevPage} disabled={page === 1 || loading} style={styles.pageBtn}>
               <AiOutlineArrowLeft /> Prev
@@ -364,8 +382,16 @@ const StockPayment = () => {
           </button>
       </div>
 
-      {/* Modals */}
-      {showPaymentModal && <PaymentModal record={currentItemForPayment} onSave={handleSavePayment} onCancel={() => setShowPaymentModal(false)} cashBooks={cashBooks} cashBookBalances={cashBookBalances} />}
+      {showPaymentModal && 
+        <PaymentModal 
+            record={currentItemForPayment} 
+            onSave={handleSavePayment} 
+            onCancel={() => setShowPaymentModal(false)} 
+            cashBooks={cashBooks} 
+            cashBookBalances={cashBookBalances}
+            wallets={wallets} // Passed Wallets
+        />
+      }
       {showHistoryModal && <PaymentHistoryModal payments={paymentsForHistory} loading={historyLoading} onClose={() => setShowHistoryModal(false)} />}
     </div>
   );
@@ -373,43 +399,97 @@ const StockPayment = () => {
 
 // --- MODAL COMPONENTS ---
 
-const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances }) => {
+const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances, wallets }) => {
     const [paymentType, setPaymentType] = useState(null);
-    const [formData, setFormData] = useState({amount: '', receiverName: '', chequeNumber: '', referenceNumber: '', cashBook: null,});
+    const [formData, setFormData] = useState({amount: '', receiverName: '', chequeNumber: '', referenceNumber: '', cashBook: null, selectedAccount: null});
     const [error, setError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false); 
+
     const cashBookOptions = useMemo(() => cashBooks.map(book => ({ value: book.id, label: book.name })), [cashBooks]);
+    
+    // Account Options for Online Payment
+    const accountOptions = useMemo(() => [
+        { value: 'card', label: `Card Payment Bank ${wallets.card?.nickname ? `(${wallets.card.nickname})` : ''}`, balance: wallets.card?.balance || 0 },
+        { value: 'online', label: `Online Payment Bank ${wallets.online?.nickname ? `(${wallets.online.nickname})` : ''}`, balance: wallets.online?.balance || 0 },
+        { value: 'cheque', label: `Cheque Account ${wallets.cheque?.nickname ? `(${wallets.cheque.nickname})` : ''}`, balance: wallets.cheque?.balance || 0 }
+    ], [wallets]);
 
     useEffect(() => {
-        const { amount, cashBook } = formData;
+        const { amount, cashBook, selectedAccount } = formData;
         const numAmount = parseFloat(amount);
-        if (amount && cashBook && paymentType === 'Cash') {
+        
+        if (!amount || isNaN(numAmount)) {
+            setError('');
+            return;
+        }
+
+        if (paymentType === 'Cash' && cashBook) {
             const balance = cashBookBalances[cashBook.value] || 0;
-            if (numAmount > balance) { setError(`Amount exceeds cash book balance of Rs. ${balance.toFixed(2)}`); } 
-            else if (numAmount > record.balance) { setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`); } 
-            else { setError(''); }
-        } else if (amount && numAmount > record.balance) { setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`); } 
+            if (numAmount > balance) setError(`Amount exceeds cash book balance (Rs. ${balance.toFixed(2)})`);
+            else if (numAmount > record.balance) setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`);
+            else setError('');
+        } 
+        else if (paymentType === 'Cheque') {
+            const balance = wallets.cheque?.balance || 0;
+            if (numAmount > balance) setError(`Amount exceeds Cheque Account balance (Rs. ${balance.toFixed(2)})`);
+            else if (numAmount > record.balance) setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`);
+            else setError('');
+        }
+        else if (paymentType === 'Online Payment' && selectedAccount) {
+            // Validate against selected account balance
+            if (numAmount > selectedAccount.balance) setError(`Amount exceeds ${selectedAccount.label} balance (Rs. ${selectedAccount.balance.toFixed(2)})`);
+            else if (numAmount > record.balance) setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`);
+            else setError('');
+        }
+        else if (numAmount > record.balance) { 
+            setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`); 
+        } 
         else { setError(''); }
-    }, [formData.amount, formData.cashBook, paymentType, cashBookBalances, record.balance]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [formData.amount, formData.cashBook, formData.selectedAccount, paymentType, cashBookBalances, wallets, record.balance]);
     
     const isFormValid = () => {
         const amount = parseFloat(formData.amount);
-        return (!error && formData.receiverName.trim() && formData.amount && amount > 0 && paymentType && (paymentType === 'Cash' ? formData.cashBook : true) && (paymentType !== 'Cheque' || formData.chequeNumber.trim()) && (paymentType !== 'Online Payment' || formData.referenceNumber.trim()));
+        return (
+            !error && 
+            formData.receiverName.trim() && 
+            formData.amount && amount > 0 && 
+            paymentType && 
+            (paymentType === 'Cash' ? formData.cashBook : true) && 
+            (paymentType === 'Cheque' ? formData.chequeNumber.trim() : true) && 
+            (paymentType === 'Online Payment' ? (formData.referenceNumber.trim() && formData.selectedAccount) : true)
+        );
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (isSubmitting) return; 
         if (!isFormValid()) { alert('Please fill all required fields correctly.'); return; }
+        
+        setIsSubmitting(true); 
+
         const finalPaymentData = {
-            amount: parseFloat(formData.amount), method: paymentType, receiverName: formData.receiverName.trim(),
+            amount: parseFloat(formData.amount), 
+            method: paymentType, 
+            receiverName: formData.receiverName.trim(),
             ...(paymentType === 'Cash' && { cashBookId: formData.cashBook.value, cashBookName: formData.cashBook.label }),
             ...(paymentType === 'Cheque' && { chequeNumber: formData.chequeNumber.trim() }),
-            ...(paymentType === 'Online Payment' && { referenceNumber: formData.referenceNumber.trim() }),
+            ...(paymentType === 'Online Payment' && { 
+                referenceNumber: formData.referenceNumber.trim(),
+                walletId: formData.selectedAccount.value, // Pass Wallet ID (card/online/cheque)
+                walletName: formData.selectedAccount.label
+            }),
         };
-        onSave(finalPaymentData);
+        
+        try {
+            await onSave(finalPaymentData);
+        } catch(e) {
+            setIsSubmitting(false); 
+        }
     };
 
     const handlePaymentTypeChange = (type) => {
         setPaymentType(type);
-        if (type !== 'Cash') { setFormData(prev => ({...prev, cashBook: null})); }
+        setFormData(prev => ({...prev, cashBook: null, selectedAccount: null}));
     };
 
     return (
@@ -431,45 +511,84 @@ const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances })
                             <label>Payment Method</label>
                             <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
                                 <p style={styles.paymentTypeDisplay}>{paymentType}</p>
-                                <button onClick={() => setPaymentType(null)} style={styles.changeButton}>Change</button>
+                                <button onClick={() => setPaymentType(null)} style={styles.changeButton} disabled={isSubmitting}>Change</button>
                             </div>
                         </div>
-                        <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
-                            <label>Pay From Cash Book {paymentType === 'Cash' ? '*' : '(Cash Only)'}</label>
-                            <Select 
-                                options={cashBookOptions} 
-                                value={formData.cashBook} 
-                                onChange={option => setFormData(prev => ({...prev, cashBook: option}))} 
-                                placeholder={paymentType === 'Cash' ? "Select cash book..." : "Not applicable"} 
-                                isDisabled={paymentType !== 'Cash'}
-                            />
-                        </div>
+                        
+                        {/* Cheque Info Box */}
+                        {paymentType === 'Cheque' && (
+                            <div style={{...styles.formGroup, gridColumn: 'span 2', background: '#e0f2fe', padding: '10px', borderRadius: '6px', fontSize: '13px', color: '#0284c7'}}>
+                                <strong>Available Cheque Balance:</strong> Rs. {(wallets.cheque?.balance || 0).toFixed(2)}
+                            </div>
+                        )}
+
+                        {/* Condition for Cash */}
+                        {paymentType === 'Cash' && (
+                            <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                                <label>Pay From Cash Book *</label>
+                                <Select 
+                                    options={cashBookOptions} 
+                                    value={formData.cashBook} 
+                                    onChange={option => setFormData(prev => ({...prev, cashBook: option}))} 
+                                    placeholder="Select cash book..." 
+                                    isDisabled={isSubmitting}
+                                />
+                            </div>
+                        )}
+
+                        {/* Condition for Online Payment (NEW) */}
+                        {paymentType === 'Online Payment' && (
+                            <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                                <label>Pay From Account *</label>
+                                <Select 
+                                    options={accountOptions} 
+                                    value={formData.selectedAccount} 
+                                    onChange={option => setFormData(prev => ({...prev, selectedAccount: option}))} 
+                                    placeholder="Select account (Card/Online/Cheque)..." 
+                                    isDisabled={isSubmitting}
+                                />
+                                {formData.selectedAccount && (
+                                    <div style={{fontSize: '11px', color: '#666', marginTop: '4px'}}>
+                                        Available Balance: Rs. {formData.selectedAccount.balance.toFixed(2)}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {paymentType === 'Cheque' && (
                             <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                                 <label>Cheque Number *</label>
-                                <input type="text" value={formData.chequeNumber} onChange={e => setFormData({...formData, chequeNumber: e.target.value})} style={styles.modalInput} required />
+                                <input type="text" value={formData.chequeNumber} onChange={e => setFormData({...formData, chequeNumber: e.target.value})} style={styles.modalInput} required disabled={isSubmitting}/>
                             </div>
                         )}
                         {paymentType === 'Online Payment' && (
                             <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                                 <label>Reference Number *</label>
-                                <input type="text" value={formData.referenceNumber} onChange={e => setFormData({...formData, referenceNumber: e.target.value})} style={styles.modalInput} required />
+                                <input type="text" value={formData.referenceNumber} onChange={e => setFormData({...formData, referenceNumber: e.target.value})} style={styles.modalInput} required disabled={isSubmitting}/>
                             </div>
                         )}
                         <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                            <label>Receiver Name *</label>
-                           <input type="text" value={formData.receiverName} onChange={e => setFormData({...formData, receiverName: e.target.value})} style={styles.modalInput} required/>
+                           <input type="text" value={formData.receiverName} onChange={e => setFormData({...formData, receiverName: e.target.value})} style={styles.modalInput} required disabled={isSubmitting}/>
                         </div>
                         <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                             <label>Amount to Pay *</label>
-                            <input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} style={styles.modalInput} required/>
+                            <input type="number" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} style={styles.modalInput} required disabled={isSubmitting}/>
                             {error && <p style={styles.errorText}>{error}</p>}
                         </div>
                     </div>
                 )}
                 <div style={styles.modalActions}>
-                    <button onClick={onCancel} style={styles.cancelButton}>Cancel</button>
-                    {paymentType && <button onClick={handleSave} style={!isFormValid() ? {...styles.saveButtonModal, ...styles.saveButtonDisabled} : styles.saveButtonModal} disabled={!isFormValid()}>Save Payment</button>}
+                    <button onClick={onCancel} style={styles.cancelButton} disabled={isSubmitting}>Cancel</button>
+                    {paymentType && (
+                        <button 
+                            onClick={handleSave} 
+                            style={!isFormValid() || isSubmitting ? {...styles.saveButtonModal, ...styles.saveButtonDisabled} : styles.saveButtonModal} 
+                            disabled={!isFormValid() || isSubmitting}
+                        >
+                            {isSubmitting ? 'Processing...' : 'Save Payment'}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -502,7 +621,7 @@ const PaymentHistoryModal = ({ payments, loading, onClose }) => {
                                 <td style={styles.td}>{p.paidAt?.toDate().toLocaleString()}</td>
                                 <td style={styles.td}>Rs. {p.amount.toFixed(2)}</td>
                                 <td style={styles.td}>{p.method}</td>
-                                <td style={styles.td}>{p.cashBookName || 'N/A'}</td>
+                                <td style={styles.td}>{p.cashBookName || p.walletName || 'N/A'}</td>
                                 <td style={styles.td}>{p.receiverName}</td>
                                 <td style={styles.td}>{p.paidBy}</td>
                             </tr>

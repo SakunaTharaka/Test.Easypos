@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from "react";
 import { db, auth } from "../../firebase";
-import { collection, query, getDocs, addDoc, serverTimestamp, orderBy, doc, getDoc, runTransaction, limit, startAfter, where, deleteDoc } from "firebase/firestore";
+// Removed unused 'addDoc'
+import { collection, query, getDocs, serverTimestamp, orderBy, doc, getDoc, runTransaction, limit, startAfter, where, deleteDoc } from "firebase/firestore";
 import { AiOutlineSearch, AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
 import CreatableSelect from 'react-select/creatable';
 import { CashBookContext } from "../../context/CashBookContext";
 
-// ✅ UPDATED: Receive 'goToSettings' prop from Dashboard
 const Expenses = ({ goToSettings }) => {
   const { cashBooks, cashBookBalances, reconciledDates, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
 
@@ -32,7 +32,6 @@ const Expenses = ({ goToSettings }) => {
     } catch (e) { return null; }
   };
 
-  // ✅ UPDATED: Added "Add New Category" Option
   const categoryOptions = useMemo(() => [
     { value: 'ADD_NEW', label: '➕ Add New Category', color: '#2ecc71' },
     ...expenseCategories.map(cat => ({ value: cat, label: cat }))
@@ -154,14 +153,13 @@ const Expenses = ({ goToSettings }) => {
               setFormError(`Amount exceeds the selected cash book balance of Rs. ${balance.toFixed(2)}`);
           } else { setFormError(""); }
       } else { setFormError(""); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formState.amount, formState.cashBook, cashBookBalances]);
 
-  // ✅ UPDATED: Handle Selection & Redirect
   const handleSelectChange = (name, selectedOption) => {
-      // 1. Check if "Add New" was clicked
       if (name === 'category' && selectedOption?.value === 'ADD_NEW') {
           if (goToSettings) {
-              goToSettings(); // Switch tab
+              goToSettings();
           } else {
               alert("Please go to Settings > Finance Settings to add new categories.");
           }
@@ -259,7 +257,6 @@ const Expenses = ({ goToSettings }) => {
             </div>
             <div style={{...styles.formGroup, flex: 1.5}}>
                 <label style={styles.label}>Category</label>
-                {/* ✅ UPDATED: Using modified categoryOptions */}
                 <CreatableSelect 
                     isClearable 
                     options={categoryOptions} 
@@ -302,7 +299,35 @@ const Expenses = ({ goToSettings }) => {
           <table style={styles.table}>
             <thead><tr><th style={styles.th}>Date</th><th style={styles.th}>Payment/Exp ID</th><th style={styles.th}>Stock ID</th><th style={styles.th}>Type</th><th style={styles.th}>Details</th><th style={styles.th}>Amount</th><th style={styles.th}>Action</th></tr></thead>
             <tbody>
-              {loading ? (<tr><td colSpan={7} style={styles.loadingCell}>Loading...</td></tr>) : combinedData.length > 0 ? (combinedData.map(item => (<tr key={item.id}><td style={styles.td}>{item.createdAt?.toDate().toLocaleDateString()}</td><td style={styles.td}>{item.paymentId || item.expenseId}</td><td style={styles.td}>{item.type === 'Payment' ? item.stockInId : 'N/A'}</td><td style={styles.td}><span style={{ ...styles.typeBadge, backgroundColor: item.type === 'Expense' ? '#e74c3c' : '#3498db' }}>{item.type}</span></td><td style={styles.td}><div>{item.details || item.receiverName}</div><div style={styles.subText}>{item.type === 'Expense' ? `Paid from: ${item.cashBookName || 'N/A'}` : `Method: ${item.method}`}</div></td><td style={{ ...styles.td, color: '#2c3e50', fontWeight: 'bold' }}>Rs. {item.amount.toFixed(2)}</td><td style={styles.td}><button onClick={() => handleDelete(item)} style={styles.deleteButton}><AiOutlineDelete size={16}/></button></td></tr>))) : (<tr><td colSpan={7} style={styles.loadingCell}>No records found.</td></tr>)}
+              {loading ? (
+                  <tr><td colSpan={7} style={styles.loadingCell}>Loading...</td></tr>
+              ) : combinedData.length > 0 ? (
+                  combinedData.map(item => (
+                      <tr key={item.id}>
+                          <td style={styles.td}>{item.createdAt?.toDate().toLocaleDateString()}</td>
+                          <td style={styles.td}>{item.paymentId || item.expenseId}</td>
+                          <td style={styles.td}>{item.type === 'Payment' ? item.stockInId : 'N/A'}</td>
+                          <td style={styles.td}>
+                              <span style={{ ...styles.typeBadge, backgroundColor: item.type === 'Expense' ? '#e74c3c' : '#3498db' }}>{item.type}</span>
+                          </td>
+                          <td style={styles.td}>
+                              <div>{item.details || item.receiverName}</div>
+                              <div style={styles.subText}>
+                                  {/* ✅ UPDATED: Shows account name for Online Payments */}
+                                  {item.type === 'Expense' 
+                                      ? `Paid from: ${item.cashBookName || 'N/A'}` 
+                                      : `Method: ${item.method}${item.method === 'Online Payment' && item.walletName ? ` from ${item.walletName}` : ''}`}
+                              </div>
+                          </td>
+                          <td style={{ ...styles.td, color: '#2c3e50', fontWeight: 'bold' }}>Rs. {item.amount.toFixed(2)}</td>
+                          <td style={styles.td}>
+                              <button onClick={() => handleDelete(item)} style={styles.deleteButton}><AiOutlineDelete size={16}/></button>
+                          </td>
+                      </tr>
+                  ))
+              ) : (
+                  <tr><td colSpan={7} style={styles.loadingCell}>No records found.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -315,7 +340,7 @@ const Expenses = ({ goToSettings }) => {
     </div>
   );
 };
-// Styles remain the same
+
 const styles = { container: { padding: "24px", backgroundColor: "#f4f6f8" }, section: { backgroundColor: '#fff', padding: '24px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }, title: { fontSize: "22px", marginBottom: "20px", color: "#2c3e50", fontWeight: 600 }, form: { display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }, formGroup: { flex: 1, display: 'flex', flexDirection: 'column', minWidth: '150px' }, label: { marginBottom: '8px', fontSize: '14px', fontWeight: 500, color: '#34495e' }, input: { padding: '10px', borderRadius: '6px', border: '1px solid #bdc3c7', fontSize: '14px', width: '100%', boxSizing: 'border-box', height: '40px' }, saveButton: { padding: '10px 20px', marginTop: '30px', border: 'none', backgroundColor: '#2ecc71', color: 'white', borderRadius: '6px', cursor: 'pointer', height: '40px' }, saveButtonDisabled: { backgroundColor: '#95a5a6', cursor: 'not-allowed' }, filtersContainer: { display: 'flex', gap: '16px', marginBottom: '20px', alignItems: 'center' }, searchInputContainer: { position: 'relative' }, searchIcon: { position: 'absolute', top: '50%', left: '10px', transform: 'translateY(-50%)', color: '#9ca3af' }, clearButton: { padding: '0 15px', border: '1px solid #bdc3c7', backgroundColor: '#f8f9fa', color: '#34495e', borderRadius: '6px', cursor: 'pointer', height: '40px' }, tableContainer: { overflowX: 'auto' }, table: { width: '100%', borderCollapse: 'collapse' }, th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: '600', color: '#4b5563', fontSize: '12px', textTransform: 'uppercase' }, td: { padding: '12px 16px', borderBottom: '1px solid #e5e7eb', verticalAlign: 'middle', fontSize: '14px' }, loadingCell: { textAlign: 'center', padding: '40px', color: '#7f8c8d' }, typeBadge: { color: 'white', padding: '4px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: '500' }, subText: { fontSize: '12px', color: '#7f8c8d', marginTop: '4px' }, deleteButton: { backgroundColor: '#fee2e2', border: 'none', color: '#ef4444', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background-color 0.2s' }, paginationContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginTop: '20px' }, errorText: { color: '#e74c3c', marginTop: '10px', fontSize: '14px', fontWeight: '500', width: '100%' }, balancesContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '16px' }, balanceCard: { backgroundColor: '#ecf0f1', padding: '16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }, balanceLabel: { color: '#2c3e50', fontWeight: '500' }, balanceAmount: { color: '#2980b9', fontWeight: 'bold', fontSize: '18px' }, };
 const customSelectStyles = { control: (provided) => ({ ...provided, minHeight: '40px', border: '1px solid #bdc3c7', borderRadius: '6px' }), option: (provided, state) => ({ ...provided, backgroundColor: state.isSelected ? '#3498db' : state.isFocused ? '#ecf0f1' : 'white', color: state.isSelected ? 'white' : '#34495e' }), };
 

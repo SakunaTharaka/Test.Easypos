@@ -4,7 +4,8 @@ import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firest
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { FaCheckCircle, FaSignOutAlt, FaTimes, FaLock, FaStar } from 'react-icons/fa'; 
+// Removed unused 'FaStar'
+import { FaCheckCircle, FaSignOutAlt, FaTimes, FaLock } from 'react-icons/fa'; 
 
 const UserDetails = () => {
   const navigate = useNavigate();

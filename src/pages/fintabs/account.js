@@ -10,10 +10,22 @@ import {
   limit, 
   startAfter,
   doc, 
-  runTransaction 
+  runTransaction,
+  setDoc,
+  updateDoc
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
-import { AiOutlineSearch, AiOutlineArrowLeft, AiOutlineArrowRight, AiOutlineReload, AiOutlineBank, AiOutlineWallet, AiOutlineGlobal } from 'react-icons/ai'; 
+import { 
+  AiOutlineSearch, 
+  AiOutlineArrowLeft, 
+  AiOutlineArrowRight, 
+  AiOutlineReload, 
+  AiOutlineBank, 
+  AiOutlineWallet, 
+  AiOutlineGlobal,
+  AiOutlineAudit, 
+  AiOutlineEdit 
+} from 'react-icons/ai'; 
 
 const Accounts = () => {
   const { cashBooks, cashBookBalances, refreshBalances } = useContext(CashBookContext);
@@ -21,11 +33,12 @@ const Accounts = () => {
   const [loading, setLoading] = useState(true);
   const [isTransferring, setIsTransferring] = useState(false);
 
-  // Balances State
-  const [salesBalances, setSalesBalances] = useState({
-    cash: 0,
-    card: 0,
-    online: 0
+  // Wallets State (Balance + Nickname)
+  const [wallets, setWallets] = useState({
+    cash: { name: 'Cash from Sale', balance: 0, nickname: '' },
+    card: { name: 'Card Payment Bank', balance: 0, nickname: '' },
+    online: { name: 'Online Payment Bank', balance: 0, nickname: '' },
+    cheque: { name: 'Cheque Account', balance: 0, nickname: '' }
   });
 
   // Transfer Form State
@@ -46,7 +59,7 @@ const Accounts = () => {
 
   const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-  // --- Fetch Wallets ---
+  // --- Fetch Wallets (and create Cheque if missing) ---
   const fetchWalletBalances = async () => {
     if (!uid) return;
     setLoading(true);
@@ -54,14 +67,29 @@ const Accounts = () => {
         const walletColRef = collection(db, uid, "wallet", "accounts");
         const snapshot = await getDocs(walletColRef);
         
-        const newBalances = { cash: 0, card: 0, online: 0 };
-        snapshot.forEach(doc => {
-            if (doc.id === 'cash') newBalances.cash = Number(doc.data().balance) || 0;
-            if (doc.id === 'card') newBalances.card = Number(doc.data().balance) || 0;
-            if (doc.id === 'online') newBalances.online = Number(doc.data().balance) || 0;
+        const newWallets = { ...wallets };
+        const foundIds = new Set();
+
+        snapshot.forEach(docSnap => {
+            const id = docSnap.id;
+            const data = docSnap.data();
+            if (newWallets[id]) {
+                newWallets[id] = {
+                    ...newWallets[id],
+                    balance: Number(data.balance) || 0,
+                    nickname: data.nickname || ''
+                };
+                foundIds.add(id);
+            }
         });
 
-        setSalesBalances(newBalances);
+        // Auto-create 'cheque' doc if it doesn't exist
+        if (!foundIds.has('cheque')) {
+            const chequeRef = doc(db, uid, "wallet", "accounts", "cheque");
+            await setDoc(chequeRef, { balance: 0, nickname: "" }, { merge: true });
+        }
+
+        setWallets(newWallets);
     } catch (error) {
         console.error("Error fetching wallet balances:", error);
     } finally {
@@ -73,6 +101,30 @@ const Accounts = () => {
     fetchWalletBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
+
+  // --- Nickname Handler ---
+  const handleEditNickname = async (walletId) => {
+      const currentWallet = wallets[walletId];
+      const newNick = prompt(`Enter a nickname for ${currentWallet.name}:`, currentWallet.nickname);
+      
+      if (newNick !== null) {
+          try {
+              const ref = doc(db, uid, "wallet", "accounts", walletId);
+              await updateDoc(ref, { nickname: newNick });
+              setWallets(prev => ({
+                  ...prev,
+                  [walletId]: { ...prev[walletId], nickname: newNick }
+              }));
+          } catch (error) {
+              alert("Failed to update nickname: " + error.message);
+          }
+      }
+  };
+
+  const getWalletLabel = (key) => {
+      const w = wallets[key];
+      return w.nickname ? `${w.name} (${w.nickname})` : w.name;
+  };
 
   // --- Fetch History ---
   useEffect(() => {
@@ -121,9 +173,10 @@ const Accounts = () => {
 
   const getAllOptions = () => {
       const options = [
-          { value: 'SALES_CASH', label: 'Cash from Sale', type: 'WALLET', walletId: 'cash' },
-          { value: 'SALES_CARD', label: 'Card Payment Bank', type: 'WALLET', walletId: 'card' },
-          { value: 'SALES_ONLINE', label: 'Online Payment Bank', type: 'WALLET', walletId: 'online' }
+          { value: 'SALES_CASH', label: getWalletLabel('cash'), type: 'WALLET', walletId: 'cash' },
+          { value: 'SALES_CARD', label: getWalletLabel('card'), type: 'WALLET', walletId: 'card' },
+          { value: 'SALES_ONLINE', label: getWalletLabel('online'), type: 'WALLET', walletId: 'online' },
+          { value: 'SALES_CHEQUE', label: getWalletLabel('cheque'), type: 'WALLET', walletId: 'cheque' }
       ];
       cashBooks.forEach(cb => {
           options.push({ value: cb.id, label: cb.name, type: 'CASHBOOK' });
@@ -131,17 +184,22 @@ const Accounts = () => {
       return options;
   };
 
-  // --- Handle Transfer / Deposit / Withdrawal ---
+  // --- Handle Transfer ---
   const handleTransfer = async (e) => {
     e.preventDefault();
     if (!uid) return;
     
+    // 1. Basic Validation
     if (transferFromId === 'DEPOSIT_CASH' && transferToId === 'WITHDRAWAL_CASH') {
         return alert("Operation Not Allowed: You cannot select 'Deposit to Business' and 'Withdrawal Cash' at the same time.");
     }
 
     if (!transferFromId || !transferToId || !transferAmount) return alert("Please select Source, Destination, and Amount.");
-    if (transferFromId === transferToId) return alert("Source and Destination cannot be the same.");
+    
+    // 2. Same Account Check (String Equality)
+    if (transferFromId === transferToId) {
+        return alert("Source and Destination cannot be the same account.");
+    }
     
     const amt = parseFloat(transferAmount);
     if (isNaN(amt) || amt <= 0) return alert("Please enter a valid amount.");
@@ -165,8 +223,19 @@ const Accounts = () => {
 
     if (!transferFrom || !transferTo) return alert("Invalid account selection.");
 
+    // 3. Deep Equality Check (Wallet ID)
+    if (transferFrom.type === 'WALLET' && transferTo.type === 'WALLET' && transferFrom.walletId === transferTo.walletId) {
+        return alert("Source and Destination cannot be the same wallet.");
+    }
+
+    // 4. Pre-Transaction Balance Check (Client Side)
     if (transferFrom.type === 'CASHBOOK') {
         const currentBalance = cashBookBalances[transferFrom.value] || 0;
+        if (currentBalance < amt) return alert(`Insufficient funds in ${transferFrom.label}.`);
+    }
+    if (transferFrom.type === 'WALLET') {
+        const wKey = transferFrom.walletId;
+        const currentBalance = wallets[wKey]?.balance || 0;
         if (currentBalance < amt) return alert(`Insufficient funds in ${transferFrom.label}.`);
     }
 
@@ -175,17 +244,40 @@ const Accounts = () => {
         await runTransaction(db, async (transaction) => {
             const timestamp = serverTimestamp();
             
-            // Source Logic
-            let currentSourceBalance = 0;
+            // ==========================================
+            // PHASE 1: ALL READS (MUST BE DONE FIRST)
+            // ==========================================
+            
             let sourceWalletRef = null;
+            let destWalletRef = null;
+            let currentSourceBalance = 0;
+            let currentDestBalance = 0;
 
+            // 1. Read Source (if it's a wallet)
             if (transferFrom.type === 'WALLET') {
                 sourceWalletRef = doc(db, uid, "wallet", "accounts", transferFrom.walletId);
                 const sDoc = await transaction.get(sourceWalletRef);
-                if (!sDoc.exists()) throw new Error("Source wallet not found."); // ✅ Fixed
+                if (!sDoc.exists()) throw new Error("Source wallet not found."); 
                 currentSourceBalance = Number(sDoc.data().balance) || 0;
-                if (currentSourceBalance < amt) throw new Error(`Insufficient funds in ${transferFrom.label}.`); // ✅ Fixed
                 
+                if (currentSourceBalance < amt) throw new Error(`Insufficient funds in ${transferFrom.label}.`);
+            }
+
+            // 2. Read Destination (if it's a wallet)
+            if (transferTo.type === 'WALLET') {
+                destWalletRef = doc(db, uid, "wallet", "accounts", transferTo.walletId);
+                const dDoc = await transaction.get(destWalletRef);
+                if (dDoc.exists()) {
+                    currentDestBalance = Number(dDoc.data().balance) || 0;
+                }
+            }
+
+            // ==========================================
+            // PHASE 2: ALL WRITES
+            // ==========================================
+
+            // 3. Update Source
+            if (transferFrom.type === 'WALLET') {
                 transaction.set(sourceWalletRef, { balance: currentSourceBalance - amt, lastUpdated: timestamp }, { merge: true });
             } 
             else if (transferFrom.type === 'CASHBOOK') {
@@ -202,15 +294,8 @@ const Accounts = () => {
                 });
             }
 
-            // Destination Logic
-            let currentDestBalance = 0;
-            let destWalletRef = null;
-
+            // 4. Update Destination
             if (transferTo.type === 'WALLET') {
-                destWalletRef = doc(db, uid, "wallet", "accounts", transferTo.walletId);
-                const dDoc = await transaction.get(destWalletRef);
-                if (dDoc.exists()) currentDestBalance = Number(dDoc.data().balance) || 0;
-                
                 transaction.set(destWalletRef, { balance: currentDestBalance + amt, lastUpdated: timestamp }, { merge: true });
             }
             else if (transferTo.type === 'CASHBOOK') {
@@ -224,7 +309,7 @@ const Accounts = () => {
                 });
             }
 
-            // Log Transaction
+            // 5. Log Transaction
             const transferRef = doc(collection(db, uid, "finance", "transfers"));
             transaction.set(transferRef, {
                 fromId: transferFrom.value,
@@ -278,6 +363,30 @@ const Accounts = () => {
       setPageCursors([null]);
   };
 
+  // Helper Component for Wallet Cards
+  const WalletCard = ({ walletKey, icon, iconStyle }) => {
+      const w = wallets[walletKey];
+      return (
+        <div style={styles.accountCard}>
+            <div style={iconStyle}>{icon}</div>
+            <div style={{flex: 1}}>
+                <div style={styles.cardHeaderRow}>
+                    <div style={styles.cardLabel}>{w.name}</div>
+                    <button 
+                        onClick={() => handleEditNickname(walletKey)} 
+                        style={styles.editNickBtn} 
+                        title="Edit Nickname"
+                    >
+                        <AiOutlineEdit />
+                    </button>
+                </div>
+                {w.nickname && <div style={styles.cardNickname}>({w.nickname})</div>}
+                <div style={styles.cardBalance}>Rs. {w.balance.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
+            </div>
+        </div>
+      );
+  };
+
   return (
     <div style={styles.container}>
       
@@ -294,29 +403,26 @@ const Accounts = () => {
 
       {/* --- SECTION 1: WALLET BALANCES --- */}
       <div style={styles.gridContainer}>
-          <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxGreen}><AiOutlineWallet size={24}/></div>
-              <div>
-                  <div style={styles.cardLabel}>Cash from Sale</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.cash.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
-              </div>
-          </div>
-
-          <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxBlue}><AiOutlineBank size={24}/></div>
-              <div>
-                  <div style={styles.cardLabel}>Card Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.card.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
-              </div>
-          </div>
-
-          <div style={styles.accountCard}>
-              <div style={styles.cardIconBoxPurple}><AiOutlineGlobal size={24}/></div>
-              <div>
-                  <div style={styles.cardLabel}>Online Payment Bank</div>
-                  <div style={styles.cardBalance}>Rs. {salesBalances.online.toLocaleString('en-LK', {minimumFractionDigits: 2})}</div>
-              </div>
-          </div>
+          <WalletCard 
+            walletKey="cash" 
+            icon={<AiOutlineWallet size={24}/>} 
+            iconStyle={styles.cardIconBoxGreen} 
+          />
+          <WalletCard 
+            walletKey="card" 
+            icon={<AiOutlineBank size={24}/>} 
+            iconStyle={styles.cardIconBoxBlue} 
+          />
+          <WalletCard 
+            walletKey="online" 
+            icon={<AiOutlineGlobal size={24}/>} 
+            iconStyle={styles.cardIconBoxPurple} 
+          />
+          <WalletCard 
+            walletKey="cheque" 
+            icon={<AiOutlineAudit size={24}/>} 
+            iconStyle={styles.cardIconBoxOrange} 
+          />
       </div>
       
       {/* --- SECTION 2: CASH BOOKS --- */}
@@ -355,9 +461,10 @@ const Accounts = () => {
                           <option value="">Select Source...</option>
                           <option value="DEPOSIT_CASH" style={{fontWeight: 'bold', color: '#16a34a'}}>➕ Deposit to Business</option>
                           <optgroup label="Sales Buckets">
-                              <option value="SALES_CASH">Cash from Sale</option>
-                              <option value="SALES_CARD">Card Payment Bank</option>
-                              <option value="SALES_ONLINE">Online Payment Bank</option>
+                              <option value="SALES_CASH">{getWalletLabel('cash')}</option>
+                              <option value="SALES_CARD">{getWalletLabel('card')}</option>
+                              <option value="SALES_ONLINE">{getWalletLabel('online')}</option>
+                              <option value="SALES_CHEQUE">{getWalletLabel('cheque')}</option>
                           </optgroup>
                           <optgroup label="Cash Books">
                               {cashBooks.map(cb => (
@@ -381,9 +488,10 @@ const Accounts = () => {
                           <option value="">Select Destination...</option>
                           <option value="WITHDRAWAL_CASH" style={{fontWeight: 'bold', color: '#ef4444'}}>➖ Withdrawal Cash</option>
                           <optgroup label="Sales Buckets">
-                              <option value="SALES_CASH">Cash from Sale</option>
-                              <option value="SALES_CARD">Card Payment Bank</option>
-                              <option value="SALES_ONLINE">Online Payment Bank</option>
+                              <option value="SALES_CASH">{getWalletLabel('cash')}</option>
+                              <option value="SALES_CARD">{getWalletLabel('card')}</option>
+                              <option value="SALES_ONLINE">{getWalletLabel('online')}</option>
+                              <option value="SALES_CHEQUE">{getWalletLabel('cheque')}</option>
                           </optgroup>
                           <optgroup label="Cash Books">
                               {cashBooks.map(cb => (
@@ -553,9 +661,14 @@ const styles = {
   cardIconBoxGreen: { width: '56px', height: '56px', borderRadius: '12px', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   cardIconBoxBlue: { width: '56px', height: '56px', borderRadius: '12px', background: '#dbeafe', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   cardIconBoxPurple: { width: '56px', height: '56px', borderRadius: '12px', background: '#f3e8ff', color: '#9333ea', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  cardLabel: { fontSize: '13px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' },
-  cardBalance: { fontSize: '24px', color: '#0f172a', fontWeight: '800', marginTop: '4px' },
+  cardIconBoxOrange: { width: '56px', height: '56px', borderRadius: '12px', background: '#ffedd5', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   
+  cardHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  cardLabel: { fontSize: '13px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  cardNickname: { fontSize: '13px', color: '#94a3b8', fontStyle: 'italic', marginBottom: '4px' },
+  cardBalance: { fontSize: '24px', color: '#0f172a', fontWeight: '800', marginTop: '4px' },
+  editNickBtn: { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: '4px', fontSize: '14px' },
+
   section: { 
     background: 'white', 
     borderRadius: '16px', 
