@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://quickpos.site/</loc>
+    <lastmod>2025-01-18</lastmod>
+    <priority>1.00</priority>
+  </url>
+  <url>
+    <loc>https://quickpos.site/login</loc>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://quickpos.site/signup</loc>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://quickpos.site/pos</loc>
+    <priority>0.90</priority>
+  </url>
+</urlset>

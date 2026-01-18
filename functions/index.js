@@ -15,7 +15,7 @@ setGlobalOptions({ maxInstances: 10 });
 // ⚙️ CONFIGURATION
 // ====================================================
 const TEXT_LK_API_TOKEN = "1594|WMi7mCcEEI3Ajkg4oMG2EeU7cA03k6oKIN81ouJ901ddfb53"; 
-const SENDER_ID = "Wayne"; 
+const SENDER_ID = "QuickPOS"; 
 
 // ====================================================
 // 🛠️ HELPER: SEND SMS (With 011 Filter)
