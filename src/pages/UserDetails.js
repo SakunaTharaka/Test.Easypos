@@ -319,7 +319,7 @@ const UserDetails = () => {
                <div style={styles.disabledPlanOption}>
                 <div style={styles.lockedBadge}><FaLock /> Regular Price</div>
                 <h3 style={{...styles.planTitle, color: '#6b7280'}}>Standard Monthly</h3>
-                <p style={{...styles.planPrice, color: '#9ca3af'}}>Rs. 2,500 <span style={styles.pricePer}>/ month</span></p>
+                <p style={{...styles.planPrice, color: '#9ca3af'}}>Rs. 3,000 <span style={styles.pricePer}>/ month</span></p>
                 
                 <div style={styles.divider}></div>
                 <div style={styles.featureList}>
@@ -338,10 +338,10 @@ const UserDetails = () => {
                {/* --- PLAN 3: YEARLY (Rs 20000) --- */}
               <div style={selectedPlan === 'yearly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('yearly')}>
                 {selectedPlan === 'yearly' && <FaCheckCircle style={styles.checkIcon} />}
-                <div style={styles.saveBadge}>Save 7.41%</div>
+                <div style={styles.saveBadge}>Save 16.67%</div>
                 
                 <h3 style={styles.planTitle}>Yearly Plan</h3>
-                <p style={styles.planPrice}>Rs. 20,000 <span style={styles.pricePer}>/ year</span></p>
+                <p style={styles.planPrice}>Rs. 30,000 <span style={styles.pricePer}>/ year</span></p>
                 <div style={{height: '19px'}}></div> {/* Spacer to align with slashed price */}
 
                  <div style={styles.divider}></div>
