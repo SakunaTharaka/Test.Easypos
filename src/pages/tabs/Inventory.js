@@ -17,7 +17,7 @@ import {
   AiOutlinePlus, 
   AiOutlineDelete, 
   AiOutlineSearch, 
-  AiOutlineFilter,
+  AiOutlineFilter, 
   AiOutlineLoading
 } from "react-icons/ai";
 import Select from "react-select";
@@ -164,6 +164,7 @@ const Inventory = ({ internalUser }) => {
       }
     };
     fetchDropdownData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleApplyFilters = () => {
@@ -260,6 +261,9 @@ const Inventory = ({ internalUser }) => {
               const oldQty = parseFloat(data.qtyOnHand) || 0;
               const incomingQty = parseFloat(item.quantity);
               
+              // ✅ FIX 1: Retrieve current periodIn
+              const currentPeriodIn = parseFloat(data.periodIn) || 0;
+
               let newQty = oldQty + incomingQty;
               let newAvgCost = parseFloat(data.averageCost) || 0;
 
@@ -283,7 +287,9 @@ const Inventory = ({ internalUser }) => {
               transaction.update(itemRef, {
                   qtyOnHand: newQty,
                   averageCost: newAvgCost, 
-                  lastStockInDate: serverTimestamp()
+                  lastStockInDate: serverTimestamp(),
+                  // ✅ FIX 2: Increment Period In
+                  periodIn: currentPeriodIn + incomingQty
               });
           }
 
@@ -336,6 +342,9 @@ const Inventory = ({ internalUser }) => {
                 const masterData = itemSnap.data();
                 const currentQty = parseFloat(masterData.qtyOnHand) || 0;
                 
+                // ✅ FIX 3: Get Period In
+                const currentPeriodIn = parseFloat(masterData.periodIn) || 0;
+
                 const qtyToRemove = parseFloat(item.quantity);
                 const priceToRemove = parseFloat(item.price);
 
@@ -352,7 +361,6 @@ const Inventory = ({ internalUser }) => {
                      console.log(`Skipping reverse cost calculation for ${item.name} (Manual Mode Active)`);
                 } else {
                     // AUTOMATIC MODE: Reverse Weighted Average
-                    // Formula: (CurrentTotalValue - RemovedBatchValue) / RemainingQty
                     const currentAvgCost = parseFloat(masterData.averageCost) || 0;
 
                     if (newQty > 0) {
@@ -368,7 +376,9 @@ const Inventory = ({ internalUser }) => {
 
                 transaction.update(itemRef, {
                     qtyOnHand: newQty,
-                    averageCost: newAvgCost
+                    averageCost: newAvgCost,
+                    // ✅ FIX 4: Decrement Period In (Prevent Negative)
+                    periodIn: Math.max(0, currentPeriodIn - qtyToRemove)
                 });
             }
 
@@ -434,13 +444,11 @@ const Inventory = ({ internalUser }) => {
             <div style={styles.formGrid}>
               <div style={styles.formGroup}><label style={styles.label}>Supplier Name</label><input value={supplierInfo.name} onChange={e => setSupplierInfo({...supplierInfo, name: e.target.value})} style={styles.input} /></div>
               
-              {/* ✅ UPDATED: Digits Only & Max Length 10 */}
               <div style={styles.formGroup}>
                   <label style={styles.label}>Supplier Mobile</label>
                   <input 
                       value={supplierInfo.mobile} 
                       onChange={(e) => {
-                          // Allow only numbers
                           const val = e.target.value.replace(/[^0-9]/g, '');
                           setSupplierInfo({...supplierInfo, mobile: val});
                       }} 
@@ -460,7 +468,6 @@ const Inventory = ({ internalUser }) => {
                       <div style={{flex: 1}}><input type="number" placeholder="Qty" value={currentQty} onChange={e => setCurrentQty(e.target.value)} style={styles.input}/></div>
                       <div style={{flex: 1}}>
                           <select value={currentUnit} onChange={e => setCurrentUnit(e.target.value)} style={styles.input}>
-                            {/* Updated Dropdown Logic */}
                             {units.map(u => <option key={u} value={u}>{u}</option>)}
                           </select>
                       </div>
@@ -507,7 +514,6 @@ const Inventory = ({ internalUser }) => {
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.addedBy}</td>}
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>}
                           {isAdmin && lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>
-                            {/* DELETE BUTTON with Spinner Support */}
                             <button 
                                 style={{...styles.deleteBtn, cursor: isProcessing ? 'not-allowed' : 'pointer'}} 
                                 onClick={() => handleDelete(item)} 

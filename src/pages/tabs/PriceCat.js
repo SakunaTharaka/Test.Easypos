@@ -42,6 +42,8 @@ const PriceCat = ({ internalUser }) => {
   const [editingCategory, setEditingCategory] = useState(null);
 
   const [isSavingCategory, setIsSavingCategory] = useState(false);
+  // ✅ NEW: Loading state for item submission
+  const [isSubmittingItem, setIsSubmittingItem] = useState(false);
 
   const [dropdownSearch, setDropdownSearch] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -264,6 +266,9 @@ const PriceCat = ({ internalUser }) => {
   };
 
   const handleAddItem = async () => {
+    // ✅ PREVENT DOUBLE SUBMISSION
+    if (isSubmittingItem) return;
+
     if (!selectedItem || !price || !selectedCategory) return alert("Fill all required fields");
     
     if (selectedCategory.isDiscountable) {
@@ -276,6 +281,9 @@ const PriceCat = ({ internalUser }) => {
             return alert("Please enter valid Buy and Get quantities greater than 0.");
         }
     }
+
+    // ✅ LOCK BUTTON
+    setIsSubmittingItem(true);
 
     const uid = auth.currentUser.uid;
     const pricedItemsColRef = collection(db, uid, "price_categories", "priced_items");
@@ -305,8 +313,12 @@ const PriceCat = ({ internalUser }) => {
           )
         );
       } else {
+        // CHECK FOR DUPLICATES BEFORE SAVING
         const duplicate = pricedItems.find(i => i.categoryId === selectedCategory.id && i.itemId === selectedItem.id);
-        if (duplicate) return alert("This item already exists in this price category.");
+        if (duplicate) {
+            setIsSubmittingItem(false); // Reset lock
+            return alert("This item already exists in this price category.");
+        }
 
         const newItemData = {
           categoryId: selectedCategory.id,
@@ -328,8 +340,12 @@ const PriceCat = ({ internalUser }) => {
       }
       
       closePopup();
+      // State is reset in closePopup, but good to be explicit if closePopup changes
+      setIsSubmittingItem(false);
+
     } catch (err) {
       alert("Error saving item: " + err.message);
+      setIsSubmittingItem(false); // ✅ UNLOCK ON ERROR
     }
   };
 
@@ -357,6 +373,9 @@ const PriceCat = ({ internalUser }) => {
     setIsBuyXGetY(false);
     setBuyQty("");
     setGetQty("");
+    
+    // ✅ RESET SUBMISSION STATE
+    setIsSubmittingItem(false);
   };
 
   const filteredItems = pricedItems
@@ -768,10 +787,16 @@ const PriceCat = ({ internalUser }) => {
                     style={popupBtnStyle}>Cancel</button>
                 <button 
                   ref={saveButtonRef}
-                  onClick={handleAddItem} 
-                  style={{ ...popupBtnStyle, background: "#2ecc71", color: "#fff" }}
+                  onClick={handleAddItem}
+                  disabled={isSubmittingItem} 
+                  style={{ 
+                      ...popupBtnStyle, 
+                      background: isSubmittingItem ? "#95a5a6" : "#2ecc71", 
+                      color: "#fff",
+                      cursor: isSubmittingItem ? "not-allowed" : "pointer" 
+                  }}
                 >
-                  Save
+                  {isSubmittingItem ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>

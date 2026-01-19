@@ -16,7 +16,7 @@ import {
   startAfter,
   where,
   writeBatch,
-  increment, // Imported increment
+  increment, 
 } from "firebase/firestore";
 import {
   AiOutlinePlus,
@@ -38,7 +38,7 @@ const Items = ({ internalUser }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // ✅ NEW: State for Total Items Count
+  // State for Total Items Count
   const [totalItems, setTotalItems] = useState(0);
   const MAX_ITEMS = 1000;
 
@@ -63,7 +63,7 @@ const Items = ({ internalUser }) => {
     return cur?.isAdmin === true || cur?.isAdmin === "1";
   })();
 
-  // ✅ NEW: Fetch Total Item Count on Load
+  // Fetch Total Item Count on Load
   useEffect(() => {
     const fetchCount = async () => {
         const uid = auth.currentUser?.uid;
@@ -161,12 +161,12 @@ const Items = ({ internalUser }) => {
     fetchSettings();
   }, []);
 
+  // ✅ FIXED: Removed unnecessary dependency on 'loading'
   useEffect(() => {
-    if (!loading) {
-        setCurrentPage(1);
-        setPageCursors({ 1: null });
-        setLastVisible(null);
-    }
+    // Always reset pagination when search term changes
+    setCurrentPage(1);
+    setPageCursors({ 1: null });
+    setLastVisible(null);
   }, [search]);
 
   const handlePageChange = (direction) => {
@@ -187,7 +187,6 @@ const Items = ({ internalUser }) => {
     setForm((prev) => ({ ...prev, type: selectedType, brand: selectedType === "ourProduct" ? "" : prev.brand }));
   };
   
-  // ✅ UPDATED: getNextPID now checks limit and increments total count
   const getNextPID = async (uid) => {
     const counterRef = doc(db, uid, "counters");
     try {
@@ -351,7 +350,6 @@ const Items = ({ internalUser }) => {
     }
   };
 
-  // ✅ UPDATED: handleDelete Decrements Count
   const handleDelete = async (id) => {
     if (!isAdmin || !window.confirm("Are you sure?")) return;
     const uid = auth.currentUser.uid;

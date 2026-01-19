@@ -1,396 +1,205 @@
-import React, { useEffect, useState } from "react";
+// src/pages/tabs/ProductionBalance.js
+import React, { useEffect, useState, useCallback } from "react";
 import { db, auth } from "../../firebase";
-import { doc, getDoc, writeBatch, serverTimestamp, collection, getDocs } from "firebase/firestore"; 
-import { AiOutlineReload, AiOutlineDownload, AiOutlineExclamationCircle, AiOutlineFieldTime, AiOutlineArrowLeft, AiOutlineArrowRight } from "react-icons/ai";
-import { calculateStockBalances } from "../../utils/inventoryUtils";
+import { collection, getDocs, query, where, doc, getDoc, Timestamp } from "firebase/firestore";
+import { AiOutlineReload } from "react-icons/ai";
 
-const StockBalance = () => {
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [stockData, setStockData] = useState([]);
-  
-  // Pagination State
-  const [lastVisible, setLastVisible] = useState(null); // Cursor for DB
-  const [pageHistory, setPageHistory] = useState([]); // To handle "Previous"
-  const [page, setPage] = useState(1);
-  const ITEMS_PER_PAGE = 50;
-  const [isLastPage, setIsLastPage] = useState(false);
+const ProductionBalance = () => {
+    const [loading, setLoading] = useState(true);
+    const [balanceData, setBalanceData] = useState([]);
+    const [availableShifts, setAvailableShifts] = useState([]);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [selectedShift, setSelectedShift] = useState("");
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortConfig, setSortConfig] = useState({ key: 'item', direction: 'ascending' }); // Client-side sort for current page
-  const [stockReminderThreshold, setStockReminderThreshold] = useState(null);
-  const [showUnbalancedOnly, setShowUnbalancedOnly] = useState(false);
+    useEffect(() => {
+        const user = auth.currentUser;
+        if (!user) return;
+        const uid = user.uid;
 
-  useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-    fetchStockData('initial');
-    fetchStockReminderSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        // Fetch available shifts from settings
+        const fetchShifts = async () => {
+            const settingsRef = doc(db, uid, "settings");
+            const settingsSnap = await getDoc(settingsRef);
+            if (settingsSnap.exists()) {
+                const shifts = settingsSnap.data().productionShifts || [];
+                setAvailableShifts(shifts);
+                if (shifts.length > 0) {
+                    setSelectedShift(shifts[0]); // Default to the first shift
+                }
+            }
+        };
+        fetchShifts();
+    }, []);
 
-  // Debounce search to prevent too many DB reads
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (auth.currentUser) {
-          fetchStockData('initial');
-      }
-    }, 800);
-    return () => clearTimeout(delayDebounceFn);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm]);
+    // ✅ FIXED: Wrapped in useCallback to satisfy ESLint and prevent infinite loops
+    const fetchBalanceData = useCallback(async () => {
+        const user = auth.currentUser;
+        if (!user || !selectedDate || !selectedShift) {
+            setBalanceData([]);
+            return;
+        };
 
-  const fetchStockReminderSettings = async () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    try {
-      const settingsRef = doc(db, uid, "settings");
-      const settingsSnap = await getDoc(settingsRef);
-      if (settingsSnap.exists()) {
-        const threshold = settingsSnap.data().stockReminder;
-        setStockReminderThreshold(threshold === "Do not remind" ? null : parseInt(threshold));
-      }
-    } catch (error) {
-      console.error("Error fetching settings:", error);
-    }
-  };
+        setLoading(true);
+        try {
+            const uid = user.uid;
+            const startOfDay = new Date(selectedDate);
+            startOfDay.setHours(0, 0, 0, 0);
+            const endOfDay = new Date(selectedDate);
+            endOfDay.setHours(23, 59, 59, 999);
+            
+            const startTimestamp = Timestamp.fromDate(startOfDay);
+            const endTimestamp = Timestamp.fromDate(endOfDay);
 
-  const fetchStockData = async (direction = 'initial') => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    
-    setLoading(true);
-    try {
-      let cursor = null;
-
-      if (direction === 'next') {
-        cursor = lastVisible;
-      } else if (direction === 'prev') {
-        // Pop current page off, then peek at the one before
-        const newHistory = [...pageHistory];
-        newHistory.pop(); // Remove current
-        cursor = newHistory[newHistory.length - 1] || null;
-        setPageHistory(newHistory);
-      } else {
-        // Initial load
-        setPageHistory([]);
-        setPage(1);
-      }
-
-      // 1. Fetch data from utility
-      const { data, lastVisible: newCursor } = await calculateStockBalances(
-          db, 
-          uid, 
-          cursor, 
-          ITEMS_PER_PAGE,
-          searchTerm
-      );
-      
-      setStockData(data);
-      setLastVisible(newCursor);
-      
-      // Update pagination state
-      if (direction === 'next') {
-        setPageHistory(prev => [...prev, cursor]); // Save the cursor we JUST used
-        setPage(p => p + 1);
-      } else if (direction === 'prev') {
-        setPage(p => p - 1);
-      }
-      
-      // If we got fewer items than requested, it's the last page
-      setIsLastPage(data.length < ITEMS_PER_PAGE);
-
-    } catch (error) {
-      console.error("Error fetching stock:", error);
-      alert("Error: " + error.message);
-    }
-    setLoading(false);
-  };
-
-  const handleClosePeriod = async () => {
-    const confirm = window.confirm(
-      "⚠ CLOSE PERIOD & RESET COUNTERS?\n\n" +
-      "This will set current 'Available Qty' as 'Opening Stock' for ALL items.\n" +
-      "Are you sure?"
-    );
-    if (!confirm) return;
-
-    setProcessing(true);
-    const uid = auth.currentUser?.uid;
-
-    try {
-      const itemsRef = collection(db, uid, "items", "item_list");
-      const snapshot = await getDocs(itemsRef);
-      const allItems = snapshot.docs;
-
-      const batchSize = 450;
-      const chunks = [];
-      for (let i = 0; i < allItems.length; i += batchSize) {
-        chunks.push(allItems.slice(i, i + batchSize));
-      }
-
-      for (const chunk of chunks) {
-        const batch = writeBatch(db);
-        chunk.forEach((itemDoc) => {
-            const currentQty = itemDoc.data().qtyOnHand || 0;
-            const ref = doc(db, uid, "items", "item_list", itemDoc.id);
-            batch.update(ref, {
-                openingStock: currentQty,
-                periodIn: 0,  // Reset counters
-                periodOut: 0, // Reset counters
-                lastReconciledAt: serverTimestamp()
+            // 1. Fetch Master List of 'ourProduct' items first to create a filter
+            const itemsColRef = collection(db, uid, "items", "item_list");
+            const itemsQuery = query(itemsColRef, where("type", "==", "ourProduct"));
+            const itemsSnap = await getDocs(itemsQuery);
+            const itemNameMap = new Map();
+            const ourProductIds = new Set();
+            itemsSnap.docs.forEach(doc => {
+                itemNameMap.set(doc.id, doc.data().name);
+                ourProductIds.add(doc.id);
             });
-        });
-        await batch.commit();
-      }
 
-      alert("Period Closed.");
-      fetchStockData('initial'); 
-    } catch (error) {
-      console.error("Close Period Error:", error);
-      alert("Failed: " + error.message);
-    } finally {
-      setProcessing(false);
-    }
-  };
+            // If no products are defined, no need to query further.
+            if (ourProductIds.size === 0) {
+                setBalanceData([]);
+                setLoading(false);
+                return;
+            }
 
-  const handleSort = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
-    }
-    setSortConfig({ key, direction });
-  };
+            // 2. Fetch Production Data for date and shift
+            const prodColRef = collection(db, uid, "production", "production_records");
+            const prodQuery = query(prodColRef, 
+                where("productionDate", ">=", startTimestamp), 
+                where("productionDate", "<=", endTimestamp),
+                where("shift", "==", selectedShift)
+            );
+            const prodSnap = await getDocs(prodQuery);
+            const productionMap = new Map();
+            prodSnap.docs.forEach(doc => {
+                doc.data().lineItems.forEach(item => {
+                    // Filter: Only count if the item is one of 'ourProduct's
+                    if (ourProductIds.has(item.id)) {
+                        const currentQty = productionMap.get(item.id) || 0;
+                        productionMap.set(item.id, currentQty + item.quantity);
+                    }
+                });
+            });
 
-  const sortedData = React.useMemo(() => {
-    if (!sortConfig.key) return stockData;
-    return [...stockData].sort((a, b) => {
-      if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'ascending' ? -1 : 1;
-      if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'ascending' ? 1 : -1;
-      return 0;
-    });
-  }, [stockData, sortConfig]);
+            // 3. Fetch Invoice (Billed) Data for date and shift
+            const invColRef = collection(db, uid, "invoices", "invoice_list");
+            const invQuery = query(invColRef, 
+                where("createdAt", ">=", startTimestamp), 
+                where("createdAt", "<=", endTimestamp),
+                where("shift", "==", selectedShift)
+            );
+            const invSnap = await getDocs(invQuery);
+            const billedMap = new Map();
+            invSnap.docs.forEach(doc => {
+                doc.data().items.forEach(item => {
+                    // Filter: Only count if the item is one of 'ourProduct's
+                    if (ourProductIds.has(item.itemId)) {
+                        const currentQty = billedMap.get(item.itemId) || 0;
+                        billedMap.set(item.itemId, currentQty + item.quantity);
+                    }
+                });
+            });
+            
+            // 4. Merge and Calculate Balance
+            const allItemIds = new Set([...productionMap.keys(), ...billedMap.keys()]);
+            const finalData = Array.from(allItemIds).map(itemId => {
+                const productionQty = productionMap.get(itemId) || 0;
+                const billedQty = billedMap.get(itemId) || 0;
+                const difference = productionQty - billedQty;
+                
+                let status = `(${Math.abs(difference)} ${difference > 0 ? 'Excess' : 'Shortage'})`;
+                if (difference === 0) status = "(Balanced)";
 
-  const filteredData = showUnbalancedOnly 
-    ? sortedData.filter(item => item.availableQty < 0)
-    : sortedData;
+                return {
+                    id: itemId,
+                    itemName: itemNameMap.get(itemId) || 'Unknown Item',
+                    productionQty,
+                    billedQty,
+                    difference,
+                    status
+                };
+            }).sort((a, b) => a.itemName.localeCompare(b.itemName)); // Sort alphabetically
 
-  // --- UPDATED EXPORT FUNCTION: Downloads ALL data, not just current page ---
-  const handleFullExport = async () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
+            setBalanceData(finalData);
 
-    // Confirm with user because this costs reads
-    if (!window.confirm("Download full inventory report?\n\n(This will fetch ALL items from the database)")) {
-        return;
-    }
+        } catch (error) {
+            console.error("Error fetching balance data:", error);
+            alert("Error fetching balance data. A Firestore index might be required. See console for details.");
+        }
+        setLoading(false);
+    }, [selectedDate, selectedShift]);
+    
+    // ✅ FIXED: Added fetchBalanceData to dependency array
+    useEffect(() => {
+        fetchBalanceData();
+    }, [fetchBalanceData]);
 
-    setProcessing(true);
-    try {
-      // 1. Fetch ALL items without limit
-      const itemsRef = collection(db, uid, "items", "item_list");
-      const snapshot = await getDocs(itemsRef);
-      
-      if (snapshot.empty) {
-        alert("No stock data found to export.");
-        setProcessing(false);
-        return;
-      }
+    const getRowStyle = (item) => {
+        if (item.billedQty > item.productionQty) return styles.yellowRow; // Shortage
+        if (item.billedQty < item.productionQty) return styles.redRow;   // Excess
+        if (item.billedQty === item.productionQty && item.productionQty > 0) return styles.greenRow; // Balanced
+        return {};
+    };
 
-      // 2. Prepare CSV Header
-      const headers = ["Item Name", "Category", "Opening Stock", "Period In", "Period Out", "Available Qty"];
-      
-      // 3. Process Data & Calculate Balance
-      const rows = snapshot.docs.map(doc => {
-        const data = doc.data();
-        
-        // Ensure numbers are treated as numbers
-        const open = Number(data.openingStock) || 0;
-        const pIn = Number(data.periodIn) || 0;
-        const pOut = Number(data.periodOut) || 0;
-        
-        // Calculate Available Qty on the fly to match the table logic
-        const available = open + pIn - pOut; 
+    return (
+        <div style={styles.container}>
+            <div style={styles.headerContainer}>
+                <h2 style={styles.header}>Production Balance Report</h2>
+                <p style={styles.subHeader}>Compare produced vs. billed items for a specific date and shift.</p>
+            </div>
+            <div style={styles.controlsContainer}>
+                <div style={styles.formGroup}><label>Date</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={styles.input}/></div>
+                <div style={styles.formGroup}><label>Shift</label><select value={selectedShift} onChange={e => setSelectedShift(e.target.value)} style={styles.input}><option value="">Select Shift</option>{availableShifts.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                <button style={styles.refreshButton} onClick={fetchBalanceData}><AiOutlineReload/> Refresh</button>
+            </div>
 
-        // Return CSV formatted row
-        return [
-          `"${data.item || 'Unknown'}"`, 
-          `"${data.category || '-'}"`, 
-          open, 
-          pIn, 
-          pOut, 
-          available
-        ].join(",");
-      });
-
-      // 4. Combine and Download
-      const csvContent = [headers.join(","), ...rows].join("\n");
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      
-      const dateStr = new Date().toISOString().slice(0,10);
-      link.setAttribute("href", url);
-      link.setAttribute("download", `Full_Stock_Balance_${dateStr}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-    } catch (error) {
-      console.error("Export Error:", error);
-      alert("Failed to export: " + error.message);
-    } finally {
-      setProcessing(false);
-    }
-  };
-  // -------------------------------------------------------------------------
-
-  return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.headerContainer}>
-        <h2 style={styles.header}>Stock Balance Report</h2>
-        <p style={styles.subHeader}>View inventory levels (Page {page})</p>
-        {stockReminderThreshold && (
-          <div style={styles.reminderNote}><AiOutlineExclamationCircle size={16} /><span>Items below threshold ({stockReminderThreshold}%) are highlighted in yellow.</span></div>
-        )}
-      </div>
-
-      {/* Controls */}
-      <div style={styles.controlsContainer}>
-        <div style={styles.searchContainer}>
-            <input type="text" placeholder="Search items (Start typing name...)" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={styles.searchInput}/>
+            <div style={styles.tableContainer}>
+                {loading ? (
+                    <p>Loading report...</p>
+                ) : (
+                    <table style={styles.table}>
+                        <thead><tr><th style={styles.th}>Item Name</th><th style={styles.th}>Production Qty</th><th style={styles.th}>Billed Qty</th><th style={styles.th}>Difference</th><th style={styles.th}>Status</th></tr></thead>
+                        <tbody>
+                            {balanceData.map(item => (
+                                <tr key={item.id} style={getRowStyle(item)}>
+                                    <td style={styles.td}>{item.itemName}</td>
+                                    <td style={styles.td}>{item.productionQty}</td>
+                                    <td style={styles.td}>{item.billedQty}</td>
+                                    <td style={styles.td}>{item.difference > 0 ? `+${item.difference}` : item.difference}</td>
+                                    <td style={styles.td}>{item.status}</td>
+                                </tr>
+                            ))}
+                            {balanceData.length === 0 && <tr><td colSpan="5" style={{textAlign: 'center', padding: '20px'}}>No 'Our Product' items found with production or sales activity for the selected date and shift.</td></tr>}
+                        </tbody>
+                    </table>
+                )}
+            </div>
         </div>
-        <div style={styles.buttonGroup}>
-          <label style={styles.filterCheckbox}>
-              <input type="checkbox" checked={showUnbalancedOnly} onChange={(e) => setShowUnbalancedOnly(e.target.checked)} style={styles.checkboxInput}/>
-              Show negative stock
-          </label>
-          <button style={styles.refreshButton} onClick={() => fetchStockData('initial')} disabled={processing || loading}>
-              <AiOutlineReload size={18} /> Refresh
-          </button>
-          <button style={{...styles.refreshButton, backgroundColor: '#8e44ad'}} onClick={handleClosePeriod} disabled={processing || loading}>
-              <AiOutlineFieldTime size={18} /> Close Period
-          </button>
-          
-          {/* UPDATED EXPORT BUTTON */}
-          <button style={styles.exportButton} onClick={handleFullExport} disabled={processing || loading}>
-              <AiOutlineDownload size={18} /> Export All Data
-          </button>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div style={styles.tableContainer}>
-        <div style={styles.tableWrapper}>
-            {loading ? (
-                <div style={styles.loadingContainer}>
-                    <div style={styles.loadingSpinner}></div>
-                    <p>Loading Page {page}...</p>
-                </div>
-            ) : (
-              <table style={styles.table}>
-                {/* Added Caption for Sorting Clarity */}
-                <caption style={{captionSide: 'top', textAlign: 'right', fontSize: '12px', color: '#999', paddingBottom: '5px', paddingRight: '15px'}}>
-                   * Sorting applies to this page only
-                </caption>
-                <thead>
-                  <tr>
-                    <th style={styles.th} onClick={() => handleSort('item')}>Item {sortConfig.key === 'item' && (sortConfig.direction === 'ascending' ? '↑' : '↓')}</th>
-                    <th style={styles.th} onClick={() => handleSort('category')}>Category</th>
-                    <th style={styles.th} onClick={() => handleSort('openingStock')}>Opening</th>
-                    <th style={styles.th} onClick={() => handleSort('periodIn')}>Period In</th>
-                    <th style={styles.th} onClick={() => handleSort('periodOut')}>Period Out</th>
-                    <th style={styles.th} onClick={() => handleSort('availableQty')}>Available</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredData.length > 0 ? (
-                    filteredData.map((item, idx) => {
-                      // Calculate percentage using (Opening + PeriodIn)
-                      const throughput = (Number(item.openingStock) || 0) + (Number(item.periodIn) || 0);
-                      const percentage = throughput > 0 ? (item.availableQty / throughput) * 100 : 100;
-                      
-                      // Highlight Logic
-                      const isLow = stockReminderThreshold !== null && percentage <= stockReminderThreshold && throughput > 0;
-                      const isUnbal = item.availableQty < 0;
-
-                      return (
-                        <tr key={idx} style={{ ...styles.tr, ...(isLow && styles.lowStockRow), ...(isUnbal && styles.unbalancedRow) }}>
-                          <td style={styles.td}>{item.item}</td>
-                          <td style={styles.td}>{item.category}</td>
-                          <td style={{...styles.td, color: '#7f8c8d'}}>{item.openingStock}</td>
-                          <td style={{...styles.td, color: '#2980b9'}}>{item.periodIn > 0 ? `+${item.periodIn}` : '-'}</td>
-                          <td style={{...styles.td, color: '#c0392b'}}>{item.periodOut > 0 ? `-${item.periodOut}` : '-'}</td>
-                          <td style={{ ...styles.td, color: isUnbal ? '#c0392b' : '#27ae60', fontWeight: 600 }}>
-                              {item.availableQty}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (<tr><td colSpan={6} style={styles.noData}>No data found.</td></tr>)}
-                </tbody>
-              </table>
-            )}
-        </div>
-        
-        {/* Firebase Pagination Controls */}
-        <div style={styles.pagination}>
-          <button 
-            style={{...styles.paginationButton, opacity: page === 1 ? 0.5 : 1}} 
-            onClick={() => fetchStockData('prev')} 
-            disabled={page === 1 || loading}
-          >
-            <AiOutlineArrowLeft /> Previous
-          </button>
-          
-          <span style={styles.paginationInfo}>Page {page}</span>
-          
-          <button 
-            style={{...styles.paginationButton, opacity: isLastPage ? 0.5 : 1}} 
-            onClick={() => fetchStockData('next')} 
-            disabled={isLastPage || loading}
-          >
-             Next <AiOutlineArrowRight />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 const styles = {
-    container: { padding: '24px', fontFamily: "'Inter', sans-serif", backgroundColor: '#f8f9fa' },
-    loadingContainer: { display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '200px', color: '#6c757d' },
-    loadingSpinner: { border: '3px solid #f3f3f3', borderTop: '3px solid #3498db', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite', marginBottom: '15px' },
-    headerContainer: { marginBottom: '24px' },
-    header: { fontSize: '28px', fontWeight: '700', color: '#2c3e50' },
-    subHeader: { fontSize: '16px', color: '#6c757d', margin: '4px 0 12px 0' },
-    reminderNote: { display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', backgroundColor: '#fffbe6', border: '1px solid #ffe58f', borderRadius: '8px', color: '#d46b08', fontSize: '14px' },
-    controlsContainer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
-    searchContainer: { flex: 1, minWidth: '300px' },
-    searchInput: { padding: '12px 16px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', width: '100%', boxSizing: 'border-box' },
-    buttonGroup: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' },
-    filterCheckbox: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#495057', cursor: 'pointer' },
-    checkboxInput: { margin: 0, width: '16px', height: '16px' },
-    refreshButton: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' },
-    exportButton: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' },
-    tableContainer: { backgroundColor: '#fff', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' },
-    tableWrapper: { overflowX: 'auto' },
+    container: { padding: '24px', fontFamily: "'Inter', sans-serif" },
+    headerContainer: { marginBottom: '20px' },
+    header: { fontSize: '24px', fontWeight: '600' },
+    subHeader: { color: '#6c757d' },
+    controlsContainer: { display: 'flex', gap: '16px', alignItems: 'flex-end', marginBottom: '20px', padding: '16px', backgroundColor: '#fff', borderRadius: '8px' },
+    formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
+    input: { padding: '10px', borderRadius: '6px', border: '1px solid #ddd' },
+    refreshButton: { padding: '10px 16px', border: 'none', backgroundColor: '#3498db', color: 'white', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' },
+    tableContainer: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', overflow: 'hidden' },
     table: { width: '100%', borderCollapse: 'collapse' },
-    th: { padding: '16px', textAlign: 'left', backgroundColor: '#f8f9fa', fontWeight: '600', color: '#495057', fontSize: '14px', borderBottom: '1px solid #eaeaea', cursor: 'pointer', userSelect: 'none' },
-    tr: { borderBottom: '1px solid #eaeaea' },
-    lowStockRow: { backgroundColor: '#fffbe6' },
-    unbalancedRow: { backgroundColor: '#fff1f0', borderLeft: '3px solid #c0392b' },
-    td: { padding: '16px', fontSize: '14px', color: '#495057' },
-    noData: { padding: '40px', textAlign: 'center', color: '#6c757d', fontSize: '16px' },
-    pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '20px', borderTop: '1px solid #eaeaea' },
-    paginationButton: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', backgroundColor: '#fff' },
-    paginationInfo: { fontSize: '14px', color: '#495057', fontWeight: '600' }
+    th: { padding: '12px', textAlign: 'left', backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6', fontWeight: '600' },
+    td: { padding: '12px', borderBottom: '1px solid #dee2e6' },
+    greenRow: { backgroundColor: '#e6ffed' },
+    redRow: { backgroundColor: '#fff1f0' },
+    yellowRow: { backgroundColor: '#fffbe6' },
 };
 
-const styleSheet = document.createElement("style");
-styleSheet.innerText = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
-document.head.appendChild(styleSheet);
-
-export default StockBalance;
+export default ProductionBalance;

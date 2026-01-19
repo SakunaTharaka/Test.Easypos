@@ -1,4 +1,3 @@
-/* global qz */
 import React, { useEffect, useState, useRef } from "react";
 import { auth, db } from "../../firebase"; 
 import {
@@ -9,9 +8,7 @@ import {
   query,
   where,
   serverTimestamp,
-  addDoc,
   orderBy,
-  updateDoc,
   runTransaction 
 } from "firebase/firestore";
 import Select from "react-select";
@@ -62,6 +59,11 @@ const Orders = ({ internalUser }) => {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [tempSelectedItem, setTempSelectedItem] = useState(null);
   
+  // ✅ NEW: Shift State
+  const [shiftProductionEnabled, setShiftProductionEnabled] = useState(false);
+  const [availableShifts, setAvailableShifts] = useState([]);
+  const [selectedShift, setSelectedShift] = useState("");
+  
   const itemInputRef = useRef(null);
   const qtyInputRef = useRef(null);
 
@@ -92,12 +94,29 @@ const Orders = ({ internalUser }) => {
                 setSelectedCategory(defaultCat);
             }
         }
+
+        // ✅ NEW: Load Shift Settings
+        if (data.useShiftProduction) {
+            setShiftProductionEnabled(true);
+            setAvailableShifts(data.productionShifts || []);
+            
+            // Try to load saved shift from localStorage
+            const savedShift = localStorage.getItem('savedSelectedShift');
+            if (savedShift && data.productionShifts?.includes(savedShift)) {
+                setSelectedShift(savedShift);
+            }
+        }
       }
     };
     initialize();
     fetchSavedOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
+
+  // ✅ NEW: Save Shift to LocalStorage when changed
+  useEffect(() => { 
+      if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); 
+  }, [selectedShift]);
 
   const fetchSavedOrders = async () => {
       setLoadingOrders(true);
@@ -216,6 +235,9 @@ const Orders = ({ internalUser }) => {
     if (!customerPhone.trim()) return alert("Phone Number is mandatory.");
     if (!deliveryDate) return alert("Delivery Date is mandatory.");
 
+    // ✅ NEW: Validation for Shift
+    if (shiftProductionEnabled && !selectedShift) return alert("Please select a Shift.");
+
     setPendingAction({ type: 'SAVE' });
     setConfirmPaymentMethod('Cash');
     setShowPaymentConfirm(true);
@@ -310,7 +332,9 @@ const Orders = ({ internalUser }) => {
                 type: "ORDER",
                 remarks: `[ADVANCE] Order Total Value: ${grandTotal.toFixed(2)}. ${remarks}`,
                 relatedOrderId: orderRef.id,
-                paymentMethod: paymentMethod 
+                paymentMethod: paymentMethod,
+                // ✅ NEW: Save Shift
+                shift: selectedShift || ""
             };
 
             const orderData = {
@@ -326,7 +350,9 @@ const Orders = ({ internalUser }) => {
                 createdAt: serverTimestamp(),
                 linkedInvoiceId: invRef.id,
                 deliveryDate,
-                remarks
+                remarks,
+                // ✅ NEW: Save Shift
+                shift: selectedShift || ""
             };
 
             transaction.set(invRef, invoiceData);
@@ -577,6 +603,18 @@ const Orders = ({ internalUser }) => {
                 <h2 style={styles.sectionTitle}>New Order</h2>
                 <div style={styles.invoiceBadge}>{invoiceNumber}</div>
             </div>
+            
+            {/* ✅ NEW: Shift Selector UI */}
+            {shiftProductionEnabled && (
+                <div style={{ width: 150, marginRight: 15 }}>
+                    <label style={styles.label}>Shift *</label>
+                    <select value={selectedShift} onChange={e => setSelectedShift(e.target.value)} style={styles.inputSelect}>
+                        <option value="">Select Shift</option>
+                        {availableShifts.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </div>
+            )}
+
             <div style={{width: 300}}>
                  <label style={styles.label}>Price Category *</label>
                  <Select options={priceCategories} value={selectedCategory} onChange={setSelectedCategory} placeholder="Select Category..." styles={customSelectStyles} />
@@ -680,6 +718,9 @@ const Orders = ({ internalUser }) => {
                           <span style={order.status==='Pending' ? styles.statusPending : styles.statusCompleted}>{order.status}</span>
                       </div>
                       <div style={styles.orderMeta}>
+                          {/* ✅ NEW: Show Shift in History if exists */}
+                          {order.shift && <div style={styles.metaRow}><span>Shift:</span> <strong>{order.shift}</strong></div>}
+                          
                           <div style={styles.metaRow}><span>Total:</span> <strong>{order.totalAmount?.toFixed(2)}</strong></div>
                           {order.deliveryCharge > 0 && <div style={styles.metaRow}><span>Delivery:</span> {order.deliveryCharge?.toFixed(2)}</div>}
                           <div style={styles.metaRow}><span>Advance:</span> {order.advanceAmount?.toFixed(2)}</div>
@@ -736,6 +777,7 @@ const Orders = ({ internalUser }) => {
                         <div style={styles.detailItem}><label>Status:</label> <span style={{fontWeight: 'bold', color: selectedOrder.status === 'Pending' ? '#f59e0b' : '#10b981'}}>{selectedOrder.status}</span></div>
                         <div style={styles.detailItem}><label>Date:</label> <span>{formatDate(selectedOrder.createdAt)}</span></div>
                         <div style={styles.detailItem}><label>Delivery:</label> <span>{formatDate(selectedOrder.deliveryDate)}</span></div>
+                        {selectedOrder.shift && <div style={styles.detailItem}><label>Shift:</label> <span>{selectedOrder.shift}</span></div>}
                     </div>
 
                     <div style={styles.notesBox}>
@@ -802,6 +844,8 @@ const styles = {
   inputGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
   label: { fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase' },
   input: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', transition: 'border 0.2s', width: '100%', boxSizing: 'border-box' },
+  // ✅ NEW: Styling for select dropdown similar to input
+  inputSelect: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', height: '38px' },
   inputBig: { padding: '10px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '16px', fontWeight: '600', width: '100%', boxSizing: 'border-box' },
   divider: { margin: '24px 0', borderTop: '1px solid #e5e7eb' },
   itemEntryRow: { display: 'flex', gap: '15px', alignItems: 'flex-start' },
