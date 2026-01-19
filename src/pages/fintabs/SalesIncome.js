@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { db, auth } from "../../firebase";
 import {
   collection,
@@ -24,14 +24,13 @@ const SalesIncome = () => {
     return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // Returns YYYY-MM-DD
   };
 
-  const fetchData = async (date) => {
+  const fetchData = useCallback(async (date) => {
     const uid = auth.currentUser?.uid;
     if (!uid || !date) return;
 
     setLoading(true);
     try {
       // 1. Fetch Totals from Daily Stats (The source of truth)
-      // Note: We use the helper to ensure the ID matches exactly how it was saved
       const dailyDateString = getSriLankaDateString(date);
       const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
       const dailyStatsSnap = await getDoc(dailyStatsRef);
@@ -76,29 +75,97 @@ const SalesIncome = () => {
       console.error("Error fetching sales income:", error);
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     fetchData(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, fetchData]);
 
 
   return (
     <>
       <style>{`
         @media print {
-          .non-printable { display: none !important; }
-          .printable-area { position: absolute; left: 0; top: 0; width: 100%; }
-          body { background-color: #fff; }
-          .report-header { text-align: center; margin-bottom: 20px; display: block !important; }
-          .table-container { box-shadow: none !important; border: 1px solid #ccc; }
-          .totals-section { border-top: 2px solid #333; padding-top: 15px; }
+          @page {
+            size: A4 portrait;
+            margin: 5mm; /* Minimized margin to fit content */
+          }
+          
+          body * {
+            visibility: hidden;
+          }
+          
+          /* Force printable area to take over the entire page */
+          .printable-area, .printable-area * {
+            visibility: visible;
+          }
+          
+          .printable-area {
+            position: fixed; /* Fixed ensures it ignores parent flow/margins */
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background: white;
+            margin: 0;
+            padding: 10mm !important; /* Safe padding for content */
+            box-sizing: border-box;
+            z-index: 9999;
+            overflow: visible;
+          }
+
+          /* Override inline styles that might cause issues */
+          .printable-area div[style] {
+            box-shadow: none !important;
+            border: none !important;
+          }
+
+          .non-printable {
+            display: none !important;
+          }
+
+          .report-header {
+            text-align: center;
+            margin-bottom: 20px;
+            display: block !important;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+          }
+
+          .table-container {
+            border: 1px solid #ccc;
+            width: 100%;
+          }
+
+          table {
+            width: 100%;
+            table-layout: fixed; /* Ensures columns respect width */
+            border-collapse: collapse;
+            font-size: 10pt; /* Optimized reading size */
+          }
+
+          th, td {
+            padding: 6px;
+            border: 1px solid #eee;
+            word-wrap: break-word;
+          }
+          
+          th {
+            background-color: #f0f0f0 !important;
+            -webkit-print-color-adjust: exact;
+          }
+
+          .totals-section {
+            border: 1px solid #000 !important;
+            padding: 15px !important;
+            margin-bottom: 20px;
+          }
         }
       `}</style>
       <div className="printable-area" style={styles.container}>
         <div className="report-header" style={{ display: 'none' }}>
-            <h2>Sales Income Report</h2>
-            <p>Date: {new Date(selectedDate).toLocaleDateString()}</p>
+            <h2 style={{margin: '0 0 5px 0'}}>Sales Income Report</h2>
+            <p style={{margin: 0, fontSize: '14px', color: '#555'}}>Date: {new Date(selectedDate).toLocaleDateString()}</p>
         </div>
         <div className="non-printable" style={styles.headerContainer}>
           <h2 style={styles.header}>Sales Income</h2>
@@ -116,7 +183,7 @@ const SalesIncome = () => {
           </button>
         </div>
 
-        {/* Totals Section First for better visibility */}
+        {/* Totals Section */}
         <div style={styles.totalsSection} className="totals-section">
             <div style={styles.totalRow}>
                 <span>Cash Payment Total:</span>
@@ -142,12 +209,12 @@ const SalesIncome = () => {
             {loading ? <p style={{textAlign: 'center', padding: '20px'}}>Loading Data...</p> : (
                 <table style={styles.table}>
                     <thead><tr>
-                        <th style={styles.th}>Inv # / Ref #</th>
-                        <th style={styles.th}>Total Value</th>
-                        <th style={styles.th}>Received</th>
-                        <th style={styles.th}>Payment Method</th>
-                        <th style={styles.th}>Issued By</th>
-                        <th style={styles.th}>Time</th>
+                        <th style={styles.th} width="20%">Inv #</th>
+                        <th style={styles.th} width="15%">Total</th>
+                        <th style={styles.th} width="15%">Received</th>
+                        <th style={styles.th} width="15%">Method</th>
+                        <th style={styles.th} width="20%">User</th>
+                        <th style={styles.th} width="15%">Time</th>
                     </tr></thead>
                     <tbody>
                         {invoices.length > 0 ? invoices.map(inv => (
@@ -156,7 +223,7 @@ const SalesIncome = () => {
                                 <td style={styles.td}>Rs. {inv.total?.toFixed(2)}</td>
                                 <td style={styles.td}>Rs. {inv.received?.toFixed(2)}</td>
                                 <td style={styles.td}>{inv.paymentMethod || 'N/A'}</td>
-                                <td style={styles.td}>{inv.issuedBy}</td>
+                                <td style={styles.td}>{inv.issuedBy || 'Admin'}</td>
                                 <td style={styles.td}>{inv.createdAt?.toDate ? inv.createdAt.toDate().toLocaleTimeString() : 'N/A'}</td>
                             </tr>
                         )) : <tr><td colSpan="6" style={styles.noData}>No transactions found for this date.</td></tr>}
