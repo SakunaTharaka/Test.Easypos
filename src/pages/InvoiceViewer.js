@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom'; 
 import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -43,7 +43,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   }
 
   const isSinhala = companyInfo?.useSinhalaInvoice || false;
-  const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; // ✅ Check Double Line Setting
+  const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; 
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
 
@@ -75,7 +75,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       return new Date(dateVal).toLocaleDateString();
   };
 
-  // ✅ Helper to count columns for colspan
   const getColumnCount = () => {
       let count = 2; // Qty + Total
       if (invoice.isDiscountable) count += 1; // Original Price
@@ -141,7 +140,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           <table style={styles.itemsTable}>
             <thead>
               <tr>
-                {/* ✅ DYNAMIC HEADER LOGIC */}
                 <th style={{ ...styles.th, ...styles.thItem }}>
                     {isDoubleLine 
                         ? (isSinhala ? "අයිතමය/ ප්‍රමාණය" : "Item/ Qty") 
@@ -149,7 +147,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                     }
                 </th>
 
-                {/* If NOT Double Line, Show Qty Column Header explicitly */}
                 {!isDoubleLine && <th style={styles.th}>Qty</th>}
                 
                 {invoice.isDiscountable && (
@@ -169,10 +166,8 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <tbody>
               {invoice.items && invoice.items.map((item, index) => (
                 <React.Fragment key={index}>
-                    {/* ✅ DOUBLE LINE MODE RENDER */}
                     {isDoubleLine ? (
                         <>
-                            {/* Line 1: Item Name (Full Width) */}
                             <tr>
                                 <td colSpan={getColumnCount()} style={{ ...styles.td, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
                                     {item.itemName}
@@ -183,10 +178,8 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                     )}
                                 </td>
                             </tr>
-                            {/* Line 2: Qty | Prices | Total */}
                             <tr>
                                 <td style={{ ...styles.td, paddingTop: '0px' }}>
-                                   {/* Qty is shown in the first column under Item Name */}
                                    <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
                                 </td>
 
@@ -199,7 +192,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                             </tr>
                         </>
                     ) : (
-                        /* ✅ STANDARD SINGLE LINE MODE */
                         <tr>
                             <td style={styles.td}>
                                 {item.itemName}
@@ -323,6 +315,8 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
 const InvoiceViewer = () => {
   const { invoiceId } = useParams();
+  const navigate = useNavigate(); 
+  
   const [invoice, setInvoice] = useState(null);
   const [serviceJob, setServiceJob] = useState(null);
   const [orderDetails, setOrderDetails] = useState(null); 
@@ -332,6 +326,34 @@ const InvoiceViewer = () => {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [printFormat, setPrintFormat] = useState('80mm');
+
+  // Sidebar Logic
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [hoveredTab, setHoveredTab] = useState(null);
+  
+  // ✅ 1. Get Internal User Logic
+  const getCurrentInternal = () => {
+    try {
+      const stored = localStorage.getItem("internalLoggedInUser");
+      return stored ? JSON.parse(stored) : null;
+    } catch (e) { return null; }
+  };
+  const internalLoggedInUser = getCurrentInternal();
+
+  // ✅ 2. Tabs Configuration
+  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
+  const [enableServiceOrders, setEnableServiceOrders] = useState(false);
+
+  // ✅ 3. Filter Visible Tabs
+  const visibleTabs = allTabs.filter(tab => {
+    if (tab === "Service and Orders" && !enableServiceOrders) return false;
+    
+    if (internalLoggedInUser?.isAdmin) return true;
+
+    // Restricted tabs for non-admins
+    const restrictedTabs = ["Finance", "Admin", "Settings"];
+    return !restrictedTabs.includes(tab);
+  });
 
   const handlePrint = (format) => {
     setPrintFormat(format);
@@ -369,6 +391,9 @@ const InvoiceViewer = () => {
         if (settingsSnap.exists()) {
           const settingsData = settingsSnap.data();
           setCompanyInfo(settingsData);
+          // ✅ Set Feature Toggle from Settings
+          setEnableServiceOrders(settingsData.enableServiceOrders === true);
+
           if (!settingsData.companyLogo) { setIsImageLoaded(true); }
         } else {
             setIsImageLoaded(true);
@@ -414,7 +439,6 @@ const InvoiceViewer = () => {
         .format-80mm { width: 80mm; transform: scale(1.1); }
         .format-a5 { width: 148mm; transform: scale(1.0); }
         
-        /* ✅ SCREEN-ONLY CSS TO FIX PREVIEW OVERFLOW */
         @media screen {
             .format-80mm .print-area table th, 
             .format-80mm .print-area table td {
@@ -440,6 +464,41 @@ const InvoiceViewer = () => {
         }
       `}</style>
 
+      {/* ✅ SIDEBAR ADDED HERE (No Print) */}
+      <div className="no-print">
+          <div
+            style={styles.sidebarTriggerArea}
+            onMouseEnter={() => setIsSidebarOpen(true)}
+          />
+          <div
+            style={{
+              ...styles.sidebar,
+              ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed),
+            }}
+            onMouseLeave={() => {
+              setIsSidebarOpen(false);
+              setHoveredTab(null);
+            }}
+          >
+            <div style={styles.sidebarTabs}>
+              {visibleTabs.map((tab) => (
+                <div
+                  key={tab}
+                  style={{
+                    ...styles.sidebarTab,
+                    ...(hoveredTab === tab ? styles.sidebarTabHover : {}),
+                  }}
+                  onClick={() => navigate('/dashboard')}
+                  onMouseEnter={() => setHoveredTab(tab)}
+                  onMouseLeave={() => setHoveredTab(null)}
+                >
+                  {tab}
+                </div>
+              ))}
+            </div>
+          </div>
+      </div>
+
       <div className="no-print">
         <InvoiceHeader 
             companyInfo={companyInfo} 
@@ -464,89 +523,62 @@ const InvoiceViewer = () => {
   );
 };
 
-const themeColors = {
-  primary: '#00A1FF',
-  secondary: '#F089D7',
-};
+// ✅ UPDATED Theme Colors & Styles for Sidebar
+const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa' };
 
 const styles = {
-  // TopBar Container
+  // TopBar
   topBar: { 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'space-between', 
-      height: '80px', 
-      padding: '0 32px', 
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '80px', padding: '0 32px', 
       background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)', 
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', 
-      position: 'fixed', 
-      top: 0, 
-      left: 0, 
-      right: 0, 
-      zIndex: 1000, 
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000, 
       backdropFilter: 'blur(10px)', 
   },
-  
   headerLeft: { display: 'flex', alignItems: 'center', flex: 1, },
   headerRight: { display: 'flex', alignItems: 'center', gap: '16px', flex: 1, justifyContent: 'flex-end', },
   
   logoPlaceholder: { 
-    width: "52px", 
-    height: "52px", 
-    borderRadius: "12px", 
+    width: "52px", height: "52px", borderRadius: "12px", 
     background: `linear-gradient(135deg, ${themeColors.primary}, ${themeColors.secondary})`, 
-    display: "flex", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    color: "white", 
-    fontSize: "22px", 
-    fontWeight: "bold", 
-    marginRight: "16px",
-    flexShrink: 0, 
+    display: "flex", alignItems: "center", justifyContent: "center", color: "white", 
+    fontSize: "22px", fontWeight: "bold", marginRight: "16px", flexShrink: 0, 
     boxShadow: '0 4px 12px rgba(0, 161, 255, 0.3)',
   },
-  
   topInfo: { display: "flex", flexDirection: "column", alignItems: "flex-start" },
-  companyName: { 
-    margin: "0", 
-    fontSize: "22px", 
-    fontWeight: "700", 
-    color: '#fff', 
-    letterSpacing: '-0.5px', 
-  },
-  wayneSystems: { 
-    fontSize: '12px', 
-    color: 'rgba(255, 255, 255, 0.7)', 
-    margin: '4px 0 0 0', 
-    fontStyle: 'italic', 
-    fontWeight: '400', 
-  },
+  companyName: { margin: "0", fontSize: "22px", fontWeight: "700", color: '#fff', letterSpacing: '-0.5px', },
+  wayneSystems: { fontSize: '12px', color: 'rgba(255, 255, 255, 0.7)', margin: '4px 0 0 0', fontStyle: 'italic', fontWeight: '400', },
   
   printButtonsContainer: { display: 'flex', gap: '10px' },
   headerPrintBtn: { 
-    padding: "10px 18px", 
-    border: "1px solid rgba(255, 255, 255, 0.3)",
-    borderRadius: "8px", 
-    background: "rgba(255, 255, 255, 0.2)",
-    color: "#fff", 
-    cursor: "pointer", 
-    fontWeight: "600", 
-    fontSize: "14px", 
-    fontFamily: "'Inter', sans-serif",
-    backdropFilter: 'blur(10px)',
-    transition: 'all 0.3s ease',
+    padding: "10px 18px", border: "1px solid rgba(255, 255, 255, 0.3)", borderRadius: "8px", 
+    background: "rgba(255, 255, 255, 0.2)", color: "#fff", cursor: "pointer", fontWeight: "600", 
+    fontSize: "14px", fontFamily: "'Inter', sans-serif", backdropFilter: 'blur(10px)', transition: 'all 0.3s ease',
   },
   headerPrintBtnDisabled: { 
-    padding: "10px 18px", 
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    borderRadius: "8px", 
-    background: "rgba(255, 255, 255, 0.1)",
-    color: "rgba(255, 255, 255, 0.5)",
-    cursor: "not-allowed", 
-    fontWeight: "600", 
-    fontSize: "14px", 
-    fontFamily: "'Inter', sans-serif" 
+    padding: "10px 18px", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "8px", 
+    background: "rgba(255, 255, 255, 0.1)", color: "rgba(255, 255, 255, 0.5)", cursor: "not-allowed", 
+    fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" 
   },
+
+  // ✅ SIDEBAR STYLES (MATCHING DASHBOARD)
+  sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 3000, },
+  sidebar: { 
+      position: 'fixed', top: 0, left: 0, bottom: 0, width: '260px', 
+      background: `linear-gradient(180deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)`, 
+      backdropFilter: 'blur(10px)', borderRight: '1px solid rgba(255, 255, 255, 0.15)', color: '#fff', 
+      display: 'flex', flexDirection: 'column', zIndex: 2999, 
+      transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
+      boxShadow: '4px 0 20px rgba(0, 0, 0, 0.15)', 
+  },
+  sidebarOpen: { transform: 'translateX(0)', },
+  sidebarClosed: { transform: 'translateX(-100%)', },
+  sidebarTabs: { display: 'flex', flexDirection: 'column', padding: '16px 0', paddingTop: '24px', },
+  sidebarTab: { 
+      padding: '16px 24px', cursor: 'pointer', fontSize: '15px', color: 'rgba(255, 255, 255, 0.7)', 
+      fontWeight: '500', borderLeft: '4px solid transparent', 
+      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', whiteSpace: 'nowrap', 
+  },
+  sidebarTabHover: { color: '#fff', background: 'rgba(255, 255, 255, 0.15)', },
 
   // --- Invoice Body Styles ---
   invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
