@@ -9,14 +9,16 @@ import {
   startAfter, 
   doc, 
   updateDoc,
-  serverTimestamp 
+  serverTimestamp,
+  where 
 } from "firebase/firestore";
 import { 
   AiOutlineSearch, 
   AiOutlineSave, 
   AiOutlineLoading,
   AiOutlineLeft,
-  AiOutlineRight
+  AiOutlineRight,
+  AiFillLock
 } from "react-icons/ai";
 import { BsToggleOn, BsToggleOff } from "react-icons/bs";
 
@@ -56,13 +58,38 @@ const Costing = ({ internalUser }) => {
 
     try {
       const itemsRef = collection(db, uid, "items", "item_list");
-      let q = query(itemsRef, orderBy("name", "asc"), limit(ITEMS_PER_PAGE));
+      
+      // ✅ Define allowed types (Excluding "storesItem")
+      const allowedTypes = ["buySell", "ourProduct"];
 
+      let q;
+
+      // Construct queries with the type filter
       if (direction === 'next' && lastVisible) {
-        q = query(itemsRef, orderBy("name", "asc"), startAfter(lastVisible), limit(ITEMS_PER_PAGE));
+        q = query(
+            itemsRef, 
+            where("type", "in", allowedTypes), // ✅ Filter
+            orderBy("name", "asc"), 
+            startAfter(lastVisible), 
+            limit(ITEMS_PER_PAGE)
+        );
       } else if (direction === 'prev' && page > 1) {
         const prevPageStart = pageHistory[page - 2];
-        q = query(itemsRef, orderBy("name", "asc"), startAfter(prevPageStart), limit(ITEMS_PER_PAGE));
+        q = query(
+            itemsRef, 
+            where("type", "in", allowedTypes), // ✅ Filter
+            orderBy("name", "asc"), 
+            startAfter(prevPageStart), 
+            limit(ITEMS_PER_PAGE)
+        );
+      } else {
+        // Initial Load
+        q = query(
+            itemsRef, 
+            where("type", "in", allowedTypes), // ✅ Filter
+            orderBy("name", "asc"), 
+            limit(ITEMS_PER_PAGE)
+        );
       }
 
       const snapshot = await getDocs(q);
@@ -78,6 +105,9 @@ const Costing = ({ internalUser }) => {
 
     } catch (error) {
       console.error("Error fetching items:", error);
+      if (error.code === 'failed-precondition') {
+          alert("System Notice: A new database index is required for this filter. Please check the browser console to create it.");
+      }
     } finally {
       setLoading(false);
     }
@@ -85,6 +115,7 @@ const Costing = ({ internalUser }) => {
 
   useEffect(() => {
     fetchItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleNextPage = () => !isLastPage && (setPage(p => p + 1), fetchItems('next'));
@@ -101,10 +132,6 @@ const Costing = ({ internalUser }) => {
     try {
       if (item.isManualCosting) {
         // --- Switching to AUTOMATIC ---
-        // Requirement: "Show buffering and calculate its avg cost"
-        // Since we cannot easily query full history client-side for 10k items,
-        // we enable the system to take over from the *current* valid state.
-        
         // Simulate Calculation Delay (Buffering)
         await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -163,6 +190,19 @@ const Costing = ({ internalUser }) => {
     i.name.toLowerCase().includes(search.toLowerCase()) || 
     (i.category || "").toLowerCase().includes(search.toLowerCase())
   );
+
+  // ✅ SECURITY CHECK: Only Admins can view this page
+  if (!isAdmin) {
+    return (
+        <div style={{...styles.container, display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
+            <div style={{textAlign: 'center', color: '#64748b'}}>
+                <AiFillLock size={48} style={{marginBottom: '16px', color: '#ef4444'}} />
+                <h2 style={{margin: '0 0 8px 0', color: '#1e293b'}}>Access Denied</h2>
+                <p style={{margin: 0}}>You do not have permission to view or edit Costing.</p>
+            </div>
+        </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
