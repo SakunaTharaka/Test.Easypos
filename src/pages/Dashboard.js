@@ -1,6 +1,6 @@
 import React, { useEffect, useState, lazy, Suspense } from "react";
 import { auth, db } from "../firebase";
-import { doc, getDoc, updateDoc, collection, getDocs, setDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, setDoc } from "firebase/firestore";
 import { useNavigate, Navigate } from "react-router-dom";
 // Removed react-icons to prevent crash if library is missing
 // import { FaExclamationCircle } from 'react-icons/fa'; 
@@ -208,18 +208,31 @@ const Dashboard = () => {
         const users = internalUsersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         setInternalUsers(users);
 
-        // 3. Handle Session
-        const savedInternalUser = JSON.parse(localStorage.getItem("internalLoggedInUser"));
-        if (savedInternalUser) {
-            setInternalLoggedInUser(savedInternalUser);
-        } else {
-            if (users.length > 1) {
+        // 3. Handle Session (CORRECTED LOGIC)
+        // If users > 1: Check LocalStorage. If valid session exists, USE IT. If not, SHOW POPUP.
+        // If users == 1: Auto-login.
+        
+        const savedSessionJSON = localStorage.getItem("internalLoggedInUser");
+        const savedSession = savedSessionJSON ? JSON.parse(savedSessionJSON) : null;
+
+        if (users.length > 1) {
+            if (savedSession && users.some(u => u.username === savedSession.username)) {
+                // ✅ VALID SESSION FOUND: RESTORE IT (Fixes Refresh/New Tab issue)
+                setInternalLoggedInUser(savedSession);
+                setShowLoginPopup(false);
+            } else {
+                // ❌ NO SESSION: FORCE LOGIN
+                setInternalLoggedInUser(null);
                 setShowLoginPopup(true);
-            } else if (users.length === 1) {
-                // Auto-login if only one user (the admin)
-                setInternalLoggedInUser(users[0]);
-                localStorage.setItem("internalLoggedInUser", JSON.stringify(users[0]));
             }
+        } else if (users.length === 1) {
+            // Auto-login if only one user (the admin)
+            setInternalLoggedInUser(users[0]);
+            localStorage.setItem("internalLoggedInUser", JSON.stringify(users[0]));
+            setShowLoginPopup(false);
+        } else {
+            // Fallback
+            setShowLoginPopup(true);
         }
 
       } catch (error) {
@@ -563,7 +576,7 @@ const styles = {
     companyName: { margin: "0", fontSize: "22px", fontWeight: "700", color: '#fff', letterSpacing: '-0.5px', },
     wayneSystems: { fontSize: '12px', color: 'rgba(255, 255, 255, 0.7)', margin: '4px 0 0 0', fontStyle: 'italic', fontWeight: '400', },
     blinkingIndicator: { display: 'flex', alignItems: 'center', padding: '10px 20px', backgroundColor: 'rgba(239, 68, 68, 0.95)', color: 'white', borderRadius: '10px', fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', animation: 'blinker 1.5s linear infinite', letterSpacing: '1px', boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)', border: '1px solid rgba(255, 255, 255, 0.3)', },
-    logoutBtn: { padding: "12px 20px", border: "none", borderRadius: "10px", background: "rgba(255, 255, 255, 0.2)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontWeight: "600", fontSize: "14px", transition: 'all 0.3s ease', border: '1px solid rgba(255, 255, 255, 0.3)', backdropFilter: 'blur(10px)', },
+    logoutBtn: { padding: "12px 20px", borderRadius: "10px", background: "rgba(255, 255, 255, 0.2)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", fontWeight: "600", fontSize: "14px", transition: 'all 0.3s ease', border: '1px solid rgba(255, 255, 255, 0.3)', backdropFilter: 'blur(10px)', },
     logoutText: { fontSize: "14px" },
     logoutIcon: { fontSize: "16px", transition: 'transform 0.3s ease', },
     loadingContainer: { display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: "100vh", color: "#64748b", background: themeColors.light, },
