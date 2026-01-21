@@ -66,6 +66,14 @@ const Settings = () => {
   // ✅ NEW TOGGLE STATE
   const [enableServiceOrders, setEnableServiceOrders] = useState(false);
 
+  // ✅ NEW STATE FOR KOD (KITCHEN ORDERING DISPLAY)
+  const [enableKOD, setEnableKOD] = useState(false);
+
+  // ✅ NEW STATE FOR DINE-IN
+  const [dineInAvailable, setDineInAvailable] = useState(false);
+  const [serviceCharge, setServiceCharge] = useState("");
+  const [editServiceCharge, setEditServiceCharge] = useState(false);
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -107,8 +115,13 @@ const Settings = () => {
           setServicePriceCategory(data.serviceJobPriceCategory || "");
           setEnableServiceOrders(data.enableServiceOrders || false);
           
-          // ✅ Load new setting
+          // ✅ Load new settings
           setDoubleLineInvoiceItem(data.doubleLineInvoiceItem || false);
+          setEnableKOD(data.enableKOD || false);
+          
+          // ✅ Load Dine-In Settings
+          setDineInAvailable(data.dineInAvailable || false);
+          setServiceCharge(data.serviceCharge || "");
 
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
@@ -149,8 +162,11 @@ const Settings = () => {
             showOrderNo: false,
             serviceJobPriceCategory: "",
             enableServiceOrders: false,
-            // ✅ Default new setting
             doubleLineInvoiceItem: false,
+            enableKOD: false,
+            // ✅ Default Dine-in settings
+            dineInAvailable: false,
+            serviceCharge: "",
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -178,8 +194,10 @@ const Settings = () => {
           setShowOrderNo(defaultSettings.showOrderNo);
           setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
           setEnableServiceOrders(defaultSettings.enableServiceOrders);
-          // ✅ Set default state
           setDoubleLineInvoiceItem(defaultSettings.doubleLineInvoiceItem);
+          setEnableKOD(defaultSettings.enableKOD);
+          setDineInAvailable(defaultSettings.dineInAvailable);
+          setServiceCharge(defaultSettings.serviceCharge);
         }
 
         // --- FETCH CUSTOMERS ---
@@ -346,6 +364,25 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { enableServiceOrders: value });
   };
 
+  // ✅ HANDLER FOR KOD (KITCHEN ORDERING DISPLAY)
+  const handleEnableKODChange = async (value) => {
+    setEnableKOD(value);
+    await updateDoc(getSettingsDocRef(), { enableKOD: value });
+  };
+
+  // ✅ HANDLER FOR DINE-IN
+  const handleDineInChange = async (value) => {
+    setDineInAvailable(value);
+    await updateDoc(getSettingsDocRef(), { dineInAvailable: value });
+  };
+
+  // ✅ HANDLER FOR SAVING SERVICE CHARGE
+  const handleSaveServiceCharge = async () => {
+    await updateDoc(getSettingsDocRef(), { serviceCharge: serviceCharge });
+    setEditServiceCharge(false);
+    alert("Service charge updated!");
+  };
+
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -476,6 +513,60 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to split item details into two lines on the printed invoice.</p>
         </div>
 
+      </div>
+
+      {/* ✅ RESTAURANT MODE SECTION */}
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Resturent Mode</h3>
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Enable Kitchen Ordering Display (KOD) feature</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleEnableKODChange(true)} style={enableKOD ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleEnableKODChange(false)} style={!enableKOD ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to activate the Kitchen Ordering Display system feature.</p>
+        </div>
+
+        {/* ✅ DINE-IN TOGGLE */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Dine-in available</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleDineInChange(true)} style={dineInAvailable ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleDineInChange(false)} style={!dineInAvailable ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to allow dine-in orders.</p>
+        </div>
+
+        {/* ✅ CONDITIONAL SERVICE CHARGE INPUT */}
+        {dineInAvailable && (
+            <div style={styles.formGroup}>
+                <label style={styles.label}>Service Charge (Percentage)</label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {editServiceCharge ? (
+                        <>
+                            <input
+                                type="number"
+                                value={serviceCharge}
+                                onChange={(e) => setServiceCharge(e.target.value)}
+                                style={{ ...styles.input, width: '150px' }}
+                                placeholder="0"
+                            />
+                            <button onClick={handleSaveServiceCharge} style={styles.saveButton}>Save</button>
+                        </>
+                    ) : (
+                        <>
+                             <div style={{ ...styles.inputDisabled, width: '150px', color: '#333' }}>
+                                {serviceCharge || "0"}%
+                             </div>
+                             <button onClick={() => setEditServiceCharge(true)} style={styles.editButton}>
+                                <AiOutlineEdit /> Edit
+                             </button>
+                        </>
+                    )}
+                </div>
+                <p style={styles.helpText}>Percentage added to dine-in orders.</p>
+            </div>
+        )}
       </div>
 
       {/* --- NEW SERVICE AND ORDERS SECTION --- */}

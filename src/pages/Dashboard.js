@@ -2,9 +2,7 @@ import React, { useEffect, useState, lazy, Suspense } from "react";
 import { auth, db } from "../firebase";
 import { doc, getDoc, collection, getDocs, setDoc } from "firebase/firestore";
 import { useNavigate, Navigate } from "react-router-dom";
-// Removed react-icons to prevent crash if library is missing
-// import { FaExclamationCircle } from 'react-icons/fa'; 
-
+// Removed unused imports to prevent warnings
 import { CashBookProvider } from "../context/CashBookContext";
 
 // IMPORTED YOUR LOGO
@@ -30,22 +28,24 @@ const DaySaleBal = lazy(() => import("./fintabs/Reconcile"));
 const Expenses = lazy(() => import("./fintabs/Expenses"));
 const Summary = lazy(() => import("./fintabs/Summary"));
 const CashBook = lazy(() => import("./fintabs/CashBook"));
-// Unlinked CreditCust page
 const DashboardView = lazy(() => import("./DashboardView"));
 const Invoice = lazy(() => import("./Invoice"));
 const SalesReport = lazy(() => import("./SalesReport"));
 const Help = lazy(() => import("./Help"));
 const StockOutBal = lazy(() => import("./tabs/StockOutBal"));
 
-// --- NEW ACCOUNTS PAGE ---
+// --- ACCOUNTS PAGE ---
 const Accounts = lazy(() => import("./fintabs/account"));
 
-// --- ADDED NEW Service & Order Sub-tab IMPORTS ---
+// --- SERVICE & ORDER TABS ---
 const Services = lazy(() => import("./tabs/Services"));
 const Orders = lazy(() => import("./tabs/Orders"));
 const Timeline = lazy(() => import("./tabs/Timeline"));
 
-// --- SECURITY UTILITY: HASH FUNCTION ---
+// --- KOD PAGE ---
+const KitchenDisplay = lazy(() => import("./tabs/KitchenDisplay"));
+
+// --- SECURITY UTILITY ---
 async function hashPassword(string) {
   const utf8 = new TextEncoder().encode(string);
   const hashBuffer = await crypto.subtle.digest('SHA-256', utf8);
@@ -53,13 +53,11 @@ async function hashPassword(string) {
   return hashArray.map((bytes) => bytes.toString(16).padStart(2, '0')).join('');
 }
 
-
 const Dashboard = () => {
   const navigate = useNavigate();
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showPopup, setShowPopup] = useState(false);
-  // 1. CHANGED DEFAULT TO DASHBOARD
   const [activeTab, setActiveTab] = useState("Dashboard"); 
   const [activeInventoryTab, setActiveInventoryTab] = useState("Purchasing Order");
   const [activeItemsCustomersTab, setActiveItemsCustomersTab] = useState("Items");
@@ -75,15 +73,16 @@ const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
 
-  // ✅ NEW STATE FOR FEATURE TOGGLE
+  // Feature Toggles
   const [enableServiceOrders, setEnableServiceOrders] = useState(false);
+  const [enableKOD, setEnableKOD] = useState(false);
 
   const [maintenanceStatus, setMaintenanceStatus] = useState({
     loading: true,
     isActive: false,
   });
 
-  // useEffects
+  // --- 1. Maintenance Check ---
   useEffect(() => {
     const fetchMaintenanceStatus = async () => {
       const maintRef = doc(db, 'global_settings', 'maintenance');
@@ -102,6 +101,7 @@ const Dashboard = () => {
     fetchMaintenanceStatus();
   }, []);
 
+  // --- 2. Auth & User Data ---
   useEffect(() => {
     if (maintenanceStatus.loading || maintenanceStatus.isActive) {
       setLoading(false);
@@ -114,18 +114,13 @@ const Dashboard = () => {
         return;
       }
 
-      // ---------------------------------------------------------
-      // 🔒 NEW SECURITY CHECK: BLOCK UNVERIFIED USERS
-      // ---------------------------------------------------------
       if (!currentUser.emailVerified) {
         navigate("/verify-email");
         return; 
       }
-      // ---------------------------------------------------------
 
       const uid = currentUser.uid;
       
-      // Announcement
       try {
         const announcementRef = doc(db, 'global_settings', 'announcement');
         const annocementSnap = await getDoc(announcementRef);
@@ -134,7 +129,6 @@ const Dashboard = () => {
         setIsAnnouncementActive(false);
       }
 
-      // User Info & Security Checks
       try {
         const userInfoRefOnboarding = doc(db, "Userinfo", uid);
         const userDocSnap = await getDoc(userInfoRefOnboarding);
@@ -145,28 +139,22 @@ const Dashboard = () => {
         }
 
         const userData = userDocSnap.data();
-
-        // ---------------------------------------------------------
-        // 🔒 SECURITY CHECK: TRIAL EXPIRATION
-        // ---------------------------------------------------------
         const trialEndDate = userData.trialEndDate?.toDate();
         if (trialEndDate) {
             const today = new Date();
-            today.setHours(0, 0, 0, 0); // Normalize to start of day
-            
-            // If expired, BLOCK ACCESS and redirect to billing
+            today.setHours(0, 0, 0, 0); 
             if (today > trialEndDate) {
                 navigate("/billing");
-                return; // Stop executing dashboard logic
+                return; 
             }
         }
-        // ---------------------------------------------------------
 
         if (!userData.status) {
             navigate("/user-details");
             return;
         }
         
+        // Load Settings
         const settingsRef = doc(db, uid, "settings");
         const settingsSnap = await getDoc(settingsRef);
         if (settingsSnap.exists()) {
@@ -176,62 +164,50 @@ const Dashboard = () => {
             setShowProductionTabs(inventoryType === "Production Selling only" || inventoryType === "We doing both");
             setMaintainCreditCustomers(settingsData.maintainCreditCustomers === true);
             
-            // ✅ LOAD THE NEW SETTING
+            // ✅ Load Feature Toggles
             setEnableServiceOrders(settingsData.enableServiceOrders === true);
+            setEnableKOD(settingsData.enableKOD === true); 
 
         } else {
             setUserInfo({ companyName: "My Business" });
         }
 
-        // --- INTERNAL USER SETUP (UPDATED FOR HASH & DEFAULT PASSWORD) ---
+        // Internal User Setup
         const internalUsersColRef = collection(db, uid, "admin", "admin_details");
-        
-        // 1. Check specifically if the "admin" user exists
         const adminUserRef = doc(internalUsersColRef, "admin");
         const adminUserSnap = await getDoc(adminUserRef);
 
         if (!adminUserSnap.exists()) {
-            // ✅ CREATE DEFAULT ADMIN IF MISSING
-            // Using "123456" as default, HASHED
             const defaultPassHash = await hashPassword("123456");
             const masterUser = { 
                 username: "admin", 
-                password: defaultPassHash, // Save the HASH, not plain text
+                password: defaultPassHash, 
                 isAdmin: true, 
                 isMaster: true 
             };
             await setDoc(adminUserRef, masterUser);
         }
 
-        // 2. Now fetch all users to populate state
         const internalUsersSnap = await getDocs(internalUsersColRef);
         const users = internalUsersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         setInternalUsers(users);
-
-        // 3. Handle Session (CORRECTED LOGIC)
-        // If users > 1: Check LocalStorage. If valid session exists, USE IT. If not, SHOW POPUP.
-        // If users == 1: Auto-login.
         
         const savedSessionJSON = localStorage.getItem("internalLoggedInUser");
         const savedSession = savedSessionJSON ? JSON.parse(savedSessionJSON) : null;
 
         if (users.length > 1) {
             if (savedSession && users.some(u => u.username === savedSession.username)) {
-                // ✅ VALID SESSION FOUND: RESTORE IT (Fixes Refresh/New Tab issue)
                 setInternalLoggedInUser(savedSession);
                 setShowLoginPopup(false);
             } else {
-                // ❌ NO SESSION: FORCE LOGIN
                 setInternalLoggedInUser(null);
                 setShowLoginPopup(true);
             }
         } else if (users.length === 1) {
-            // Auto-login if only one user (the admin)
             setInternalLoggedInUser(users[0]);
             localStorage.setItem("internalLoggedInUser", JSON.stringify(users[0]));
             setShowLoginPopup(false);
         } else {
-            // Fallback
             setShowLoginPopup(true);
         }
 
@@ -255,12 +231,9 @@ const Dashboard = () => {
     };
   }, [navigate, maintenanceStatus]);
 
-  // Helper Functions
+  // --- Handlers ---
   const handleInternalLogin = async () => {
-    // --- SECURE LOGIN: HASH INPUT ---
     const hashedPassword = await hashPassword(loginInput.password);
-
-    // Compare with Hashed Password
     const matchedUser = internalUsers.find((u) => u.username === loginInput.username && u.password === hashedPassword);
     
     if (!matchedUser) { alert("Invalid credentials"); return; }
@@ -276,7 +249,7 @@ const Dashboard = () => {
     if (internalUsers.length > 1) setShowLoginPopup(true);
   };
 
-  // Loading/Maintenance Screens
+  // --- Render Helpers ---
   if (maintenanceStatus.loading) {
     return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div></div>;
   }
@@ -285,27 +258,21 @@ const Dashboard = () => {
   }
   if (loading) return ( <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div><p style={styles.loadingText}>Loading dashboard...</p></div> );
 
-  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
+  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "KOD", "Settings", "Help"];
   
-  // --- FIXED VISIBILITY LOGIC ---
   const visibleTabs = allTabs.filter(tab => {
-    // ✅ 1. CHECK FEATURE TOGGLE FIRST
-    if (tab === "Service and Orders" && !enableServiceOrders) {
-      return false; // Hide completely if setting is off
-    }
+    // 1. Feature Toggle: Services
+    if (tab === "Service and Orders" && !enableServiceOrders) return false; 
+    
+    // 2. Feature Toggle: KOD
+    if (tab === "KOD" && !enableKOD) return false;
 
-    // If user is Admin, they see everything (that is enabled)
     if (internalLoggedInUser?.isAdmin) return true;
 
-    // If user is NOT Admin, hide these specific tabs
-    // 2. REMOVED "Dashboard" FROM RESTRICTED LIST SO EVERYONE CAN SEE IT
     const restrictedTabs = ["Finance", "Admin", "Settings"];
-    
-    // Only return tabs that are NOT in the restricted list
     return !restrictedTabs.includes(tab);
   });
 
-  // Render sticky sub-tabs
   const renderSubTabs = () => {
     let subTabs = [];
     let activeSubTab = "";
@@ -313,21 +280,14 @@ const Dashboard = () => {
 
     if (activeTab === "Inventory") {
       subTabs = ["Purchasing Order", "Stock-In", "Stock-Out", "Stores Balance", "Buy&Sell Balance"];
-      if (showProductionTabs) {
-        subTabs.push("Add Production", "Production Balance");
-      }
+      if (showProductionTabs) subTabs.push("Add Production", "Production Balance");
       activeSubTab = activeInventoryTab;
       setActiveSubTab = setActiveInventoryTab;
     } else if (activeTab === "Finance") {
-      subTabs = ["Sales Income", "Stock Payments"];
-      // Removed "Credit Customer Cash" push logic here
-      
-      // Added "Accounts" to the list
-      subTabs.push("Reconcilation", "Expenses", "Summary", "Cash Book", "Accounts");
+      subTabs = ["Sales Income", "Stock Payments", "Reconcilation", "Expenses", "Summary", "Cash Book", "Accounts"];
       activeSubTab = activeFinanceTab;
       setActiveSubTab = setActiveFinanceTab;
     } else if (activeTab === "Items & Customers") {
-      // --- ADDED COSTING HERE ---
       subTabs = ["Items", "Customers", "Price Categories", "Quotations", "Costing"];
       activeSubTab = activeItemsCustomersTab;
       setActiveSubTab = setActiveItemsCustomersTab;
@@ -347,10 +307,7 @@ const Dashboard = () => {
           {subTabs.map(tab => (
             <div
               key={tab}
-              style={{
-                ...styles.inventorySubTab,
-                ...(activeSubTab === tab ? styles.activeInventorySubTab : {})
-              }}
+              style={{ ...styles.inventorySubTab, ...(activeSubTab === tab ? styles.activeInventorySubTab : {}) }}
               onClick={() => setActiveSubTab(tab)}
             >
               {tab}
@@ -361,23 +318,16 @@ const Dashboard = () => {
     );
   };
 
-  // Render tab content
   const renderTabContent = () => {
-    if (!auth.currentUser && !loading) { return <p style={styles.accessDenied}>Please log in to continue.</p>; }
+    if (!auth.currentUser && !loading) return <p style={styles.accessDenied}>Please log in to continue.</p>;
     
-    // Safety check for direct component access
-    // 3. REMOVED "Dashboard" FROM CHECK SO IT DOESN'T REDIRECT NON-ADMINS
     if ((activeTab === "Finance" || activeTab === "Admin" || activeTab === "Settings") && !internalLoggedInUser?.isAdmin) { 
-        // Fallback to Invoicing if they somehow land on a restricted tab
         if(activeTab !== "Invoicing") setActiveTab("Invoicing");
         return null;
     }
 
-    // ✅ Safety Check for Disabled Feature
-    if (activeTab === "Service and Orders" && !enableServiceOrders) {
-       setActiveTab("Dashboard");
-       return null;
-    }
+    if (activeTab === "Service and Orders" && !enableServiceOrders) { setActiveTab("Dashboard"); return null; }
+    if (activeTab === "KOD" && !enableKOD) { setActiveTab("Dashboard"); return null; }
 
     switch (activeTab) {
       case "Dashboard": return <DashboardView internalUser={internalLoggedInUser} />;
@@ -410,9 +360,7 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeFinanceTab === "Sales Income" && <SalesIncome />}
             {activeFinanceTab === "Stock Payments" && <StockPayment />}
-            {/* Removed CreditCust component rendering */}
             {activeFinanceTab === "Reconcilation" && <DaySaleBal />}
-            {/* ✅ FIXED: Passing 'goToSettings' prop to Expenses */}
             {activeFinanceTab === "Expenses" && <Expenses goToSettings={() => setActiveTab("Settings")} />}
             {activeFinanceTab === "Summary" && <Summary />}
             {activeFinanceTab === "Cash Book" && <CashBook />}
@@ -427,11 +375,11 @@ const Dashboard = () => {
           {activeItemsCustomersTab === "Customers" && <Customers internalUser={internalLoggedInUser} maintainCreditCustomers={maintainCreditCustomers} />}
           {activeItemsCustomersTab === "Price Categories" && <PriceCat internalUser={internalLoggedInUser} />}
           {activeItemsCustomersTab === "Quotations" && <Quotations internalUser={internalLoggedInUser} />}
-          {/* --- RENDER COSTING HERE --- */}
           {activeItemsCustomersTab === "Costing" && <Costing internalUser={internalLoggedInUser} />}
         </div>
       );
       case "Admin": return <Admin internalUsers={internalUsers} setInternalUsers={setInternalUsers} />;
+      case "KOD": return <KitchenDisplay />; // ✅ KOD RENDER
       default: return null;
     }
   };
@@ -443,35 +391,18 @@ const Dashboard = () => {
     </div>
   );
 
-  // Main JSX Render
   return (
     <div style={styles.container}>
-      {/* Invisible hover trigger area */}
+      <div style={styles.sidebarTriggerArea} onMouseEnter={() => setIsSidebarOpen(true)} />
       <div
-        style={styles.sidebarTriggerArea}
-        onMouseEnter={() => setIsSidebarOpen(true)}
-      />
-
-      {/* Sidebar */}
-      <div
-        style={{
-          ...styles.sidebar,
-          ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed),
-        }}
-        onMouseLeave={() => {
-          setIsSidebarOpen(false);
-          setHoveredTab(null);
-        }}
+        style={{ ...styles.sidebar, ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed), }}
+        onMouseLeave={() => { setIsSidebarOpen(false); setHoveredTab(null); }}
       >
         <div style={styles.sidebarTabs}>
           {visibleTabs.map((tab) => (
             <div
               key={tab}
-              style={{
-                ...styles.sidebarTab,
-                ...(hoveredTab === tab && activeTab !== tab ? styles.sidebarTabHover : {}),
-                ...(activeTab === tab ? styles.sidebarActiveTab : {}),
-              }}
+              style={{ ...styles.sidebarTab, ...(hoveredTab === tab && activeTab !== tab ? styles.sidebarTabHover : {}), ...(activeTab === tab ? styles.sidebarActiveTab : {}), }}
               onClick={() => setActiveTab(tab)}
               onMouseEnter={() => setHoveredTab(tab)}
               onMouseLeave={() => setHoveredTab(null)}
@@ -482,55 +413,29 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Main Content Area */}
       <div style={styles.mainContentWrapper}>
-        {/* Fixed Top Header */}
         <div style={styles.topBar}>
-          {/* Clickable Header Left for Settings Redirect */}
-          <div 
-            style={{...styles.headerLeft, cursor: 'pointer'}} 
-            onClick={() => setActiveTab("Settings")}
-            title="Go to Settings"
-          >
+          <div style={{...styles.headerLeft, cursor: 'pointer'}} onClick={() => setActiveTab("Settings")} title="Go to Settings">
             <div style={styles.logoPlaceholder}>
-              {userInfo?.companyLogo ? (
-                <img src={userInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} />
-              ) : ( userInfo?.companyName?.charAt(0) || "B" )}
+              {userInfo?.companyLogo ? ( <img src={userInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} /> ) : ( userInfo?.companyName?.charAt(0) || "B" )}
             </div>
             <div style={styles.topInfo}>
               <h2 style={styles.companyName}>{userInfo?.companyName || "Business"}</h2>
               <p style={styles.wayneSystems}>Wayne Systems</p>
             </div>
           </div>
-
           <div style={styles.headerCenter}>
-            {/* Clickable System Alert for Dashboard Redirect */}
-            {isAnnouncementActive && (
-              <div 
-                style={{...styles.blinkingIndicator, cursor: 'pointer'}} 
-                onClick={() => setActiveTab("Dashboard")}
-                title="Go to Dashboard"
-              >
-                SYSTEM ALERT
-              </div>
-            )}
+            {isAnnouncementActive && ( <div style={{...styles.blinkingIndicator, cursor: 'pointer'}} onClick={() => setActiveTab("Dashboard")} title="Go to Dashboard"> SYSTEM ALERT </div> )}
           </div>
-          
           <div style={styles.headerRight}>
-            {internalLoggedInUser && (
-              <div style={styles.userBadge}><span style={styles.userName}>{internalLoggedInUser.username}</span></div>
-            )}
+            {internalLoggedInUser && ( <div style={styles.userBadge}><span style={styles.userName}>{internalLoggedInUser.username}</span></div> )}
             <img src={companyLogo} alt="Logo" style={styles.headerLogo} />
-            {internalUsers.length > 1 && internalLoggedInUser && (
-              <button onClick={handleInternalLogout} style={styles.logoutBtn}><span style={styles.logoutText}>Logout</span></button>
-            )}
+            {internalUsers.length > 1 && internalLoggedInUser && ( <button onClick={handleInternalLogout} style={styles.logoutBtn}><span style={styles.logoutText}>Logout</span></button> )}
           </div>
         </div>
 
-        {/* Sticky Sub-tabs */}
         {renderSubTabs()}
 
-        {/* Content */}
         <div style={styles.content}>
           <Suspense fallback={loadingFallback}>
             <CashBookProvider>{renderTabContent()}</CashBookProvider>
@@ -538,19 +443,18 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Popups */}
       {showPopup && ( <div style={styles.popupOverlay}><div style={styles.popupBox}><h2 style={styles.welcomeTitle}>Welcome to {userInfo?.companyName || "EasyPOS"} 🎉</h2><p style={styles.welcomeText}>Here's a quick video guide to get you started:</p><div style={styles.videoWrapper}><iframe style={styles.popupBoxiframe} src="https://youtu.be/DiA2LuJcN4A?si=gOhg0jRYo8ANvZkI" title="Welcome Video" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div><button onClick={() => setShowPopup(false)} style={styles.gotItBtn}>Got it</button></div></div> )}
       {showLoginPopup && (<div style={styles.popupOverlay}><div style={styles.loginPopupBox}><h3 style={styles.loginTitle}>Internal User Login</h3><input type="text" placeholder="Username" value={loginInput.username} onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })} style={styles.loginInput} /><input type="password" placeholder="Password" value={loginInput.password} onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })} style={styles.loginInput} /><div style={styles.loginButtons}><button onClick={handleInternalLogin} style={styles.loginBtn}>Login</button><button onClick={async () => { await auth.signOut(); localStorage.clear(); navigate("/"); }} style={styles.systemLogoutBtn}>Logout from System</button></div></div></div>)}
     </div>
   );
 };
 
-// Styles (No changes)
+// Styles
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa', headerGradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', success: '#10b981', danger: '#ef4444', };
 const styles = {
     container: { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", background: themeColors.light, minHeight: "100vh", display: 'flex', flexDirection: 'row', },
     mainContentWrapper: { flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto', position: 'relative', marginLeft: '0', },
-    content: { padding: "28px 24px", flex: 1, marginTop: '140px', }, // Adjusted marginTop for header + subtabs
+    content: { padding: "28px 24px", flex: 1, marginTop: '140px', }, 
     sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 2001, },
     sidebar: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '260px', background: `linear-gradient(180deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)`, backdropFilter: 'blur(10px)', borderRight: '1px solid rgba(255, 255, 255, 0.15)', color: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2000, transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', boxShadow: '4px 0 20px rgba(0, 0, 0, 0.15)', },
     sidebarOpen: { transform: 'translateX(0)', },
@@ -598,7 +502,6 @@ const styles = {
     systemLogoutBtn: { padding: "16px", border: "2px solid #ef4444", borderRadius: "12px", background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: "15px", fontWeight: "700", transition: 'all 0.3s ease', },
 };
 
-// KEYFRAMES
 const styleSheet = document.createElement("style");
 styleSheet.innerText = `
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }

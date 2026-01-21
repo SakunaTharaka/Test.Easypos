@@ -15,7 +15,7 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import Select from "react-select";
 
-// --- STYLES (Unchanged) ---
+// --- STYLES ---
 const styles = {
     container: { display: 'flex', height: 'calc(100vh - 180px)', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", gap: '20px', padding: '20px', position: 'relative' },
     leftPanel: { flex: 3, display: 'flex', flexDirection: 'column', gap: '20px' },
@@ -57,8 +57,14 @@ const styles = {
         minHeight: 0 
     },
     table: { width: '100%', borderCollapse: 'collapse' },
+    printTh: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
+    thItem: { textAlign: 'left' },
+    printTd: { padding: '8px', borderBottom: '1px dotted #ccc' },
     th: { padding: '10px', textAlign: 'left', color: '#6b7280', fontSize: '12px', fontWeight: '600', borderBottom: '1px solid #e5e7eb' },
     td: { padding: '10px', borderBottom: '1px solid #e5e7eb' },
+    tdCenter: { textAlign: 'center' },
+    tdRight: { textAlign: 'right' },
+    
     highlightedRow: { backgroundColor: '#dbeafe' },
     emptyState: { textAlign: 'center', color: '#9ca3af', padding: '20px' },
     removeButton: { background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' },
@@ -83,6 +89,11 @@ const styles = {
     qzStatus: { padding: '15px', margin: '15px 0', backgroundColor: '#f3f4f6', borderRadius: '6px', textAlign: 'left' },
     qzControls: { textAlign: 'left', marginTop: '10px' },
     closeButton: { marginTop: '15px', padding: '10px 20px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' },
+    
+    // Toggle Styles
+    toggleWrapper: { display: 'flex', backgroundColor: '#e5e7eb', borderRadius: '8px', padding: '4px', gap: '4px' },
+    toggleOption: { padding: '6px 12px', borderRadius: '6px', fontSize: '14px', fontWeight: '600', color: '#6b7280', cursor: 'pointer', flex: 1, textAlign: 'center', transition: 'all 0.2s' },
+    toggleOptionActive: { padding: '6px 12px', borderRadius: '6px', fontSize: '14px', fontWeight: '600', color: '#2563eb', backgroundColor: 'white', cursor: 'pointer', flex: 1, textAlign: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' },
 
     // --- PRINT / VIEWER STYLES ---
     invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
@@ -90,11 +101,6 @@ const styles = {
     companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
     headerText: { margin: '2px 0', fontSize: '0.9em' },
     itemsTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
-    th: { borderBottom: '1px solid #000', padding: '8px', textAlign: 'right', background: '#f0f0f0' },
-    thItem: { textAlign: 'left' },
-    td: { padding: '8px', borderBottom: '1px dotted #ccc' },
-    tdCenter: { textAlign: 'center' },
-    tdRight: { textAlign: 'right' },
     totalsContainer: { width: '100%' },
     totals: { paddingTop: '10px' },
     totalRow: { display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '1em' },
@@ -102,6 +108,8 @@ const styles = {
     footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
     creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
 };
+
+const paymentOptions = ['Cash', 'Card', 'Online'];
 
 // --- COMPONENTS ---
 
@@ -119,7 +127,8 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
 
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
-  const invTotal = invSubtotal + deliveryCharge;
+  const serviceCharge = Number(invoice.serviceCharge) || 0;
+  const invTotal = invSubtotal + deliveryCharge + serviceCharge;
   
   const dateObj = invoice.createdAt?.toDate ? invoice.createdAt.toDate() : (invoice.createdAt instanceof Date ? invoice.createdAt : new Date());
 
@@ -181,6 +190,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 <p><strong>Date:</strong> {dateObj.toLocaleDateString()}</p>
                 <p><strong>Customer:</strong> {invoice.customerName}</p>
                 {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
+                
+                {invoice.paymentMethod === "Dine-in" && <p><strong>Order Type:</strong> Dine-in</p>}
+
                 {isOrder && orderDetails && orderDetails.deliveryDate && (
                     <p style={{marginTop: 5, fontWeight: 'bold'}}>
                         <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
@@ -208,25 +220,25 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
           <table style={styles.itemsTable}>
             <thead>
               <tr>
-                <th style={{ ...styles.th, ...styles.thItem }}>
+                <th style={{ ...styles.printTh, ...styles.thItem }}>
                     {isDoubleLine 
                         ? (isSinhala ? "අයිතමය / ප්‍රමාණය" : "Item / Qty") 
                         : (isSinhala ? "අයිතමය" : "Item / Service")
                     }
                 </th>
                 
-                {!isDoubleLine && <th style={styles.th}>Qty</th>}
+                {!isDoubleLine && <th style={styles.printTh}>Qty</th>}
 
                 {invoice.isDiscountable && (
-                    <th style={styles.th}>{isSinhala ? "මිල" : "Orig. Price"}</th>
+                    <th style={styles.printTh}>{isSinhala ? "මිල" : "Orig. Price"}</th>
                 )}
-                <th style={styles.th}>
+                <th style={styles.printTh}>
                     {invoice.isDiscountable 
                         ? (isSinhala ? "අපේ මිල" : "Our Price") 
                         : (isSinhala ? "මිල" : "Rate")
                     }
                 </th>
-                <th style={styles.th}>{isSinhala ? "එකතුව" : "Total"}</th>
+                <th style={styles.printTh}>{isSinhala ? "එකතුව" : "Total"}</th>
               </tr>
             </thead>
             <tbody>
@@ -235,7 +247,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                     {isDoubleLine ? (
                         <>
                             <tr>
-                                <td colSpan={getColumnCount()} style={{ ...styles.td, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
+                                <td colSpan={getColumnCount()} style={{ ...styles.printTd, borderBottom: 'none', paddingBottom: '2px', fontWeight: '500' }}>
                                     {item.itemName}
                                     {item.isFreeIssue && (
                                         <span style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold', marginLeft: '5px'}}>
@@ -245,21 +257,21 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                 </td>
                             </tr>
                             <tr>
-                                <td style={{ ...styles.td, paddingTop: '0px' }}>
+                                <td style={{ ...styles.printTd, paddingTop: '0px' }}>
                                    <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
                                 </td>
 
                                 {invoice.isDiscountable && (
-                                    <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                                    <td style={{ ...styles.printTd, ...styles.tdRight, paddingTop: '0px' }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                                 )}
 
-                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{item.price.toFixed(2)}</td>
-                                <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px', fontWeight: 'bold' }}>{(item.quantity * item.price).toFixed(2)}</td>
+                                <td style={{ ...styles.printTd, ...styles.tdRight, paddingTop: '0px' }}>{item.price.toFixed(2)}</td>
+                                <td style={{ ...styles.printTd, ...styles.tdRight, paddingTop: '0px', fontWeight: 'bold' }}>{(item.quantity * item.price).toFixed(2)}</td>
                             </tr>
                         </>
                     ) : (
                         <tr>
-                            <td style={styles.td}>
+                            <td style={styles.printTd}>
                                 {item.itemName}
                                 {item.isFreeIssue && (
                                     <div style={{fontSize: '0.8em', fontStyle: 'italic', fontWeight: 'bold'}}>
@@ -267,14 +279,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                     </div>
                                 )}
                             </td>
-                            <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
+                            <td style={{ ...styles.printTd, ...styles.tdCenter }}>{item.quantity}</td>
                             
                             {invoice.isDiscountable && (
-                                <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
+                                <td style={{ ...styles.printTd, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                             )}
 
-                            <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
-                            <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
+                            <td style={{ ...styles.printTd, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
+                            <td style={{ ...styles.printTd, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
                         </tr>
                     )}
                 </React.Fragment>
@@ -310,6 +322,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                             <div style={styles.totalRow}><span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span><span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span></div>
                         )}
                         {deliveryCharge > 0 && <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>}
+                        {serviceCharge > 0 && <div style={styles.totalRow}><strong>Service Charge:</strong><span>Rs. {serviceCharge.toFixed(2)}</span></div>}
                         <div style={styles.totalRow}><strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong><span>Rs. {invTotal.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
                         <div style={styles.totalRow}><strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong><span>Rs. {invReceived.toFixed(2)}</span></div>
@@ -540,7 +553,6 @@ const Invoice = ({ internalUser }) => {
   const [calculatedFreeItems, setCalculatedFreeItems] = useState([]); 
   
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
-  const paymentOptions = ['Cash', 'Card', 'Online'];
   
   const [showQZPrintModal, setShowQZPrintModal] = useState(false);
   const [invoiceToPrint, setInvoiceToPrint] = useState(null);
@@ -550,6 +562,11 @@ const Invoice = ({ internalUser }) => {
   const [deliveryChargeMode, setDeliveryChargeMode] = useState(false);
   const [isPrintingBrowser, setIsPrintingBrowser] = useState(false);
   const [isCustomerDiscountable, setIsCustomerDiscountable] = useState(false);
+
+  // ✅ DINE-IN LOGIC
+  const [dineInAvailable, setDineInAvailable] = useState(false);
+  const [orderType, setOrderType] = useState("Take Away"); // "Take Away" or "Dine-in"
+  const [serviceChargeRate, setServiceChargeRate] = useState(0);
 
   const containerRef = useRef(null);
   const itemInputRef = useRef(null);
@@ -583,7 +600,8 @@ const Invoice = ({ internalUser }) => {
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  const fetchProvisionalInvoiceNumber = async () => {
+  // Wrapped in useCallback to prevent re-creation on render
+  const fetchProvisionalInvoiceNumber = useCallback(async () => {
     const user = auth.currentUser;
     if (!user) { setInvoiceNumber("INV-ERROR"); return; }
     const today = new Date();
@@ -594,7 +612,7 @@ const Invoice = ({ internalUser }) => {
         const nextSeq = (counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0) + 1;
         setInvoiceNumber(`INV-${datePrefix}-${String(nextSeq).padStart(4, "0")}`);
     } catch (err) { setInvoiceNumber(`INV-${datePrefix}-ERR`); }
-  };
+  }, []);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -619,10 +637,15 @@ const Invoice = ({ internalUser }) => {
           const savedShift = localStorage.getItem('savedSelectedShift');
           if (savedShift && sData.productionShifts?.includes(savedShift)) setSelectedShift(savedShift);
         }
+        // ✅ LOAD DINE-IN SETTINGS
+        if (sData.dineInAvailable) {
+            setDineInAvailable(true);
+            setServiceChargeRate(Number(sData.serviceCharge) || 0);
+        }
       }
     };
     initialize();
-  }, []);
+  }, [fetchProvisionalInvoiceNumber]); // Added dependency
   
   useEffect(() => { if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); }, [selectedShift]);
 
@@ -672,7 +695,7 @@ const Invoice = ({ internalUser }) => {
       }
     };
     fetchCustomerData();
-  }, [selectedCustomer]); // Trigger only when customer changes
+  }, [selectedCustomer, currentCategoryId, items.length]); 
 
   // ✅ Client-Side Search (Instant)
   useEffect(() => {
@@ -696,37 +719,6 @@ const Invoice = ({ internalUser }) => {
     setSelectedIndex(0);
   }, [itemInput, items]);
 
-  useEffect(() => {
-    const handleShortcuts = (e) => {
-      if (showPaymentConfirm || showFreeIssuePopup || isSaving || showQZPrintModal || isPrintingBrowser) return;
-      if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
-      if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(p => !p); }
-      if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(p => !p); }
-      if (e.key === "F5") { e.preventDefault(); setCheckoutFocusMode(false); setAmountReceivedMode(false); setDeliveryChargeMode(p => !p); }
-    };
-    window.addEventListener("keydown", handleShortcuts);
-    return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [checkout, selectedCustomer, selectedShift, showPaymentConfirm, showFreeIssuePopup, isSaving, showQZPrintModal, isPrintingBrowser]);
-
-  useEffect(() => {
-    if (amountReceivedMode) receivedAmountRef.current?.focus();
-    else if (deliveryChargeMode) deliveryChargeRef.current?.focus();
-    else if (checkoutFocusMode) { itemInputRef.current?.blur(); qtyInputRef.current?.blur(); receivedAmountRef.current?.blur(); setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); }
-    else { itemInputRef.current?.focus(); setHighlightedCheckoutIndex(-1); }
-  }, [amountReceivedMode, checkoutFocusMode, deliveryChargeMode, checkout.length]);
-
-  useEffect(() => {
-    const handleCheckoutNav = (e) => {
-        if (!checkoutFocusMode) return;
-        if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightedCheckoutIndex(p => Math.min(p + 1, checkout.length - 1)); }
-        if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightedCheckoutIndex(p => Math.max(p - 1, 0)); }
-        if (e.key === 'Delete' && highlightedCheckoutIndex > -1) { e.preventDefault(); removeCheckoutItem(highlightedCheckoutIndex); setHighlightedCheckoutIndex(p => Math.max(0, Math.min(p, checkout.length - 2))); }
-        if (e.key === 'Escape') { e.preventDefault(); setCheckoutFocusMode(false); }
-    };
-    window.addEventListener('keydown', handleCheckoutNav);
-    return () => window.removeEventListener('keydown', handleCheckoutNav);
-  }, [checkoutFocusMode, checkout, highlightedCheckoutIndex]);
-  
   const handleItemKeyDown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex(p => (p + 1) % filteredItems.length); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex(p => (p - 1 + filteredItems.length) % filteredItems.length); }
@@ -773,9 +765,20 @@ const Invoice = ({ internalUser }) => {
   };
 
   const removeCheckoutItem = (idx) => setCheckout(p => p.filter((_, i) => i !== idx));
-  const resetForm = async () => { await fetchProvisionalInvoiceNumber(); setCheckout([]); setReceivedAmount(""); setDeliveryCharge(""); setCalculatedFreeItems([]); itemInputRef.current?.focus(); };
   
-  const handleSaveAttempt = () => {
+  // Wrapped in useCallback for dependency safety
+  const resetForm = useCallback(async () => { 
+      await fetchProvisionalInvoiceNumber(); 
+      setCheckout([]); 
+      setReceivedAmount(""); 
+      setDeliveryCharge(""); 
+      setCalculatedFreeItems([]); 
+      // Reset Order Type to Default
+      setOrderType("Take Away");
+      itemInputRef.current?.focus(); 
+  }, [fetchProvisionalInvoiceNumber]);
+  
+  const handleSaveAttempt = useCallback(() => {
     if (!selectedCustomer || checkout.length === 0) return alert("Select customer and add items.");
     if (shiftProductionEnabled && !selectedShift) return alert("Select shift.");
 
@@ -804,19 +807,70 @@ const Invoice = ({ internalUser }) => {
         setConfirmPaymentMethod('Cash'); 
         setShowPaymentConfirm(true);
     }
-  };
+  }, [selectedCustomer, checkout, shiftProductionEnabled, selectedShift]);
 
+  useEffect(() => {
+    const handleShortcuts = (e) => {
+      if (showPaymentConfirm || showFreeIssuePopup || isSaving || showQZPrintModal || isPrintingBrowser) return;
+      if (e.altKey && e.key.toLowerCase() === "s") { e.preventDefault(); handleSaveAttempt(); }
+      if (e.key === "F2") { e.preventDefault(); setCheckoutFocusMode(false); setDeliveryChargeMode(false); setAmountReceivedMode(p => !p); }
+      if (e.key === "F10") { e.preventDefault(); setAmountReceivedMode(false); setDeliveryChargeMode(false); setCheckoutFocusMode(p => !p); }
+      if (e.key === "F5") { e.preventDefault(); setCheckoutFocusMode(false); setAmountReceivedMode(false); setDeliveryChargeMode(p => !p); }
+      
+      // ✅ F8 Logic for Dine-in Toggle
+      if (e.key === "F8") {
+          e.preventDefault();
+          if (dineInAvailable) {
+              setOrderType(prev => prev === "Take Away" ? "Dine-in" : "Take Away");
+          }
+      }
+    };
+    window.addEventListener("keydown", handleShortcuts);
+    return () => window.removeEventListener("keydown", handleShortcuts);
+  }, [checkout, selectedCustomer, selectedShift, showPaymentConfirm, showFreeIssuePopup, isSaving, showQZPrintModal, isPrintingBrowser, handleSaveAttempt, dineInAvailable]);
+
+  useEffect(() => {
+    if (amountReceivedMode) receivedAmountRef.current?.focus();
+    else if (deliveryChargeMode) deliveryChargeRef.current?.focus();
+    else if (checkoutFocusMode) { itemInputRef.current?.blur(); qtyInputRef.current?.blur(); receivedAmountRef.current?.blur(); setHighlightedCheckoutIndex(checkout.length > 0 ? 0 : -1); }
+    else { itemInputRef.current?.focus(); setHighlightedCheckoutIndex(-1); }
+  }, [amountReceivedMode, checkoutFocusMode, deliveryChargeMode, checkout.length]);
+
+  useEffect(() => {
+    const handleCheckoutNav = (e) => {
+        if (!checkoutFocusMode) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightedCheckoutIndex(p => Math.min(p + 1, checkout.length - 1)); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightedCheckoutIndex(p => Math.max(p - 1, 0)); }
+        if (e.key === 'Delete' && highlightedCheckoutIndex > -1) { e.preventDefault(); removeCheckoutItem(highlightedCheckoutIndex); setHighlightedCheckoutIndex(p => Math.max(0, Math.min(p, checkout.length - 2))); }
+        if (e.key === 'Escape') { e.preventDefault(); setCheckoutFocusMode(false); }
+    };
+    window.addEventListener('keydown', handleCheckoutNav);
+    return () => window.removeEventListener('keydown', handleCheckoutNav);
+  }, [checkoutFocusMode, checkout, highlightedCheckoutIndex]);
+  
   const handleFreeIssueConfirm = () => {
       setShowFreeIssuePopup(false);
       setConfirmPaymentMethod('Cash'); 
       setShowPaymentConfirm(true);
   };
   
-  const executeSaveInvoice = async (method) => {
+  // Wrapped in useCallback and updated to use internal calculation for total/balance
+  const executeSaveInvoice = useCallback(async (method) => {
     const user = auth.currentUser;
     if (!user) return alert("Not logged in.");
     setIsSaving(true); setShowPaymentConfirm(false);
     
+    // Recalculate totals inside function
+    const currentSubtotal = checkout.reduce((s, i) => s + i.price * i.quantity, 0);
+    
+    // ✅ Calculate Service Charge based on Order Type
+    const currentServiceCharge = (orderType === "Dine-in") 
+        ? (currentSubtotal * (serviceChargeRate / 100)) 
+        : 0;
+
+    const currentTotal = currentSubtotal + (Number(deliveryCharge) || 0) + currentServiceCharge;
+    const currentBalance = (Number(receivedAmount) || 0) - currentTotal;
+
     try {
       const today = new Date();
       const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
@@ -886,7 +940,7 @@ const Invoice = ({ internalUser }) => {
         }
 
         const newDailyCOGS = currentDailyCOGS + invoiceTotalCOGS;
-        const newDailySales = currentDailySales + total; 
+        const newDailySales = currentDailySales + currentTotal; 
         
         const statsUpdate = {
             totalCOGS: newDailyCOGS,
@@ -897,7 +951,7 @@ const Invoice = ({ internalUser }) => {
         };
 
         if (salesMethodField) {
-            statsUpdate[salesMethodField] = currentMethodSales + total;
+            statsUpdate[salesMethodField] = currentMethodSales + currentTotal;
         }
 
         t.set(dailyStatsRef, statsUpdate, { merge: true });
@@ -911,16 +965,44 @@ const Invoice = ({ internalUser }) => {
         const invData = {
           customerId: selectedCustomer.value, customerName: selectedCustomer.label, 
           items: itemsToSave,
-          total, deliveryCharge: Number(deliveryCharge) || 0,
+          total: currentTotal, 
+          deliveryCharge: Number(deliveryCharge) || 0,
+          serviceCharge: currentServiceCharge, // ✅ Save Service Charge
           received: Number(receivedAmount) || 0,
-          balance: balance,
+          balance: currentBalance,
           createdAt: serverTimestamp(), invoiceNumber: newInvNum, issuedBy: internalUser?.username || "Admin", 
           shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
           totalCOGS: invoiceTotalCOGS,
-          dailyOrderNumber: nextDailyOrderSeq
+          dailyOrderNumber: nextDailyOrderSeq,
+          orderType: orderType // ✅ Save Order Type
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
+
+        // --- KOT LOGIC START ---
+        const kotItems = itemsToSave.filter(item => 
+            (item.type === "ourProduct" || item.itemType === "ourProduct")
+        );
+        
+        if (kotItems.length > 0) {
+            const kotDocRef = doc(collection(db, user.uid, "kot", dailyDateString));
+            const kotData = {
+                invoiceNumber: newInvNum,
+                orderNumber: nextDailyOrderSeq,
+                date: dailyDateString,
+                createdAt: serverTimestamp(),
+                items: kotItems.map(item => ({
+                    itemName: item.itemName || item.name || "Unknown Item",
+                    quantity: item.quantity,
+                    variant: item.variant || "", 
+                })),
+                status: "Pending",
+                shift: selectedShift || "",
+                type: orderType // ✅ Save to KOT as well
+            };
+            t.set(kotDocRef, kotData);
+        }
+        // --- KOT LOGIC END ---
 
         if (walletRef) {
             const newBalance = currentWalletBalance + invData.total;
@@ -939,7 +1021,7 @@ const Invoice = ({ internalUser }) => {
         else setIsPrintingBrowser(true);
       } else { alert("Saved!"); await resetForm(); }
     } catch (e) { console.error(e); alert("Save failed: " + e.message); } finally { setIsSaving(false); }
-  };
+  }, [checkout, deliveryCharge, receivedAmount, selectedCustomer, selectedShift, calculatedFreeItems, isCustomerDiscountable, internalUser, settings, resetForm, orderType, serviceChargeRate]);
 
   useEffect(() => {
     const handleKey = (e) => {
@@ -959,7 +1041,13 @@ const Invoice = ({ internalUser }) => {
   }, [showPaymentConfirm, showFreeIssuePopup, confirmPaymentMethod, executeSaveInvoice]); 
 
   const subtotal = checkout.reduce((s, i) => s + i.price * i.quantity, 0);
-  const total = subtotal + (Number(deliveryCharge) || 0);
+  
+  // ✅ Calculate Service Charge for Display
+  const currentServiceCharge = (orderType === "Dine-in") 
+      ? (subtotal * (serviceChargeRate / 100)) 
+      : 0;
+
+  const total = subtotal + (Number(deliveryCharge) || 0) + currentServiceCharge;
   const balance = (Number(receivedAmount) || 0) - total; 
   const displayBalance = (Number(receivedAmount) || 0) === 0 ? 0 : balance;
   const isSaveDisabled = !selectedCustomer || checkout.length === 0 || (balance < 0 && (Number(receivedAmount) || 0) > 0);
@@ -975,6 +1063,25 @@ const Invoice = ({ internalUser }) => {
       <div style={styles.leftPanel}>
         <div style={styles.header}>
             <div style={{textAlign: 'left'}}><div style={styles.invoiceLabel}>INVOICE #</div><div style={styles.invoiceNumber}>{invoiceNumber}</div></div>
+            
+            {/* ✅ DINE-IN TOGGLE UI */}
+            {dineInAvailable && (
+                <div style={styles.toggleWrapper}>
+                    <div 
+                        style={orderType === "Take Away" ? styles.toggleOptionActive : styles.toggleOption}
+                        onClick={() => setOrderType("Take Away")}
+                    >
+                        Take Away
+                    </div>
+                    <div 
+                        style={orderType === "Dine-in" ? styles.toggleOptionActive : styles.toggleOption}
+                        onClick={() => setOrderType("Dine-in")}
+                    >
+                        Dine-in (F8)
+                    </div>
+                </div>
+            )}
+
             {shiftProductionEnabled && ( <div style={{textAlign: 'center'}}><label style={styles.invoiceLabel}>SHIFT</label><select value={selectedShift} onChange={e => setSelectedShift(e.target.value)} style={styles.shiftSelect}><option value="">Select Shift</option>{availableShifts.map(s => <option key={s} value={s}>{s}</option>)}</select></div> )}
             <div style={{textAlign: 'right'}}><div style={styles.invoiceLabel}>ISSUED BY</div><div style={styles.invoiceNumber}>{internalUser?.username || 'Admin'}</div></div>
         </div>
@@ -992,6 +1099,7 @@ const Invoice = ({ internalUser }) => {
           <h4 style={styles.shortcutsTitle}>Keyboard Shortcuts</h4>
           <div style={styles.shortcutItem}><b>F2:</b> Focus 'Amount Received'</div>
           <div style={styles.shortcutItem}><b>F5:</b> Focus 'Delivery Charges'</div>
+          {dineInAvailable && <div style={styles.shortcutItem}><b>F8:</b> Toggle Dine-in / Take Away</div>}
           <div style={styles.shortcutItem}><b>F10:</b> Activate Checkout List</div>
           <div style={styles.shortcutItem}><b>Alt + S:</b> Save Invoice</div>
           <div style={styles.shortcutItem}><b>Esc:</b> Exit</div>
@@ -1010,6 +1118,15 @@ const Invoice = ({ internalUser }) => {
             <div style={styles.totalsSection}>
                 <div style={styles.totalRow}><span>Subtotal</span><span>Rs. {subtotal.toFixed(2)}</span></div>
                 {settings?.offerDelivery && ( <div style={styles.totalRow}><label htmlFor="deliveryCharge" style={{cursor: 'pointer'}}>Delivery (F5)</label><input ref={deliveryChargeRef} id="deliveryCharge" type="number" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value)} style={{...styles.input, ...styles.deliveryInput, ...(deliveryChargeMode ? styles.activeInput : {})}} placeholder="0.00" /></div> )}
+                
+                {/* ✅ DISPLAY SERVICE CHARGE */}
+                {dineInAvailable && orderType === "Dine-in" && (
+                    <div style={styles.totalRow}>
+                        <span>Service Charge ({serviceChargeRate}%)</span>
+                        <span>Rs. {currentServiceCharge.toFixed(2)}</span>
+                    </div>
+                )}
+
                 <div style={styles.grandTotalRowScreen}><span>TOTAL</span><span>Rs. {total.toFixed(2)}</span></div>
             </div>
             <div style={styles.paymentSection}>

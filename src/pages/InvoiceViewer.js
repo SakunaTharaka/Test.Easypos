@@ -50,9 +50,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   // --- Calculations ---
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
-  const invTotal = invSubtotal + deliveryCharge;
-  const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
   
+  // ✅ Retrieve Service Charge
+  const serviceCharge = Number(invoice.serviceCharge) || 0;
+
+  // ✅ Add Service Charge to Total
+  const invTotal = invSubtotal + deliveryCharge + serviceCharge;
+  
+  const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
   const invBalance = invReceived === 0 ? 0 : (invTotal - invReceived);
 
   const jobTotal = serviceJob ? Number(serviceJob.totalCharge || 0) : invTotal;
@@ -111,6 +116,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
+            {/* ✅ Show Order Type if available */}
+            {invoice.orderType && <p><strong>Order Type:</strong> {invoice.orderType}</p>}
+
             {isOrder && orderDetails && orderDetails.deliveryDate && (
                  <p style={{marginTop: 5, fontWeight: 'bold'}}>
                     <strong>Delivery Date:</strong> {formatDate(orderDetails.deliveryDate)}
@@ -272,6 +280,15 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                         {deliveryCharge > 0 && (
                             <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
                         )}
+
+                        {/* ✅ Show Service Charge if greater than 0 */}
+                        {serviceCharge > 0 && (
+                            <div style={styles.totalRow}>
+                                <strong>Service Charge:</strong>
+                                <span>Rs. {serviceCharge.toFixed(2)}</span>
+                            </div>
+                        )}
+
                         <div style={styles.totalRow}>
                             <strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong>
                             <span>Rs. {invTotal.toFixed(2)}</span>
