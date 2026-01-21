@@ -18,10 +18,14 @@ const Toast = ({ message, type, onDismiss }) => {
   return <div style={toastStyles}>{message}</div>;
 };
 
-// --- Helper Function ---
+// --- Helper Function (FIXED: Uses Local Time) ---
 const toDateString = (date) => {
   if (typeof date === 'string') return date;
-  return date.toISOString().split('T')[0];
+  // Uses local system time components to avoid UTC shift
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 // --- Main Component ---
@@ -59,12 +63,12 @@ const StockOutBal = () => {
         setHasFetchedSummary(true);
         
         const uid = auth.currentUser.uid;
+        // Use local date string to create timestamps for 00:00 to 23:59 local time
         const startOfDay = Timestamp.fromDate(new Date(summaryDate + 'T00:00:00'));
         const endOfDay = Timestamp.fromDate(new Date(summaryDate + 'T23:59:59'));
         
         try {
             // STEP 0: Fetch Strict Allowlist (Only 'buySell' items)
-            // This ensures we ONLY ever show items that are currently marked as Buy/Sell in the database.
             const itemsRef = collection(db, uid, 'items', 'item_list');
             const itemsQuery = query(itemsRef, where('type', '==', 'buySell'));
             const itemsSnap = await getDocs(itemsQuery);
@@ -80,21 +84,19 @@ const StockOutBal = () => {
             const latestReportQuery = query(reportsRef, where("reportDate", "==", summaryDate), orderBy("savedAt", "desc"), limit(1));
             const latestReportSnap = await getDocs(latestReportQuery);
 
-            let queryStartTime = startOfDay; // Default to start of day
-            let currentSummaryMap = {}; // Use a map to aggregate data
+            let queryStartTime = startOfDay; 
+            let currentSummaryMap = {}; 
 
             if (!latestReportSnap.empty) {
-                // Load saved state as starting point
                 const latestReport = latestReportSnap.docs[0].data();
                 queryStartTime = latestReport.savedAt; 
                 setLastSaveTimestamp(latestReport.savedAt);
 
                 latestReport.items.forEach(item => {
-                    // Only add if it's in our valid list (Cleans up old data)
                     if (validBuySellNames.has(item.name)) {
                         currentSummaryMap[item.name] = {
                             name: item.name,
-                            stockOutQty: Number(item.actualQty) || 0, // Reset Stock Out to the Actual Count
+                            stockOutQty: Number(item.actualQty) || 0,
                             invoicedQty: 0
                         };
                     }
@@ -112,7 +114,6 @@ const StockOutBal = () => {
                 const data = docSnap.data();
                 const itemName = data.item;
                 
-                // Double check against allowlist
                 if (itemName && validBuySellNames.has(itemName)) {
                     if (!currentSummaryMap[itemName]) {
                         currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
@@ -130,7 +131,6 @@ const StockOutBal = () => {
                 docSnap.data().items?.forEach(item => {
                     const itemName = item.itemName;
                     
-                    // Strict Check: Only process if it is in our Master Buy/Sell List
                     if (itemName && validBuySellNames.has(itemName)) {
                         if (!currentSummaryMap[itemName]) {
                             currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
@@ -140,7 +140,6 @@ const StockOutBal = () => {
                 });
             });
 
-            // Convert map to array and sort
             const finalData = Object.values(currentSummaryMap).sort((a,b) => a.name.localeCompare(b.name));
             setSummaryData(finalData);
 
@@ -241,6 +240,7 @@ const StockOutBal = () => {
             <div style={styles.controls}>
                 <div>
                     <label style={styles.label}>Select Date:</label>
+                    {/* Updated logic: Uses local Date for max attribute */}
                     <input type="date" value={summaryDate} onChange={e => setSummaryDate(e.target.value)} style={styles.input} max={toDateString(new Date())}/>
                 </div>
                 <button onClick={handleFetchSummary} disabled={summaryLoading || !summaryDate} style={summaryLoading || !summaryDate ? styles.buttonDisabled : styles.button}>
