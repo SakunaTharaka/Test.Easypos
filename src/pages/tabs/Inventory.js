@@ -251,17 +251,34 @@ const Inventory = ({ internalUser }) => {
             createdAt: serverTimestamp(),
           };
 
+          // ---------------------------------------------------------
+          // PHASE 1: READ ALL ITEMS (Before any Writes)
+          // ---------------------------------------------------------
+          const readOperations = [];
           for (const item of stagedItems) {
               const itemRef = doc(db, uid, "items", "item_list", item.value);
+              // We must perform the get inside the loop and await it, 
+              // or gather promises. Awaiting sequentially is safer in transactions to avoid race conditions in logic.
               const itemSnap = await transaction.get(itemRef);
+              readOperations.push({ 
+                  itemRef, 
+                  itemSnap, 
+                  inputItem: item 
+              });
+          }
+
+          // ---------------------------------------------------------
+          // PHASE 2: CALCULATE & WRITE ALL ITEMS
+          // ---------------------------------------------------------
+          for (const operation of readOperations) {
+              const { itemRef, itemSnap, inputItem } = operation;
               
-              if (!itemSnap.exists()) throw new Error(`Item "${item.name}" not found!`);
+              if (!itemSnap.exists()) throw new Error(`Item "${inputItem.name}" not found!`);
 
               const data = itemSnap.data();
               const oldQty = parseFloat(data.qtyOnHand) || 0;
-              const incomingQty = parseFloat(item.quantity);
+              const incomingQty = parseFloat(inputItem.quantity);
               
-              // ✅ FIX 1: Retrieve current periodIn
               const currentPeriodIn = parseFloat(data.periodIn) || 0;
 
               let newQty = oldQty + incomingQty;
@@ -270,11 +287,11 @@ const Inventory = ({ internalUser }) => {
               // --- COST CALCULATION LOGIC ---
               if (data.isManualCosting === true) {
                   // MANUAL MODE: Do not change the Average Cost
-                  console.log(`Skipping cost calculation for ${item.name} (Manual Mode Active)`);
+                  console.log(`Skipping cost calculation for ${inputItem.name} (Manual Mode Active)`);
               } else {
                   // AUTOMATIC MODE: Calculate Weighted Average
                   const oldAvgCost = parseFloat(data.averageCost) || 0;
-                  const incomingPrice = parseFloat(item.price);
+                  const incomingPrice = parseFloat(inputItem.price);
 
                   if (newQty > 0) {
                      const totalValue = (oldQty * oldAvgCost) + (incomingQty * incomingPrice);
@@ -288,11 +305,11 @@ const Inventory = ({ internalUser }) => {
                   qtyOnHand: newQty,
                   averageCost: newAvgCost, 
                   lastStockInDate: serverTimestamp(),
-                  // ✅ FIX 2: Increment Period In
                   periodIn: currentPeriodIn + incomingQty
               });
           }
 
+          // Finally, write the stock-in record
           transaction.set(stockInRef, stockInDoc);
       });
       
@@ -324,32 +341,43 @@ const Inventory = ({ internalUser }) => {
     try {
         await runTransaction(db, async (transaction) => {
             const stockInRef = doc(db, uid, "inventory", "stock_in", stockInRecord.id);
+            // READ 1
             const stockInSnap = await transaction.get(stockInRef);
             if (!stockInSnap.exists()) throw new Error("Record already deleted.");
 
             const data = stockInSnap.data();
             const itemsToReverse = data.lineItems || [];
 
+            // ---------------------------------------------------------
+            // PHASE 1: READ ALL ITEMS (Before any Writes)
+            // ---------------------------------------------------------
+            const reversalReads = [];
             for (const item of itemsToReverse) {
                 const itemId = item.itemId || item.value || item.id; 
                 if (!itemId) continue; 
 
                 const itemRef = doc(db, uid, "items", "item_list", itemId);
                 const itemSnap = await transaction.get(itemRef);
+                reversalReads.push({ itemRef, itemSnap, itemData: item });
+            }
+
+            // ---------------------------------------------------------
+            // PHASE 2: CALCULATE & WRITE ALL ITEMS
+            // ---------------------------------------------------------
+            for (const readData of reversalReads) {
+                const { itemRef, itemSnap, itemData } = readData;
                 
                 if (!itemSnap.exists()) continue; // Skip if item master deleted
 
                 const masterData = itemSnap.data();
                 const currentQty = parseFloat(masterData.qtyOnHand) || 0;
-                
-                // ✅ FIX 3: Get Period In
                 const currentPeriodIn = parseFloat(masterData.periodIn) || 0;
 
-                const qtyToRemove = parseFloat(item.quantity);
-                const priceToRemove = parseFloat(item.price);
+                const qtyToRemove = parseFloat(itemData.quantity);
+                const priceToRemove = parseFloat(itemData.price);
 
                 if (currentQty < qtyToRemove) {
-                    throw new Error(`Cannot delete! Item "${item.name}" stock is lower than this batch quantity. Items have likely been sold.`);
+                    throw new Error(`Cannot delete! Item "${itemData.name}" stock is lower than this batch quantity. Items have likely been sold.`);
                 }
 
                 const newQty = currentQty - qtyToRemove;
@@ -358,7 +386,7 @@ const Inventory = ({ internalUser }) => {
                 // --- REVERSE COST LOGIC ---
                 if (masterData.isManualCosting === true) {
                      // MANUAL MODE: Do not touch cost on delete
-                     console.log(`Skipping reverse cost calculation for ${item.name} (Manual Mode Active)`);
+                     console.log(`Skipping reverse cost calculation for ${itemData.name} (Manual Mode Active)`);
                 } else {
                     // AUTOMATIC MODE: Reverse Weighted Average
                     const currentAvgCost = parseFloat(masterData.averageCost) || 0;
@@ -377,11 +405,11 @@ const Inventory = ({ internalUser }) => {
                 transaction.update(itemRef, {
                     qtyOnHand: newQty,
                     averageCost: newAvgCost,
-                    // ✅ FIX 4: Decrement Period In (Prevent Negative)
                     periodIn: Math.max(0, currentPeriodIn - qtyToRemove)
                 });
             }
 
+            // Finally delete the record
             transaction.delete(stockInRef);
         });
 
