@@ -171,16 +171,26 @@ const StockBalance = () => {
     });
   }, [stockData, sortConfig]);
 
-  const filteredData = showUnbalancedOnly 
-    ? sortedData.filter(item => item.availableQty < 0)
-    : sortedData;
+  // ✅ FILTERING LOGIC: Strictly Exclude 'ourProduct'
+  const filteredData = sortedData.filter(item => {
+      // 1. Strict Check: Exclude Finished Products
+      // Now that 'item.type' is correctly populated by inventoryUtils, this works.
+      const isFinishedProduct = item.type === 'ourProduct' || item.itemType === 'ourProduct';
+      if (isFinishedProduct) return false;
 
-  // --- UPDATED EXPORT FUNCTION: Downloads ALL data, not just current page ---
+      // 2. Check Unbalanced filter
+      if (showUnbalancedOnly) {
+          return item.availableQty < 0;
+      }
+
+      return true;
+  });
+
+  // --- EXPORT FUNCTION: Downloads ALL data, excluding Finished Products ---
   const handleFullExport = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    // Confirm with user because this costs reads
     if (!window.confirm("Download full inventory report?\n\n(This will fetch ALL items from the database)")) {
         return;
     }
@@ -198,29 +208,29 @@ const StockBalance = () => {
       }
 
       // 2. Prepare CSV Header
-      const headers = ["Item Name", "Category", "Opening Stock", "Period In", "Period Out", "Available Qty"];
+      const headers = ["Item Name", "Category", "Type", "Opening Stock", "Period In", "Period Out", "Available Qty"];
       
       // 3. Process Data & Calculate Balance
-      const rows = snapshot.docs.map(doc => {
-        const data = doc.data();
-        
-        // Ensure numbers are treated as numbers
-        const open = Number(data.openingStock) || 0;
-        const pIn = Number(data.periodIn) || 0;
-        const pOut = Number(data.periodOut) || 0;
-        
-        // Calculate Available Qty on the fly to match the table logic
-        const available = open + pIn - pOut; 
+      const rows = snapshot.docs
+        .map(doc => doc.data())
+        // ✅ FILTER: Exclude Finished Products from Export
+        .filter(data => data.type !== 'ourProduct' && data.itemType !== 'ourProduct')
+        .map(data => {
+            const open = Number(data.openingStock) || 0;
+            const pIn = Number(data.periodIn) || 0;
+            const pOut = Number(data.periodOut) || 0;
+            
+            const available = open + pIn - pOut; 
 
-        // Return CSV formatted row
-        return [
-          `"${data.item || 'Unknown'}"`, 
-          `"${data.category || '-'}"`, 
-          open, 
-          pIn, 
-          pOut, 
-          available
-        ].join(",");
+            return [
+            `"${data.item || data.name || 'Unknown'}"`, 
+            `"${data.category || '-'}"`, 
+            `"${data.type === 'buySell' ? 'Buy/Sell' : 'Stores/Raw'}"`,
+            open, 
+            pIn, 
+            pOut, 
+            available
+            ].join(",");
       });
 
       // 4. Combine and Download
@@ -231,7 +241,7 @@ const StockBalance = () => {
       
       const dateStr = new Date().toISOString().slice(0,10);
       link.setAttribute("href", url);
-      link.setAttribute("download", `Full_Stock_Balance_${dateStr}.csv`);
+      link.setAttribute("download", `Filtered_Stock_Balance_${dateStr}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -243,14 +253,13 @@ const StockBalance = () => {
       setProcessing(false);
     }
   };
-  // -------------------------------------------------------------------------
 
   return (
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.headerContainer}>
         <h2 style={styles.header}>Stock Balance Report</h2>
-        <p style={styles.subHeader}>View inventory levels (Page {page})</p>
+        <p style={styles.subHeader}>View inventory levels (Excludes Finished Products)</p>
         {stockReminderThreshold && (
           <div style={styles.reminderNote}><AiOutlineExclamationCircle size={16} /><span>Items below threshold ({stockReminderThreshold}%) are highlighted in yellow.</span></div>
         )}
@@ -273,7 +282,6 @@ const StockBalance = () => {
               <AiOutlineFieldTime size={18} /> Close Period
           </button>
           
-          {/* UPDATED EXPORT BUTTON */}
           <button style={styles.exportButton} onClick={handleFullExport} disabled={processing || loading}>
               <AiOutlineDownload size={18} /> Export All Data
           </button>
@@ -290,7 +298,6 @@ const StockBalance = () => {
                 </div>
             ) : (
               <table style={styles.table}>
-                {/* Added Caption for Sorting Clarity */}
                 <caption style={{captionSide: 'top', textAlign: 'right', fontSize: '12px', color: '#999', paddingBottom: '5px', paddingRight: '15px'}}>
                    * Sorting applies to this page only
                 </caption>
@@ -307,11 +314,9 @@ const StockBalance = () => {
                 <tbody>
                   {filteredData.length > 0 ? (
                     filteredData.map((item, idx) => {
-                      // Calculate percentage using (Opening + PeriodIn)
                       const throughput = (Number(item.openingStock) || 0) + (Number(item.periodIn) || 0);
                       const percentage = throughput > 0 ? (item.availableQty / throughput) * 100 : 100;
                       
-                      // Highlight Logic
                       const isLow = stockReminderThreshold !== null && percentage <= stockReminderThreshold && throughput > 0;
                       const isUnbal = item.availableQty < 0;
 
@@ -328,13 +333,13 @@ const StockBalance = () => {
                         </tr>
                       );
                     })
-                  ) : (<tr><td colSpan={6} style={styles.noData}>No data found.</td></tr>)}
+                  ) : (<tr><td colSpan={6} style={styles.noData}>No data found (check filters).</td></tr>)}
                 </tbody>
               </table>
             )}
         </div>
         
-        {/* Firebase Pagination Controls */}
+        {/* Pagination Controls */}
         <div style={styles.pagination}>
           <button 
             style={{...styles.paginationButton, opacity: page === 1 ? 0.5 : 1}} 

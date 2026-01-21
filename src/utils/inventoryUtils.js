@@ -42,27 +42,22 @@ export const calculateStockBalances = async (db, uid, lastVisible = null, pageSi
         return { data: [], lastVisible: null };
     }
 
-    // 2. Process the 50 Items
-    // We use Promise.all to fetch transactions in parallel for these specific items
+    // 2. Process the Items
     const processedItems = await Promise.all(itemsSnap.docs.map(async (doc) => {
         const data = doc.data();
         const itemId = doc.id;
-        
-        // REVISED: Fetching sub-transactions for 50 items is heavy.
-        // Better approach: Just return the Item Master data. 
-        // If you need perfect PeriodIn/Out columns, we need to restructure data to store 
-        // "periodIn" on the item document itself during StockIn.
-        // FOR NOW: We will use the live "qtyOnHand" from the item document.
         
         return {
             id: itemId,
             item: data.name || "Unknown",
             category: data.category || "N/A",
+            // ✅ ADDED: Include 'type' so we can filter in the UI
+            type: data.type || "", 
+            itemType: data.itemType || "", 
+            
             openingStock: Number(data.openingStock) || 0,
             
-            // If you haven't updated Inventory.js to save 'periodIn' on the item, 
-            // these might be 0 until you do. 
-            // But 'availableQty' will be 100% correct because it's the live field.
+            // Using live qtyOnHand
             periodIn: data.periodIn || 0, 
             periodOut: data.periodOut || 0,
             
