@@ -124,6 +124,9 @@ const Costing = ({ internalUser }) => {
   // --- Logic for Toggling Modes ---
   const handleToggleMode = async (item) => {
     if (processingId) return; // Prevent multiple clicks
+    // ✅ Extra safeguard: Prevent toggling for ourProduct
+    if (item.type === "ourProduct") return;
+
     const uid = auth.currentUser.uid;
     const itemRef = doc(db, uid, "items", "item_list", item.id);
     
@@ -244,68 +247,85 @@ const Costing = ({ internalUser }) => {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map(item => (
-                  <tr key={item.id} style={styles.tr}>
-                    <td style={styles.td}>
-                      <div style={styles.itemName}>{item.name}</div>
-                      <div style={styles.itemCode}>{item.itemCode}</div>
-                    </td>
-                    <td style={styles.td}>{item.category || "N/A"}</td>
-                    <td style={styles.td}>{item.qtyOnHand || 0} {item.unit}</td>
-                    
-                    {/* MODE TOGGLE */}
-                    <td style={styles.td}>
-                      <div style={styles.modeContainer}>
-                        {processingId === item.id ? (
-                           <div style={styles.buffering}><AiOutlineLoading className="spin" /> Updating...</div>
+                {filteredItems.map(item => {
+                  // ✅ Helper Check: "ourProduct" is Finished Product
+                  const isFinishedProduct = item.type === "ourProduct";
+                  // Force manual mode UI if it's a finished product, or if flag is set
+                  const isManualMode = item.isManualCosting || isFinishedProduct;
+
+                  return (
+                    <tr key={item.id} style={styles.tr}>
+                      <td style={styles.td}>
+                        <div style={styles.itemName}>{item.name}</div>
+                        <div style={styles.itemCode}>{item.itemCode}</div>
+                        {/* Visual indicator for type */}
+                        {isFinishedProduct && <span style={styles.typeBadge}>Finished Product</span>}
+                      </td>
+                      <td style={styles.td}>{item.category || "N/A"}</td>
+                      <td style={styles.td}>{item.qtyOnHand || 0} {item.unit}</td>
+                      
+                      {/* MODE TOGGLE */}
+                      <td style={styles.td}>
+                        <div style={styles.modeContainer}>
+                          {processingId === item.id ? (
+                             <div style={styles.buffering}><AiOutlineLoading className="spin" /> Updating...</div>
+                          ) : isFinishedProduct ? (
+                            // ✅ LOCKED MANUAL VIEW for Finished Products
+                            <div style={{...styles.toggleBtn, cursor: 'not-allowed', opacity: 0.8}} title="Finished Products must be manually costed">
+                                <BsToggleOn size={24} color="#e74c3c" /> 
+                                <span style={{color: '#e74c3c'}}>Manual</span>
+                                <AiFillLock size={14} color="#999" style={{marginLeft: 4}}/>
+                            </div>
+                          ) : (
+                            // STANDARD TOGGLE for Buy/Sell Items
+                            <button 
+                              onClick={() => handleToggleMode(item)}
+                              style={styles.toggleBtn}
+                              title={item.isManualCosting ? "Switch to Automatic" : "Switch to Manual"}
+                            >
+                              {item.isManualCosting ? (
+                                <><BsToggleOn size={24} color="#e74c3c" /> <span style={{color: '#e74c3c'}}>Manual</span></>
+                              ) : (
+                                <><BsToggleOff size={24} color="#2ecc71" /> <span style={{color: '#2ecc71'}}>Automatic</span></>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* EDITABLE COST FIELD */}
+                      <td style={styles.td}>
+                        {isManualMode ? (
+                          <div style={styles.inputGroup}>
+                            <input 
+                              type="number" 
+                              style={styles.costInput}
+                              value={editValues[item.id] !== undefined ? editValues[item.id] : item.averageCost}
+                              onChange={(e) => setEditValues({ ...editValues, [item.id]: e.target.value })}
+                            />
+                          </div>
                         ) : (
+                          <span style={styles.autoCost}>
+                            Rs. {parseFloat(item.averageCost || 0).toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* SAVE BUTTON */}
+                      <td style={styles.td}>
+                        {isManualMode && (
                           <button 
-                            onClick={() => handleToggleMode(item)}
-                            style={styles.toggleBtn}
-                            title={item.isManualCosting ? "Switch to Automatic" : "Switch to Manual"}
+                            style={styles.saveBtn} 
+                            onClick={() => handleSaveManualCost(item)}
+                            disabled={processingId === item.id}
                           >
-                            {item.isManualCosting ? (
-                              <><BsToggleOn size={24} color="#e74c3c" /> <span style={{color: '#e74c3c'}}>Manual</span></>
-                            ) : (
-                              <><BsToggleOff size={24} color="#2ecc71" /> <span style={{color: '#2ecc71'}}>Automatic</span></>
-                            )}
+                            <AiOutlineSave size={18} /> Save
                           </button>
                         )}
-                      </div>
-                    </td>
-
-                    {/* EDITABLE COST FIELD */}
-                    <td style={styles.td}>
-                      {item.isManualCosting ? (
-                        <div style={styles.inputGroup}>
-                          <input 
-                            type="number" 
-                            style={styles.costInput}
-                            value={editValues[item.id] !== undefined ? editValues[item.id] : item.averageCost}
-                            onChange={(e) => setEditValues({ ...editValues, [item.id]: e.target.value })}
-                          />
-                        </div>
-                      ) : (
-                        <span style={styles.autoCost}>
-                          Rs. {parseFloat(item.averageCost || 0).toFixed(2)}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* SAVE BUTTON */}
-                    <td style={styles.td}>
-                      {item.isManualCosting && (
-                        <button 
-                          style={styles.saveBtn} 
-                          onClick={() => handleSaveManualCost(item)}
-                          disabled={processingId === item.id}
-                        >
-                          <AiOutlineSave size={18} /> Save
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -342,6 +362,7 @@ const styles = {
   td: { padding: '16px', color: '#334155', verticalAlign: 'middle' },
   itemName: { fontWeight: '600', color: '#0f172a' },
   itemCode: { fontSize: '12px', color: '#64748b' },
+  typeBadge: { display: 'inline-block', fontSize: '10px', backgroundColor: '#e0e7ff', color: '#3730a3', padding: '2px 6px', borderRadius: '4px', marginTop: '4px', fontWeight: '500' },
   loadingContainer: { padding: '40px', textAlign: 'center', color: '#64748b' },
   spinner: { width: '30px', height: '30px', border: '3px solid #e2e8f0', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 10px' },
   modeContainer: { display: 'flex', alignItems: 'center', gap: '8px' },
