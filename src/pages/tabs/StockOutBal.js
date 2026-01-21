@@ -52,7 +52,7 @@ const StockOutBal = () => {
 
     const showToast = (message, type = 'success') => setToast({ message, type });
 
-    // ✅ FIXED LOGIC: Handles Mid-Day Restocking correctly
+    // ✅ FIXED LOGIC: Strict Filtering using Item Master List
     const handleFetchSummary = useCallback(async () => {
         if (!summaryDate) { alert("Please select a date."); return; }
         setSummaryLoading(true);
@@ -63,6 +63,18 @@ const StockOutBal = () => {
         const endOfDay = Timestamp.fromDate(new Date(summaryDate + 'T23:59:59'));
         
         try {
+            // STEP 0: Fetch Strict Allowlist (Only 'buySell' items)
+            // This ensures we ONLY ever show items that are currently marked as Buy/Sell in the database.
+            const itemsRef = collection(db, uid, 'items', 'item_list');
+            const itemsQuery = query(itemsRef, where('type', '==', 'buySell'));
+            const itemsSnap = await getDocs(itemsQuery);
+            
+            const validBuySellNames = new Set();
+            itemsSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.name) validBuySellNames.add(data.name);
+            });
+
             // 1. Check for the most recently saved report for this day
             const reportsRef = collection(db, uid, 'reports', 'daily_summaries');
             const latestReportQuery = query(reportsRef, where("reportDate", "==", summaryDate), orderBy("savedAt", "desc"), limit(1));
@@ -72,25 +84,26 @@ const StockOutBal = () => {
             let currentSummaryMap = {}; // Use a map to aggregate data
 
             if (!latestReportSnap.empty) {
-                // A report exists. Load its state as the starting point.
+                // Load saved state as starting point
                 const latestReport = latestReportSnap.docs[0].data();
                 queryStartTime = latestReport.savedAt; 
                 setLastSaveTimestamp(latestReport.savedAt);
 
-                // Populate map with saved actuals (The saved actual becomes the new opening stock)
                 latestReport.items.forEach(item => {
-                    currentSummaryMap[item.name] = {
-                        name: item.name,
-                        stockOutQty: Number(item.actualQty) || 0, // Reset Stock Out to the Actual Count
-                        invoicedQty: 0
-                    };
+                    // Only add if it's in our valid list (Cleans up old data)
+                    if (validBuySellNames.has(item.name)) {
+                        currentSummaryMap[item.name] = {
+                            name: item.name,
+                            stockOutQty: Number(item.actualQty) || 0, // Reset Stock Out to the Actual Count
+                            invoicedQty: 0
+                        };
+                    }
                 });
             } else {
                 setLastSaveTimestamp(null);
             }
 
-            // 2. Fetch NEW Stock Outs (Restocking) since the start time
-            // This ensures items added mid-day are included
+            // 2. Fetch NEW Stock Outs
             const stockOutRef = collection(db, uid, 'inventory', 'stock_out');
             const stockOutQuery = query(stockOutRef, where('createdAt', '>=', queryStartTime), where('createdAt', '<=', endOfDay), where('type', '==', 'buySell'));
             const stockOutSnap = await getDocs(stockOutQuery);
@@ -98,7 +111,9 @@ const StockOutBal = () => {
             stockOutSnap.forEach(docSnap => {
                 const data = docSnap.data();
                 const itemName = data.item;
-                if (itemName) {
+                
+                // Double check against allowlist
+                if (itemName && validBuySellNames.has(itemName)) {
                     if (!currentSummaryMap[itemName]) {
                         currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
                     }
@@ -106,7 +121,7 @@ const StockOutBal = () => {
                 }
             });
             
-            // 3. Fetch NEW Invoices since the start time
+            // 3. Fetch NEW Invoices
             const invoicesRef = collection(db, uid, 'invoices', 'invoice_list');
             const invoicesQuery = query(invoicesRef, where('createdAt', '>=', queryStartTime), where('createdAt', '<=', endOfDay));
             const invoicesSnap = await getDocs(invoicesQuery);
@@ -114,9 +129,10 @@ const StockOutBal = () => {
             invoicesSnap.forEach(docSnap => {
                 docSnap.data().items?.forEach(item => {
                     const itemName = item.itemName;
-                    if (itemName) {
+                    
+                    // Strict Check: Only process if it is in our Master Buy/Sell List
+                    if (itemName && validBuySellNames.has(itemName)) {
                         if (!currentSummaryMap[itemName]) {
-                            // Edge case: Item sold but not stocked out? Initialize it.
                             currentSummaryMap[itemName] = { name: itemName, stockOutQty: 0, invoicedQty: 0 };
                         }
                         currentSummaryMap[itemName].invoicedQty += Number(item.quantity);
@@ -158,12 +174,11 @@ const StockOutBal = () => {
                 savedAt: saveTimestamp,
             });
 
-            // Update local state to reflect the new "Baseline" immediately
             const nextStateData = summaryData.map(item => {
                 const actualQty = Number(actualQuantities[item.name]) || 0;
                 return {
                     ...item,
-                    stockOutQty: actualQty, // The actual becomes the new start
+                    stockOutQty: actualQty,
                     invoicedQty: 0,
                 };
             });
