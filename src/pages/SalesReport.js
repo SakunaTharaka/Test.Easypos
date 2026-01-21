@@ -1,18 +1,19 @@
-import React, { useEffect, useState, useContext } from "react";
+import React, { useEffect, useState } from "react"; // Removed useContext
 import { auth, db } from "../firebase";
 import { 
-    collection, query, where, orderBy, getDocs, Timestamp, doc,
+    collection, query, where, orderBy, getDocs, getDoc, Timestamp, doc,
     limit, startAfter, endBefore, limitToLast, runTransaction, serverTimestamp
 } from "firebase/firestore";
 import Select from "react-select";
 import { AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
-import { CashBookContext } from "../context/CashBookContext";
+// Removed unused CashBookContext import
 
 // Define Theme Colors (Matches Dashboard.js)
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa', success: '#10b981', danger: '#ef4444' };
 
 const SalesReport = ({ internalUser }) => {
-  const { reconciledDates } = useContext(CashBookContext);
+  // Removed unused reconciledDates context hook
+  
   const [currentInvoices, setCurrentInvoices] = useState([]); 
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -49,9 +50,8 @@ const SalesReport = ({ internalUser }) => {
     `;
     document.head.appendChild(styleSheet);
     
-    // Cleanup on unmount (optional, but good practice if checking for duplicates)
     return () => {
-       // document.head.removeChild(styleSheet); // Often omitted in single-page apps to avoid flash, but logically correct
+       // cleanup
     };
   }, []);
 
@@ -113,8 +113,9 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
 
-  // --- DELETE HANDLER ---
+  // --- DELETE HANDLER (UPDATED SPECIFIC LOCK CHECK) ---
   const handleDelete = async (invoice) => {
+      // 1. Admin Permission Check
       if (!internalUser?.isAdmin) {
           alert("Access Denied: You do not have permission to delete invoices.");
           return;
@@ -123,15 +124,37 @@ const SalesReport = ({ internalUser }) => {
       const user = auth.currentUser;
       if (!user) return;
 
+      // 2. Reconciliation Check (Specific ID Check)
       if (invoice.createdAt) {
           const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
-          const dateStr = dateVal.toISOString().split('T')[0];
-          if (reconciledDates && reconciledDates.has(dateStr)) {
-              alert(`Cannot delete invoice from ${dateStr} because it has been reconciled and locked.`);
+          
+          // Generate Local YYYY-MM-DD
+          const year = dateVal.getFullYear();
+          const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+          const day = String(dateVal.getDate()).padStart(2, '0');
+          const dateStr = `${year}-${month}-${day}`;
+
+          try {
+              // Fetch the Locked Document for this specific date
+              const lockRef = doc(db, user.uid, 'user_data', 'locked_documents', dateStr);
+              const lockSnap = await getDoc(lockRef);
+
+              if (lockSnap.exists()) {
+                  const lockedIds = lockSnap.data().lockedIds || [];
+                  // Check if THIS invoice ID is in the locked list
+                  if (lockedIds.includes(invoice.id)) {
+                      alert(`Cannot delete Invoice ${invoice.invoiceNumber}. It has been explicitly reconciled and locked.`);
+                      return;
+                  }
+              }
+          } catch (e) {
+              console.error("Error verifying lock status:", e);
+              alert("System error verifying reconciliation status. Please try again.");
               return;
           }
       }
 
+      // 3. Confirmation
       if (!window.confirm(`Delete Invoice ${invoice.invoiceNumber}? This will deduct the amount from your wallet and reverse daily sales.`)) return;
 
       // START BUFFERING

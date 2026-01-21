@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react"; // Removed useContext
 import { auth, db } from "../../firebase"; 
 import {
   collection,
@@ -13,8 +13,11 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaEye } from 'react-icons/fa';
+// Removed unused CashBookContext import
 
 const Orders = ({ internalUser }) => {
+  // Removed unused reconciledDates variable
+
   // Data State
   const [priceCategories, setPriceCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null); 
@@ -59,7 +62,7 @@ const Orders = ({ internalUser }) => {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [tempSelectedItem, setTempSelectedItem] = useState(null);
   
-  // ✅ NEW: Shift State
+  // Shift State
   const [shiftProductionEnabled, setShiftProductionEnabled] = useState(false);
   const [availableShifts, setAvailableShifts] = useState([]);
   const [selectedShift, setSelectedShift] = useState("");
@@ -75,19 +78,16 @@ const Orders = ({ internalUser }) => {
     const initialize = async () => {
       fetchProvisionalInvoiceNumber();
       
-      // 1. Fetch Categories first
       const catCol = collection(db, uid, "price_categories", "categories");
       const snap = await getDocs(catCol);
       const categoriesList = snap.docs.map(d => ({ value: d.id, label: d.data().name }));
       setPriceCategories(categoriesList);
 
-      // 2. Fetch Settings and apply Default
       const settingsSnap = await getDoc(doc(db, uid, "settings"));
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setSettings(data);
         
-        // Check if there is a default category saved in settings
         if (data.serviceJobPriceCategory) {
             const defaultCat = categoriesList.find(c => c.value === data.serviceJobPriceCategory);
             if (defaultCat) {
@@ -95,12 +95,10 @@ const Orders = ({ internalUser }) => {
             }
         }
 
-        // ✅ NEW: Load Shift Settings
         if (data.useShiftProduction) {
             setShiftProductionEnabled(true);
             setAvailableShifts(data.productionShifts || []);
             
-            // Try to load saved shift from localStorage
             const savedShift = localStorage.getItem('savedSelectedShift');
             if (savedShift && data.productionShifts?.includes(savedShift)) {
                 setSelectedShift(savedShift);
@@ -113,7 +111,6 @@ const Orders = ({ internalUser }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
-  // ✅ NEW: Save Shift to LocalStorage when changed
   useEffect(() => { 
       if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); 
   }, [selectedShift]);
@@ -195,7 +192,7 @@ const Orders = ({ internalUser }) => {
   const selectItemAndJumpToQty = (item) => { 
       setItemInput(item.itemName); 
       setTempSelectedItem(item); 
-      setPriceInput(item.price); // Auto-fill price
+      setPriceInput(item.price); 
       setShowDropdown(false); 
       qtyInputRef.current.focus(); 
       qtyInputRef.current.select(); 
@@ -220,22 +217,18 @@ const Orders = ({ internalUser }) => {
       setItemInput(""); setQtyInput(1); setPriceInput(""); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
   };
 
-  // Helper: Get Date in Sri Lanka Time
   const getSriLankaDate = (dateObj = new Date()) => {
-    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
   };
 
   const handleSaveClick = () => {
-    // ✅ VALIDATION: Check for Category, Items, Name, Phone, and Delivery Date
     if (!selectedCategory) return alert("Please select a Price Category.");
     if (checkout.length === 0) return alert("Please add at least one item.");
     
-    // Check Mandatory Fields
     if (!customerName.trim()) return alert("Customer Name is mandatory.");
     if (!customerPhone.trim()) return alert("Phone Number is mandatory.");
     if (!deliveryDate) return alert("Delivery Date is mandatory.");
 
-    // ✅ NEW: Validation for Shift
     if (shiftProductionEnabled && !selectedShift) return alert("Please select a Shift.");
 
     setPendingAction({ type: 'SAVE' });
@@ -245,7 +238,6 @@ const Orders = ({ internalUser }) => {
 
   const handleCompleteClick = (order) => { setPendingAction({ type: 'COMPLETE', order }); setConfirmPaymentMethod('Cash'); setShowPaymentConfirm(true); };
   
-  // View Handler
   const handleViewOrder = (order) => {
       setSelectedOrder(order);
       setIsViewModalOpen(true);
@@ -258,12 +250,10 @@ const Orders = ({ internalUser }) => {
       else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
   };
 
-  // --- SAVE ORDER (UPDATED: Adds Advance to Daily Sales & Payment Specific Field) ---
   const executeSaveOrder = async (paymentMethod) => {
     setIsSaving(true);
     try {
         await runTransaction(db, async (transaction) => {
-            // PHASE 1: ALL READS
             const today = new Date();
             const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
             
@@ -272,7 +262,6 @@ const Orders = ({ internalUser }) => {
             const currentCount = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
             const newCount = currentCount + 1;
             
-            // Wallet Reads
             let walletDocId = null;
             let salesMethodField = null;
 
@@ -289,21 +278,18 @@ const Orders = ({ internalUser }) => {
                 }
             }
             
-            // Daily Stats Read
             const dailyDateString = getSriLankaDate(); 
             const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
             const dailyStatsSnap = await transaction.get(dailyStatsRef);
             const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
             const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
 
-            // PHASE 2: CALCULATIONS & WRITES
             const newInvNum = `ORD-${datePrefix}-${String(newCount).padStart(4, "0")}`;
             const subtotal = checkout.reduce((sum, i) => sum + (i.price * i.quantity), 0);
             const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
             const grandTotal = subtotal + dCharge;
             const advance = Number(advanceAmount) || 0;
 
-            // Update Daily Stats (Add Advance to Total AND Specific Method)
             if (advance > 0) {
                  transaction.set(dailyStatsRef, { 
                     totalSales: currentDailySales + advance,
@@ -333,7 +319,6 @@ const Orders = ({ internalUser }) => {
                 remarks: `[ADVANCE] Order Total Value: ${grandTotal.toFixed(2)}. ${remarks}`,
                 relatedOrderId: orderRef.id,
                 paymentMethod: paymentMethod,
-                // ✅ NEW: Save Shift
                 shift: selectedShift || ""
             };
 
@@ -351,7 +336,6 @@ const Orders = ({ internalUser }) => {
                 linkedInvoiceId: invRef.id,
                 deliveryDate,
                 remarks,
-                // ✅ NEW: Save Shift
                 shift: selectedShift || ""
             };
 
@@ -373,16 +357,10 @@ const Orders = ({ internalUser }) => {
     finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- COMPLETE ORDER (UPDATED: Adds Balance to Daily Sales & Payment Specific Field) ---
   const executeCompleteOrder = async (order, paymentMethod) => {
       setIsSaving(true);
       try {
           await runTransaction(db, async (transaction) => {
-              // =========================================================
-              // PHASE 1: ALL READS
-              // =========================================================
-              
-              // 1. Read Wallet & Determine Field
               let walletDocId = null;
               let salesMethodField = null;
 
@@ -400,16 +378,11 @@ const Orders = ({ internalUser }) => {
                   }
               }
 
-              // 2. Read Daily Stats
               const dailyDateString = getSriLankaDate(); 
               const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
               const dailyStatsSnap = await transaction.get(dailyStatsRef);
               const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
               const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
-
-              // =========================================================
-              // PHASE 2: ALL WRITES
-              // =========================================================
 
               const orderDocRef = doc(db, uid, "data", "orders", order.id);
               transaction.update(orderDocRef, { status: "Completed" });
@@ -420,7 +393,6 @@ const Orders = ({ internalUser }) => {
               }
 
               if (order.balance > 0) {
-                  // Add balance to daily stats (Aggregate & Specific)
                   transaction.set(dailyStatsRef, { 
                     totalSales: currentDailySales + order.balance,
                     [salesMethodField]: currentMethodSales + order.balance,
@@ -458,19 +430,49 @@ const Orders = ({ internalUser }) => {
       finally { setIsSaving(false); setPendingAction(null); }
   };
 
-  // --- DELETE ORDER (UPDATED: DEDUCT FROM WALLET & DAILY SALES SPECIFIC FIELDS) ---
+  // --- DELETE ORDER (UPDATED WITH SPECIFIC ID CHECK) ---
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
+      // ✅ 1. Reconciliation Check (Specific ID Check)
+      const orderToDelete = savedOrders.find(o => o.id === orderId);
+      
+      if (orderToDelete && orderToDelete.createdAt) {
+          const dateVal = orderToDelete.createdAt.toDate ? orderToDelete.createdAt.toDate() : new Date(orderToDelete.createdAt);
+          
+          // Generate Local YYYY-MM-DD
+          const year = dateVal.getFullYear();
+          const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+          const day = String(dateVal.getDate()).padStart(2, '0');
+          const dateStr = `${year}-${month}-${day}`;
+
+          try {
+              // Fetch the Locked Document for this specific date
+              const lockRef = doc(db, uid, 'user_data', 'locked_documents', dateStr);
+              const lockSnap = await getDoc(lockRef);
+
+              if (lockSnap.exists()) {
+                  const lockedIds = lockSnap.data().lockedIds || [];
+                  // Check if THIS order ID is in the locked list
+                  if (lockedIds.includes(orderId)) {
+                      alert(`Cannot delete Order. It has been explicitly reconciled and locked.`);
+                      return;
+                  }
+              }
+          } catch (e) {
+              console.error("Error verifying lock status:", e);
+              alert("System error verifying reconciliation status. Please try again.");
+              return;
+          }
+      }
+
       if(!window.confirm("Delete this order and linked invoices? This will deduct amounts from wallet.")) return;
       
       try {
           await runTransaction(db, async (transaction) => {
-              // 1. Get Order Data
               const orderRef = doc(db, uid, "data", "orders", orderId);
               const orderSnap = await transaction.get(orderRef);
               if (!orderSnap.exists()) throw new Error("Order not found");
               const orderData = orderSnap.data();
 
-              // 2. Find Linked Advance Invoice
               let advInvoiceRef = null;
               let advInvoiceData = null;
               if (linkedInvoiceId) {
@@ -479,7 +481,6 @@ const Orders = ({ internalUser }) => {
                   if (advSnap.exists()) advInvoiceData = advSnap.data();
               }
 
-              // 3. Find Potential Balance Invoice
               let balInvoiceRef = null;
               let balInvoiceData = null;
               if (orderData.orderNumber) {
@@ -493,8 +494,7 @@ const Orders = ({ internalUser }) => {
                   }
               }
 
-              // 4. Helper to Collect Reversal Operations
-              const ops = []; // { type: 'wallet'|'stats', ref: ..., amount: ..., field: ... }
+              const ops = []; 
 
               const prepareReversal = async (invoice) => {
                   if (!invoice || !invoice.received || invoice.received <= 0) return;
@@ -506,21 +506,19 @@ const Orders = ({ internalUser }) => {
                   else if (invoice.paymentMethod === 'Card') { wId = 'card'; salesMethodField = 'totalSales_card'; }
                   else if (invoice.paymentMethod === 'Online') { wId = 'online'; salesMethodField = 'totalSales_online'; }
 
-                  // Wallet Read
                   if (wId) {
                       const wRef = doc(db, uid, "wallet", "accounts", wId);
-                      const wDoc = await transaction.get(wRef); // READ
+                      const wDoc = await transaction.get(wRef); 
                       if (wDoc.exists()) {
                            ops.push({ type: 'wallet', ref: wRef, currentVal: Number(wDoc.data().balance) || 0, deduct: Number(invoice.received) });
                       }
                   }
 
-                  // Daily Stats Read
                   if (invoice.createdAt) {
                       const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
                       const dailyDateString = getSriLankaDate(dateVal);
                       const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
-                      const dailyStatsSnap = await transaction.get(dailyStatsRef); // READ
+                      const dailyStatsSnap = await transaction.get(dailyStatsRef); 
                       if (dailyStatsSnap.exists()) {
                           const data = dailyStatsSnap.data();
                           const currentTotal = Number(data.totalSales) || 0;
@@ -538,11 +536,9 @@ const Orders = ({ internalUser }) => {
                   }
               };
 
-              // EXECUTE READS
               if (advInvoiceData) await prepareReversal(advInvoiceData);
               if (balInvoiceData) await prepareReversal(balInvoiceData);
 
-              // EXECUTE WRITES
               ops.forEach(op => {
                   if (op.type === 'wallet') {
                       transaction.set(op.ref, { balance: op.currentVal - op.deduct, lastUpdated: serverTimestamp() }, { merge: true });
@@ -558,7 +554,6 @@ const Orders = ({ internalUser }) => {
                   }
               });
 
-              // Delete Documents
               transaction.delete(orderRef);
               if (advInvoiceRef) transaction.delete(advInvoiceRef);
               if (balInvoiceRef) transaction.delete(balInvoiceRef);
@@ -577,7 +572,6 @@ const Orders = ({ internalUser }) => {
     setItemInput(""); fetchProvisionalInvoiceNumber();
   };
 
-  // Calculations & Helpers
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const dCharge = (settings?.offerDelivery && Number(deliveryCharge)) ? Number(deliveryCharge) : 0;
   const grandTotal = subtotal + dCharge;
@@ -604,7 +598,6 @@ const Orders = ({ internalUser }) => {
                 <div style={styles.invoiceBadge}>{invoiceNumber}</div>
             </div>
             
-            {/* ✅ NEW: Shift Selector UI */}
             {shiftProductionEnabled && (
                 <div style={{ width: 150, marginRight: 15 }}>
                     <label style={styles.label}>Shift *</label>
@@ -624,17 +617,14 @@ const Orders = ({ internalUser }) => {
         <div style={styles.formContent}>
             <div style={styles.gridThree}>
                 <div style={styles.inputGroup}>
-                    {/* ✅ MODIFIED: Added Asterisk */}
                     <label style={styles.label}>Customer Name *</label>
                     <input style={styles.input} value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Walk-in Customer" />
                 </div>
                 <div style={styles.inputGroup}>
-                    {/* ✅ MODIFIED: Added Asterisk */}
                     <label style={styles.label}>Phone Number *</label>
                     <input type="text" style={styles.input} value={customerPhone} onChange={(e) => { const val = e.target.value.replace(/\D/g, ''); if (val.length <= 10) setCustomerPhone(val); }} placeholder="07xxxxxxxx" />
                 </div>
                 <div style={styles.inputGroup}>
-                    {/* ✅ MODIFIED: Added Asterisk */}
                     <label style={styles.label}>Delivery Date *</label>
                     <input type="datetime-local" style={styles.input} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} />
                 </div>
@@ -718,7 +708,6 @@ const Orders = ({ internalUser }) => {
                           <span style={order.status==='Pending' ? styles.statusPending : styles.statusCompleted}>{order.status}</span>
                       </div>
                       <div style={styles.orderMeta}>
-                          {/* ✅ NEW: Show Shift in History if exists */}
                           {order.shift && <div style={styles.metaRow}><span>Shift:</span> <strong>{order.shift}</strong></div>}
                           
                           <div style={styles.metaRow}><span>Total:</span> <strong>{order.totalAmount?.toFixed(2)}</strong></div>
@@ -844,7 +833,6 @@ const styles = {
   inputGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
   label: { fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase' },
   input: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', transition: 'border 0.2s', width: '100%', boxSizing: 'border-box' },
-  // ✅ NEW: Styling for select dropdown similar to input
   inputSelect: { padding: '8px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '14px', outline: 'none', width: '100%', boxSizing: 'border-box', height: '38px' },
   inputBig: { padding: '10px 12px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '16px', fontWeight: '600', width: '100%', boxSizing: 'border-box' },
   divider: { margin: '24px 0', borderTop: '1px solid #e5e7eb' },

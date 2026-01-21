@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { db, auth } from '../../firebase';
-import { collection, query, where, getDocs, doc, setDoc, addDoc, serverTimestamp, orderBy, limit, startAfter, endBefore } from 'firebase/firestore';
+import { 
+    collection, query, where, getDocs, doc, setDoc, addDoc, 
+    serverTimestamp, orderBy, limit, startAfter, endBefore, arrayUnion 
+} from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
 import { AiOutlineLock, AiOutlineUnlock, AiOutlineEye, AiOutlinePrinter, AiOutlineLeft, AiOutlineRight } from 'react-icons/ai';
+
+// ✅ HELPER: Get Local Date String
+const getLocalDate = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
 
 const ReconciliationReportModal = ({ report, onClose }) => {
     useEffect(() => {
@@ -81,7 +93,9 @@ const ReconciliationReportModal = ({ report, onClose }) => {
 
 const Reconcile = () => {
     const { reconciledDates, refreshBalances } = useContext(CashBookContext);
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    
+    const [selectedDate, setSelectedDate] = useState(getLocalDate());
+    
     const [summaryData, setSummaryData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [isReconciling, setIsReconciling] = useState(false);
@@ -92,7 +106,6 @@ const Reconcile = () => {
     const [historyPage, setHistoryPage] = useState(1);
     const [hasNextPage, setHasNextPage] = useState(false);
     
-    // Pagination Refs (Use Refs to avoid dependency loops/blinking)
     const lastVisibleRef = useRef(null);
     const firstVisibleRef = useRef(null);
     
@@ -141,7 +154,7 @@ const Reconcile = () => {
                 }
             }
 
-            // 2. Fetch Transactions (NO Credit Customer Filtering)
+            // 2. Fetch Transactions
             const [invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
                 getDocs(query(
                     collection(db, uid, 'invoices', 'invoice_list'), 
@@ -162,11 +175,11 @@ const Reconcile = () => {
                 ))
             ]);
 
-            const allInvoices = invoicesSnap.docs.map(d => d.data());
-            const allExpenses = expensesSnap.docs.map(d => d.data());
-            const allStockPayments = stockPaymentsSnap.docs.map(d => d.data());
+            // Map data with ID for locking later
+            const allInvoices = invoicesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const allExpenses = expensesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const allStockPayments = stockPaymentsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
             
-            // Simplified categorization by payment method
             const cashSalesList = allInvoices.filter(i => i.paymentMethod === 'Cash');
             const cardSalesList = allInvoices.filter(i => i.paymentMethod === 'Card');
             const onlineSalesList = allInvoices.filter(i => i.paymentMethod === 'Online');
@@ -196,7 +209,6 @@ const Reconcile = () => {
             orderBy('reconciledAt', 'desc')
         ];
 
-        // Use Refs for cursors to prevent dependency loops
         if (direction === 'next' && lastVisibleRef.current) {
             q = query(historyColRef, ...baseQuery, startAfter(lastVisibleRef.current), limit(REPORTS_PER_PAGE));
         } else if (direction === 'prev' && firstVisibleRef.current) {
@@ -230,7 +242,6 @@ const Reconcile = () => {
     }, []);
 
     useEffect(() => {
-        // Reset state on date change
         setHistoryPage(1);
         lastVisibleRef.current = null;
         firstVisibleRef.current = null;
@@ -250,14 +261,16 @@ const Reconcile = () => {
         }
     }
     
+    // ✅ NEW: Reconcile Logic - Saves IDs to a single document
     const handleReconcile = async () => {
-        if (!window.confirm("Are you sure you want to save this reconciliation report? This will lock the current day from deletions if it's the first report.")) return;
+        if (!window.confirm("Save Reconciliation? This will lock the listed transactions from deletion.")) return;
         setIsReconciling(true);
         const user = auth.currentUser;
         const internalUser = getCurrentInternal();
         const uid = user.uid;
         
         try {
+            // 1. Create the History Report (Snapshot of what happened)
             await addDoc(collection(db, uid, 'user_data', 'reconciliation_history'), {
                 summary: summaryData,
                 reconciliationDate: selectedDate,
@@ -265,14 +278,37 @@ const Reconcile = () => {
                 reconciledBy: internalUser?.username || user.email
             });
 
+            // 2. Lock Documents (Collect IDs)
+            const allItemsToLock = [
+                ...summaryData.cardSales.list,
+                ...summaryData.onlineSales.list,
+                ...summaryData.cashSales.list,
+                ...summaryData.expenses.list,
+                ...summaryData.stockPayments.list
+            ];
+
+            const allIds = allItemsToLock.map(item => item.id).filter(id => id);
+
+            if (allIds.length > 0) {
+                // ✅ Store IDs in: uid -> user_data -> locked_documents -> {DATE}
+                const lockedDocsRef = doc(db, uid, 'user_data', 'locked_documents', selectedDate);
+                
+                await setDoc(lockedDocsRef, {
+                    lockedIds: arrayUnion(...allIds), // Append IDs to today's list
+                    lastReconciledAt: serverTimestamp()
+                }, { merge: true });
+            }
+
+            // 3. Mark Date as Reconciled (For UI Banner)
             if (!isDateReconciled) {
                 await setDoc(doc(db, uid, 'user_data', 'reconciliations', selectedDate), {
                     reconciledAt: serverTimestamp(),
                     reconciledBy: internalUser?.username || user.email
                 });
             }
+
             await refreshBalances();
-            alert("Reconciliation report saved successfully!");
+            alert("Reconciliation saved! Items included are now locked.");
             fetchSummaryData(selectedDate);
             fetchHistory(selectedDate, 'initial');
         } catch (error) {
@@ -313,7 +349,7 @@ const Reconcile = () => {
                 </div>
                 <div style={styles.datePickerContainer}>
                     <label>Select Date:</label>
-                    <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={styles.dateInput} />
+                    <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={styles.dateInput} max={getLocalDate()}/>
                 </div>
             </div>
 
@@ -329,7 +365,7 @@ const Reconcile = () => {
                     </div>
                 )}
                 <div style={styles.dayEndContainer}>
-                    {isDateReconciled && <div style={styles.reconciledBanner}><AiOutlineLock /> This day is locked. Deletions are disabled.</div>}
+                    {isDateReconciled && <div style={styles.reconciledBanner}><AiOutlineLock /> This day has reports. Transactions are locked individually.</div>}
                     <button onClick={handleReconcile} style={!hasDataToReconcile || isReconciling || loading ? styles.reconcileButtonDisabled : styles.reconcileButton} disabled={!hasDataToReconcile || isReconciling || loading}>
                         {isDateReconciled ? <AiOutlineLock /> : <AiOutlineUnlock /> }
                         {isReconciling ? 'Saving...' : 'Save Reconciliation Report'}

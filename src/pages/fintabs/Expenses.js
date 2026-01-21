@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from "react";
 import { db, auth } from "../../firebase";
-// Removed unused 'addDoc'
-import { collection, query, getDocs, serverTimestamp, orderBy, doc, getDoc, runTransaction, limit, startAfter, where, deleteDoc } from "firebase/firestore";
+import { 
+    collection, query, getDocs, serverTimestamp, orderBy, doc, getDoc, // ✅ Added getDoc
+    runTransaction, limit, startAfter, where, deleteDoc 
+} from "firebase/firestore";
 import { AiOutlineSearch, AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
 import CreatableSelect from 'react-select/creatable';
 import { CashBookContext } from "../../context/CashBookContext";
 
 const Expenses = ({ goToSettings }) => {
-  const { cashBooks, cashBookBalances, reconciledDates, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
+  const { cashBooks, cashBookBalances, refreshBalances, loading: balancesLoading } = useContext(CashBookContext);
 
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [formState, setFormState] = useState({ category: null, amount: "", details: "", cashBook: null });
@@ -207,18 +209,40 @@ const Expenses = ({ goToSettings }) => {
     setIsSubmitting(false);
   };
   
+  // --- UPDATED DELETE HANDLER ---
   const handleDelete = async (item) => {
       const itemDate = (item.createdAt || item.paidAt)?.toDate();
       if (!itemDate) return alert("Cannot delete: transaction has no valid date.");
       
-      const dateString = itemDate.toISOString().split('T')[0];
-      if (reconciledDates.has(dateString)) {
-          return alert(`Cannot delete this transaction because the date ${dateString} has been reconciled and is locked.`);
+      const uid = auth.currentUser.uid;
+      
+      // ✅ 1. Specific Reconciliation Lock Check
+      // Manually construct YYYY-MM-DD using Local Time components
+      const year = itemDate.getFullYear();
+      const month = String(itemDate.getMonth() + 1).padStart(2, '0');
+      const day = String(itemDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+
+      try {
+          const lockRef = doc(db, uid, 'user_data', 'locked_documents', dateStr);
+          const lockSnap = await getDoc(lockRef);
+
+          if (lockSnap.exists()) {
+              const lockedIds = lockSnap.data().lockedIds || [];
+              // Check if THIS specific ID is in the locked list
+              if (lockedIds.includes(item.id)) {
+                  alert(`Cannot delete this transaction. It has been explicitly reconciled and locked.`);
+                  return;
+              }
+          }
+      } catch (e) {
+          console.error("Error verifying lock status:", e);
+          alert("System error verifying reconciliation status. Please try again.");
+          return;
       }
 
       if (!window.confirm(`Are you sure you want to delete this ${item.type}?`)) return;
 
-      const uid = auth.currentUser.uid;
       const collectionPath = item.type === 'Expense' ? `/${uid}/user_data/expenses` : `/${uid}/stock_payments/payments`;
       try {
           await deleteDoc(doc(db, collectionPath, item.id));
@@ -313,10 +337,9 @@ const Expenses = ({ goToSettings }) => {
                           <td style={styles.td}>
                               <div>{item.details || item.receiverName}</div>
                               <div style={styles.subText}>
-                                  {/* ✅ UPDATED: Shows account name for Online Payments */}
                                   {item.type === 'Expense' 
-                                      ? `Paid from: ${item.cashBookName || 'N/A'}` 
-                                      : `Method: ${item.method}${item.method === 'Online Payment' && item.walletName ? ` from ${item.walletName}` : ''}`}
+                                    ? `Paid from: ${item.cashBookName || 'N/A'}` 
+                                    : `Method: ${item.method}${item.method === 'Online Payment' && item.walletName ? ` from ${item.walletName}` : ''}`}
                               </div>
                           </td>
                           <td style={{ ...styles.td, color: '#2c3e50', fontWeight: 'bold' }}>Rs. {item.amount.toFixed(2)}</td>

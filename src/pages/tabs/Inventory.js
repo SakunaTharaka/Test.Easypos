@@ -11,7 +11,7 @@ import {
   runTransaction,
   orderBy,
   limit,
-  startAfter,
+  startAfter
 } from "firebase/firestore";
 import { 
   AiOutlinePlus, 
@@ -251,14 +251,9 @@ const Inventory = ({ internalUser }) => {
             createdAt: serverTimestamp(),
           };
 
-          // ---------------------------------------------------------
-          // PHASE 1: READ ALL ITEMS (Before any Writes)
-          // ---------------------------------------------------------
           const readOperations = [];
           for (const item of stagedItems) {
               const itemRef = doc(db, uid, "items", "item_list", item.value);
-              // We must perform the get inside the loop and await it, 
-              // or gather promises. Awaiting sequentially is safer in transactions to avoid race conditions in logic.
               const itemSnap = await transaction.get(itemRef);
               readOperations.push({ 
                   itemRef, 
@@ -267,9 +262,6 @@ const Inventory = ({ internalUser }) => {
               });
           }
 
-          // ---------------------------------------------------------
-          // PHASE 2: CALCULATE & WRITE ALL ITEMS
-          // ---------------------------------------------------------
           for (const operation of readOperations) {
               const { itemRef, itemSnap, inputItem } = operation;
               
@@ -284,20 +276,17 @@ const Inventory = ({ internalUser }) => {
               let newQty = oldQty + incomingQty;
               let newAvgCost = parseFloat(data.averageCost) || 0;
 
-              // --- COST CALCULATION LOGIC ---
               if (data.isManualCosting === true) {
-                  // MANUAL MODE: Do not change the Average Cost
                   console.log(`Skipping cost calculation for ${inputItem.name} (Manual Mode Active)`);
               } else {
-                  // AUTOMATIC MODE: Calculate Weighted Average
                   const oldAvgCost = parseFloat(data.averageCost) || 0;
                   const incomingPrice = parseFloat(inputItem.price);
 
                   if (newQty > 0) {
-                     const totalValue = (oldQty * oldAvgCost) + (incomingQty * incomingPrice);
-                     newAvgCost = totalValue / newQty;
+                      const totalValue = (oldQty * oldAvgCost) + (incomingQty * incomingPrice);
+                      newAvgCost = totalValue / newQty;
                   } else {
-                     newAvgCost = incomingPrice;
+                      newAvgCost = incomingPrice;
                   }
               }
 
@@ -309,7 +298,6 @@ const Inventory = ({ internalUser }) => {
               });
           }
 
-          // Finally, write the stock-in record
           transaction.set(stockInRef, stockInDoc);
       });
       
@@ -331,26 +319,43 @@ const Inventory = ({ internalUser }) => {
   // --- DELETE Transaction (Reverse Stock In) ---
   const handleDelete = async (stockInRecord) => {
     if (!isAdmin) return alert("Only admins can delete stock-in records.");
-    if (isProcessing) return; // Prevent double click
+    if (isProcessing) return; 
+
+    // ✅ CHECK 1: Ensure Payment Doesn't Exist (Cheap & Safe)
+    const uid = auth.currentUser.uid;
+    try {
+        const paymentsRef = collection(db, uid, 'stock_payments', 'payments');
+        // Check for any payment linked to this specific Stock In ID
+        const qPayment = query(
+            paymentsRef, 
+            where("stockInId", "==", stockInRecord.stockInId),
+            limit(1) // Optimization: Stop after finding one match
+        );
+        const paymentSnap = await getDocs(qPayment);
+
+        if (!paymentSnap.empty) {
+            alert("🚫 Cannot delete this stock record!\n\nPayments have already been made against this stock ID (" + stockInRecord.stockInId + ").\n\nPlease delete the payments first in the 'Stock Payment' or 'Expenses' page to unlock this item.");
+            return;
+        }
+    } catch (checkErr) {
+        console.error("Lock check failed:", checkErr);
+        alert("System error checking payment status. Please try again.");
+        return;
+    }
 
     if (!window.confirm(`ROLLBACK WARNING:\n\nDeleting this record will:\n1. REMOVE items from inventory.\n2. REVERSE the Average Cost calculation (if in Auto mode).\n\nAre you sure you want to proceed?`)) return;
     
     setIsProcessing(true);
-    const uid = auth.currentUser.uid;
 
     try {
         await runTransaction(db, async (transaction) => {
             const stockInRef = doc(db, uid, "inventory", "stock_in", stockInRecord.id);
-            // READ 1
             const stockInSnap = await transaction.get(stockInRef);
             if (!stockInSnap.exists()) throw new Error("Record already deleted.");
 
             const data = stockInSnap.data();
             const itemsToReverse = data.lineItems || [];
 
-            // ---------------------------------------------------------
-            // PHASE 1: READ ALL ITEMS (Before any Writes)
-            // ---------------------------------------------------------
             const reversalReads = [];
             for (const item of itemsToReverse) {
                 const itemId = item.itemId || item.value || item.id; 
@@ -361,13 +366,10 @@ const Inventory = ({ internalUser }) => {
                 reversalReads.push({ itemRef, itemSnap, itemData: item });
             }
 
-            // ---------------------------------------------------------
-            // PHASE 2: CALCULATE & WRITE ALL ITEMS
-            // ---------------------------------------------------------
             for (const readData of reversalReads) {
                 const { itemRef, itemSnap, itemData } = readData;
                 
-                if (!itemSnap.exists()) continue; // Skip if item master deleted
+                if (!itemSnap.exists()) continue; 
 
                 const masterData = itemSnap.data();
                 const currentQty = parseFloat(masterData.qtyOnHand) || 0;
@@ -383,22 +385,18 @@ const Inventory = ({ internalUser }) => {
                 const newQty = currentQty - qtyToRemove;
                 let newAvgCost = parseFloat(masterData.averageCost) || 0;
 
-                // --- REVERSE COST LOGIC ---
                 if (masterData.isManualCosting === true) {
-                     // MANUAL MODE: Do not touch cost on delete
-                     console.log(`Skipping reverse cost calculation for ${itemData.name} (Manual Mode Active)`);
+                      console.log(`Skipping reverse cost calculation for ${itemData.name} (Manual Mode Active)`);
                 } else {
-                    // AUTOMATIC MODE: Reverse Weighted Average
                     const currentAvgCost = parseFloat(masterData.averageCost) || 0;
 
                     if (newQty > 0) {
                         const currentTotalValue = currentQty * currentAvgCost;
                         const valueToRemove = qtyToRemove * priceToRemove;
-                        // Math.max(0, ...) prevents negative value floating point errors
                         const newTotalValue = Math.max(0, currentTotalValue - valueToRemove);
                         newAvgCost = newTotalValue / newQty;
                     } else {
-                        newAvgCost = 0; // Reset to 0 if stock hits 0
+                        newAvgCost = 0; 
                     }
                 }
 
@@ -409,7 +407,6 @@ const Inventory = ({ internalUser }) => {
                 });
             }
 
-            // Finally delete the record
             transaction.delete(stockInRef);
         });
 

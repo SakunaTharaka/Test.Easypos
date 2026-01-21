@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react'; // Removed useContext
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
@@ -12,11 +12,15 @@ import {
   updateDoc, 
   where,
   getDocs,
+  getDoc, 
   runTransaction 
 } from 'firebase/firestore';
 import { FaCalendarAlt, FaCheckCircle, FaTrash, FaEye, FaSave, FaSearch, FaArrowDown } from 'react-icons/fa';
+// Removed unused CashBookContext import
 
 const Services = ({ internalUser }) => {
+  // Removed unused reconciledDates context hook
+
   // Form state
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -74,7 +78,6 @@ const Services = ({ internalUser }) => {
     if (!jobsCollectionRef) { setJobsLoading(false); return; }
     setJobsLoading(true);
     
-    // Safety Limit: Only fetch the most recent 50 jobs initially
     const q = query(
         jobsCollectionRef, 
         orderBy('createdAt', 'desc'),
@@ -85,7 +88,6 @@ const Services = ({ internalUser }) => {
       const jobsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAllJobs(jobsData);
       
-      // Store the last document for pagination
       if (snapshot.docs.length > 0) {
         setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
       }
@@ -168,9 +170,8 @@ const Services = ({ internalUser }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPaymentConfirm, confirmPaymentMethod]);
 
-  // Helper: Get Date in Sri Lanka Time
   const getSriLankaDate = (dateObj = new Date()) => {
-    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // YYYY-MM-DD
+    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
   };
 
   // --- ACTIONS ---
@@ -246,14 +247,12 @@ const Services = ({ internalUser }) => {
         const totalVal = parseFloat(totalCharge) || 0;
         const advanceVal = parseFloat(advanceAmount) || 0;
 
-        // Daily Stats Logic
         const dailyDateString = getSriLankaDate(); 
         const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
         const dailyStatsSnap = await transaction.get(dailyStatsRef);
         const currentDailySales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data().totalSales) || 0) : 0;
         const currentMethodSales = dailyStatsSnap.exists() ? (Number(dailyStatsSnap.data()[salesMethodField]) || 0) : 0;
         
-        // Update Daily Stats (Add Advance)
         if (advanceVal > 0) {
             transaction.set(dailyStatsRef, { 
                 totalSales: currentDailySales + advanceVal,
@@ -347,7 +346,6 @@ const Services = ({ internalUser }) => {
             const jobData = jobSnap.data();
             const balanceAmount = (jobData.totalCharge || 0) - (jobData.advanceAmount || 0);
 
-            // Daily Stats Logic (Add Balance)
             const dailyDateString = getSriLankaDate(); 
             const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
             const dailyStatsSnap = await transaction.get(dailyStatsRef);
@@ -405,9 +403,42 @@ const Services = ({ internalUser }) => {
       finally { setIsUpdating(false); setPendingAction(null); }
   };
 
-  // --- DELETE JOB (FIXED: SEPARATED READS AND WRITES) ---
-  const handleDeleteJob = (jobId) => {
+  // --- DELETE JOB (UPDATED: SPECIFIC ID LOCK) ---
+  const handleDeleteJob = async (jobId) => {
     if (!uid) { setError("Authentication error."); return; }
+
+    const job = allJobs.find(j => j.id === jobId);
+    
+    // ✅ 1. Check Specific Reconciliation Lock
+    if (job && job.createdAt) {
+        const dateVal = job.createdAt.toDate ? job.createdAt.toDate() : new Date(job.createdAt);
+        
+        // Generate Local YYYY-MM-DD
+        const year = dateVal.getFullYear();
+        const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+        const day = String(dateVal.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+
+        try {
+            // Fetch the Locked Document for this specific date
+            const lockRef = doc(db, uid, 'user_data', 'locked_documents', dateStr);
+            const lockSnap = await getDoc(lockRef);
+
+            if (lockSnap.exists()) {
+                const lockedIds = lockSnap.data().lockedIds || [];
+                // Check if THIS job ID is in the locked list
+                if (lockedIds.includes(jobId)) {
+                    alert(`Cannot delete Job. It has been explicitly reconciled and locked.`);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error("Error verifying lock status:", e);
+            alert("System error verifying reconciliation status. Please try again.");
+            return;
+        }
+    }
+
     setJobToDelete(jobId);
     setIsDeleteModalOpen(true);
   };
@@ -418,21 +449,13 @@ const Services = ({ internalUser }) => {
 
     try {
         await runTransaction(db, async (transaction) => {
-            // =========================================================
-            // PHASE 1: ALL READS FIRST (To satisfy Firestore rules)
-            // =========================================================
-
             // 1. Get Job Data
             const jobRef = doc(db, uid, 'data', 'service_jobs', jobToDelete);
             const jobSnap = await transaction.get(jobRef);
             if (!jobSnap.exists()) throw new Error("Job not found");
             const jobData = jobSnap.data();
 
-            // 2. Find Invoices (Using a Query outside transaction for IDs, then Transaction Get for Locking)
-            // Note: We can't do a query inside a transaction, but we can query then GET.
-            // Since we need to ensure consistency, we rely on the ID matching pattern or stored IDs.
-            
-            // Advance Invoice
+            // 2. Find Invoices
             let advInvoiceRef = null;
             let advInvoiceData = null;
             if (jobData.linkedInvoiceId) {
@@ -441,28 +464,22 @@ const Services = ({ internalUser }) => {
                 if (advSnap.exists()) advInvoiceData = advSnap.data();
             }
 
-            // Balance Invoice Query (Fetch ID first)
             let balInvoiceRef = null;
             let balInvoiceData = null;
             if (jobData.generatedInvoiceNumber) {
                 const balInvNum = `${jobData.generatedInvoiceNumber}_BAL`;
                 const q = query(collection(db, uid, "invoices", "invoice_list"), where("invoiceNumber", "==", balInvNum));
-                // We must await getDocs here (Reads outside transaction context are allowed, but we need to lock via get)
-                // However, we can't lock what we haven't found. 
-                // Getting the doc ref is fine. 
                 const balSnaps = await getDocs(q); 
                 if (!balSnaps.empty) {
                     balInvoiceRef = balSnaps.docs[0].ref;
-                    // NOW LOCK IT
                     const balSnap = await transaction.get(balInvoiceRef);
                     if (balSnap.exists()) balInvoiceData = balSnap.data();
                 }
             }
 
-            // 3. Prepare Financial Reads (Wallets and Stats)
-            // We use maps to prevent reading the same doc twice
-            const walletReads = {}; // path -> { ref, data, deduction }
-            const statsReads = {};  // path -> { ref, data, deductionTotal, deductionMethod, methodField }
+            // 3. Prepare Financial Reads
+            const walletReads = {}; 
+            const statsReads = {};  
 
             const queueReads = async (invoice) => {
                 if (!invoice || !invoice.received || invoice.received <= 0) return;
@@ -474,25 +491,21 @@ const Services = ({ internalUser }) => {
                 else if (invoice.paymentMethod === 'Card') { wId = 'card'; salesMethodField = 'totalSales_card'; }
                 else if (invoice.paymentMethod === 'Online') { wId = 'online'; salesMethodField = 'totalSales_online'; }
 
-                // Wallet Ref
                 if (wId) {
                     const wRef = doc(db, uid, "wallet", "accounts", wId);
                     if (!walletReads[wRef.path]) {
-                        // READ NOW
                         const wSnap = await transaction.get(wRef);
                         walletReads[wRef.path] = { ref: wRef, data: wSnap.exists() ? wSnap.data() : null, deduction: 0 };
                     }
                     walletReads[wRef.path].deduction += Number(invoice.received);
                 }
 
-                // Stats Ref
                 if (invoice.createdAt) {
                     const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
                     const dailyDateString = getSriLankaDate(dateVal);
                     const dailyStatsRef = doc(db, uid, "daily_stats", "entries", dailyDateString);
                     
                     if (!statsReads[dailyStatsRef.path]) {
-                        // READ NOW
                         const sSnap = await transaction.get(dailyStatsRef);
                         statsReads[dailyStatsRef.path] = { 
                             ref: dailyStatsRef, 
@@ -502,7 +515,6 @@ const Services = ({ internalUser }) => {
                             methodField: salesMethodField 
                         };
                     }
-                    // Accumulate deductions
                     statsReads[dailyStatsRef.path].deductionTotal += Number(invoice.received);
                     if (statsReads[dailyStatsRef.path].methodField === salesMethodField) {
                         statsReads[dailyStatsRef.path].deductionMethod += Number(invoice.received);
@@ -510,15 +522,10 @@ const Services = ({ internalUser }) => {
                 }
             };
 
-            // Execute Queued Reads
             if (advInvoiceData) await queueReads(advInvoiceData);
             if (balInvoiceData) await queueReads(balInvoiceData);
 
-            // =========================================================
-            // PHASE 2: ALL WRITES (Now that all reads are done)
-            // =========================================================
-
-            // 1. Update Wallets
+            // Writes
             Object.values(walletReads).forEach(item => {
                 if (item.data) {
                     const currentBal = Number(item.data.balance) || 0;
@@ -529,7 +536,6 @@ const Services = ({ internalUser }) => {
                 }
             });
 
-            // 2. Update Stats
             Object.values(statsReads).forEach(item => {
                 if (item.data) {
                     const currentSales = Number(item.data.totalSales) || 0;
@@ -537,7 +543,6 @@ const Services = ({ internalUser }) => {
                         totalSales: currentSales - item.deductionTotal,
                         lastUpdated: serverTimestamp()
                     };
-                    
                     if (item.methodField) {
                         const currentMethod = Number(item.data[item.methodField]) || 0;
                         updateData[item.methodField] = currentMethod - item.deductionMethod;
@@ -546,7 +551,6 @@ const Services = ({ internalUser }) => {
                 }
             });
 
-            // 3. Delete Docs
             transaction.delete(jobRef);
             if (advInvoiceRef) transaction.delete(advInvoiceRef);
             if (balInvoiceRef) transaction.delete(balInvoiceRef);
@@ -577,7 +581,6 @@ const Services = ({ internalUser }) => {
       setIsUpdating(true);
       try { 
           await updateDoc(doc(db, uid, 'data', 'service_jobs', jobToExtend.id), { jobCompleteDate: newCompleteDate }); 
-          // Optimistically update local state so we don't need a re-fetch
           setAllJobs(prev => prev.map(j => j.id === jobToExtend.id ? {...j, jobCompleteDate: newCompleteDate} : j));
           if (selectedJob?.id === jobToExtend.id) {
               setSelectedJob(prev => ({...prev, jobCompleteDate: newCompleteDate}));
@@ -611,7 +614,6 @@ const Services = ({ internalUser }) => {
                 <input type="text" style={styles.input} value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Enter name" />
              </div>
              <div style={styles.inputGroup}>
-                {/* ✅ MODIFIED: Added Asterisk */}
                 <label style={styles.label}>Phone Number *</label>
                 <input 
                     type="text" 
@@ -629,7 +631,6 @@ const Services = ({ internalUser }) => {
                 <input type="text" style={styles.input} value={jobType} onChange={(e) => setJobType(e.target.value)} placeholder="e.g. Phone Repair" />
              </div>
              <div style={styles.inputGroup}>
-                {/* ✅ MODIFIED: Added Asterisk */}
                 <label style={styles.label}>Est. Completion *</label>
                 <input type="datetime-local" style={styles.input} value={jobCompleteDate} onChange={(e) => setJobCompleteDate(e.target.value)} />
              </div>
