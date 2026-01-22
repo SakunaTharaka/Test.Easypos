@@ -940,7 +940,7 @@ const Invoice = ({ internalUser }) => {
           const msg = generateSmsPreview(finalInvoiceData, settings);
           setSmsMessagePreview(msg);
           
-          // Calculate Credits: 1 Credit = 160 chars.
+          // ✅ CORRECT CREDIT LOGIC: 1 Credit per 160 chars
           const estimatedCost = Math.ceil(msg.length / 160);
           setSmsCreditsEstimate(estimatedCost);
 
@@ -960,7 +960,7 @@ const Invoice = ({ internalUser }) => {
     } catch (e) { console.error(e); alert("Save failed: " + e.message); } finally { setIsSaving(false); }
   }, [checkout, deliveryCharge, receivedAmount, selectedCustomer, selectedShift, calculatedFreeItems, isCustomerDiscountable, internalUser, settings, resetForm, orderType, serviceChargeRate]);
 
-  // ✅ GENERATE SMS PREVIEW FUNCTION (UPDATED)
+  // ✅ GENERATE SMS PREVIEW FUNCTION (Updated to allow long messages for accurate billing)
   const generateSmsPreview = (invoice, appSettings) => {
       // 1. Company Name (Top)
       const company = (appSettings?.companyName || "Store").substring(0, 25); 
@@ -971,28 +971,21 @@ const Invoice = ({ internalUser }) => {
       // 3. Total
       const total = invoice.total.toFixed(2);
       
-      // 4. Items List (Optimized for space)
+      // 4. Items List 
+      // We removed the aggressive truncation logic here to allow accurate charging.
+      // If the message is long (e.g., 200 chars), it will simply cost 2 credits.
       let itemsStr = invoice.items
-          .filter(i => !i.isFreeIssue) // Optionally hide free items to save chars
+          .filter(i => !i.isFreeIssue) 
           .map(i => `${i.itemName} x${i.quantity}`)
           .join(", ");
       
-      // Calculate remaining space for items to fit into 1 Credit (160 chars)
-      // Format: [Company]\nInv:[InvNo]\nItems:[List]\nTotal:[Total]\nThank you for your business!
-      // Fixed overhead approx: 25 + 20 + 7 + 15 + 30 = ~100 chars. 
-      // Available for items in 1 credit: ~60 chars.
-      
-      if (itemsStr.length > 60) {
-          // If exceeding 1 credit, check if we can fit in 2 credits (320 chars total)
-          // We allow up to ~220 chars for items if user is okay with 2 credits.
-          if (itemsStr.length > 220) {
-              itemsStr = itemsStr.substring(0, 217) + "...";
-          }
+      // Safety Cap: Only truncate if it gets excessively expensive (e.g. > 4 credits / ~600 chars)
+      // This prevents accidental massive bills while allowing 2-3 credit messages.
+      if (itemsStr.length > 600) {
+          itemsStr = itemsStr.substring(0, 597) + "...";
       }
 
       // Construct Message
-      // Note: Order Number is explicitly excluded as per requirement 3.
-      // ✅ ADDED "Thank you for your business!" at the end.
       return `${company}\nInv:${invNo}\nItems:${itemsStr}\nTotal:${total}\nThank you!`;
   };
 
@@ -1224,7 +1217,7 @@ const Invoice = ({ internalUser }) => {
                     Enter the customer's mobile number below to send the invoice details instantly.
                 </p>
                 
-                {/* Credit Info (Cleaned) */}
+                {/* Credit Info (Updated to show Chars & Credits) */}
                 <div style={{
                     background: '#eff6ff', 
                     padding: '12px 16px', 
@@ -1238,7 +1231,9 @@ const Invoice = ({ internalUser }) => {
                     border: '1px solid #bfdbfe'
                 }}>
                     <span style={{fontWeight: '500'}}>Estimated Cost:</span>
-                    <strong style={{fontSize: '16px'}}>{smsCreditsEstimate} Credit(s)</strong>
+                    <strong style={{fontSize: '16px'}}>
+                        {smsMessagePreview.length} chars ({smsCreditsEstimate} Credits)
+                    </strong>
                 </div>
 
                 {/* Input Field */}
