@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef } from "react";
 import { db, auth } from "../../firebase";
 import { collection, addDoc, getDocs, query, doc, getDoc, serverTimestamp, where, deleteDoc } from "firebase/firestore";
-import { AiOutlinePlus, AiOutlineDelete } from "react-icons/ai";
+import { AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
 
 const AddProduction = ({ internalUser }) => {
     const [loading, setLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false); // 💡 1. New state for save loading
+    const [isSaving, setIsSaving] = useState(false); // 庁 1. New state for save loading
     const [shifts, setShifts] = useState([]);
     const [allItems, setAllItems] = useState([]);
     const [productionRecords, setProductionRecords] = useState([]);
@@ -124,7 +124,7 @@ const AddProduction = ({ internalUser }) => {
             return;
         }
 
-        setIsSaving(true); // 💡 2. Set loading to true before starting
+        setIsSaving(true); // 庁 2. Set loading to true before starting
         try {
             const addedBy = internalUser?.username || "Admin";
             const prodColRef = collection(db, user.uid, "production", "production_records");
@@ -153,7 +153,7 @@ const AddProduction = ({ internalUser }) => {
         } catch (error) {
             alert("Error saving production: " + error.message);
         } finally {
-            setIsSaving(false); // 💡 3. Set loading to false after completion (success or fail)
+            setIsSaving(false); // 庁 3. Set loading to false after completion (success or fail)
         }
     };
     
@@ -165,7 +165,7 @@ const AddProduction = ({ internalUser }) => {
         try {
             const docRef = doc(db, user.uid, "production", "production_records", recordId);
             await deleteDoc(docRef);
-            // 💡 4. This line correctly filters the state, causing the list to update automatically.
+            // 庁 4. This line correctly filters the state, causing the list to update automatically.
             setProductionRecords(prev => prev.filter(rec => rec.id !== recordId));
             alert("Record deleted.");
         } catch(error) {
@@ -199,7 +199,7 @@ const AddProduction = ({ internalUser }) => {
                             ))}
                         </tbody>
                     </table>
-                    {/* 💡 5. Update save button to be disabled and show loading text when saving */}
+                    {/* 庁 5. Update save button to be disabled and show loading text when saving */}
                     <div style={{textAlign: 'right', marginTop: '16px'}}>
                         <button onClick={handleSaveProduction} style={styles.saveButton} disabled={isSaving}>
                             {isSaving ? 'Saving...' : 'Save Production Run'}
