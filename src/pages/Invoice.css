@@ -1,0 +1,435 @@
+/* Invoice.css */
+
+/* --- LAYOUT --- */
+.invoice-container {
+    display: flex;
+    height: calc(100vh - 180px);
+    background-color: #f3f4f6;
+    font-family: 'Inter', sans-serif;
+    gap: 20px;
+    padding: 20px;
+    position: relative;
+}
+
+.left-panel {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.right-panel {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+}
+
+/* --- BUTTONS --- */
+.fullscreen-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
+    padding: 8px 12px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+
+.invoice-btn-primary {
+    padding: 12px 24px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.invoice-btn-save {
+    width: 100%;
+    padding: 16px;
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: auto;
+}
+
+.invoice-btn-save:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+}
+
+.remove-button {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+/* --- HEADER & SECTIONS --- */
+.invoice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: white;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.header-label {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 600;
+}
+
+.header-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.shift-select {
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.customer-section {
+    background-color: white;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.section-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #4b5563;
+    margin-bottom: 8px;
+}
+
+/* --- ITEM ENTRY --- */
+.item-entry-section {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    background-color: white;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.invoice-input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.invoice-input.active {
+    border-color: #f59e0b;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+}
+
+/* --- DROPDOWN --- */
+.dropdown-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: white;
+    border: 1px solid #d1d5db;
+    border-radius: 0 0 6px 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.dropdown-item {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #f3f4f6;
+    display: flex;
+    justify-content: space-between;
+}
+
+.dropdown-item.selected {
+    background-color: #e0e7ff;
+    color: #3730a3;
+}
+
+.dropdown-price {
+    color: #6b7280;
+    font-size: 12px;
+}
+
+/* --- CHECKOUT CARD --- */
+.checkout-card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 2px solid transparent;
+    transition: border-color 0.3s ease;
+    overflow: hidden;
+}
+
+.checkout-card.active {
+    border-color: #3b82f6;
+}
+
+.checkout-title {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 16px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #111827;
+}
+
+/* --- TABLE --- */
+.table-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px 8px;
+    min-height: 0;
+}
+
+.invoice-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.invoice-th {
+    padding: 10px;
+    text-align: left;
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.invoice-td {
+    padding: 10px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.row-highlight {
+    background-color: #dbeafe;
+}
+
+.empty-state {
+    text-align: center;
+    color: #9ca3af;
+    padding: 20px;
+}
+
+/* --- TOTALS & FOOTER --- */
+.totals-section {
+    padding: 16px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.total-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.grand-total-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    font-size: 20px;
+    color: #16a34a;
+    padding-top: 8px;
+    border-top: 2px solid #e5e7eb;
+}
+
+.delivery-input {
+    width: 120px;
+    padding: 8px;
+    text-align: right;
+}
+
+.payment-section {
+    padding: 16px;
+}
+
+.amount-input {
+    font-size: 18px;
+    font-weight: bold;
+    text-align: right;
+}
+
+.balance-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    font-size: 20px;
+    padding: 16px;
+    border-top: 1px solid #e5e7eb;
+}
+
+/* --- MODALS & OVERLAYS --- */
+.confirm-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.confirm-popup {
+    background-color: white;
+    padding: 24px;
+    border-radius: 8px;
+    text-align: center;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    width: auto;
+    min-width: 400px;
+}
+
+.confirm-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.confirm-btn {
+    padding: 10px 24px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #f8f8f8;
+    font-weight: 600;
+    flex: 1;
+}
+
+.confirm-btn.active {
+    border: 1px solid #3b82f6;
+    background: #3b82f6;
+    color: white;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+.saving-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    color: #1f2937;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.saving-spinner {
+    border: 4px solid #f3f4f6;
+    border-top: 4px solid #3b82f6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* --- HELP & SHORTCUTS --- */
+.shortcuts-help {
+    background-color: white;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-top: auto;
+    font-size: 12px;
+    color: #4b5563;
+}
+
+.shortcuts-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #111827;
+}
+
+.shortcut-item {
+    margin-bottom: 4px;
+}
+
+/* --- QZ STATUS --- */
+.qz-status {
+    padding: 15px;
+    margin: 15px 0;
+    background-color: #f3f4f6;
+    border-radius: 6px;
+    text-align: left;
+}
+
+.qz-controls {
+    text-align: left;
+    margin-top: 10px;
+}
+
+.close-btn {
+    margin-top: 15px;
+    padding: 10px 20px;
+    background: #6b7280;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* --- TOGGLES --- */
+.toggle-wrapper {
+    display: flex;
+    background-color: #e5e7eb;
+    border-radius: 8px;
+    padding: 4px;
+    gap: 4px;
+}
+
+.toggle-option {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #6b7280;
+    cursor: pointer;
+    flex: 1;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.toggle-option.active {
+    color: #2563eb;
+    background-color: white;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}

@@ -74,6 +74,10 @@ const Settings = () => {
   const [serviceCharge, setServiceCharge] = useState("");
   const [editServiceCharge, setEditServiceCharge] = useState(false);
 
+  // ✅ SMS SETTINGS STATE
+  const [sendInvoiceSms, setSendInvoiceSms] = useState(false);
+  const [smsCredits, setSmsCredits] = useState(0);
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -123,6 +127,9 @@ const Settings = () => {
           setDineInAvailable(data.dineInAvailable || false);
           setServiceCharge(data.serviceCharge || "");
 
+          // ✅ Load SMS Settings
+          setSendInvoiceSms(data.sendInvoiceSms || false);
+
         } else {
           const userInfoRef = doc(db, "Userinfo", uid);
           const userInfoSnap = await getDoc(userInfoRef);
@@ -164,9 +171,9 @@ const Settings = () => {
             enableServiceOrders: false,
             doubleLineInvoiceItem: false,
             enableKOD: false,
-            // ✅ Default Dine-in settings
             dineInAvailable: false,
             serviceCharge: "",
+            sendInvoiceSms: false, // ✅ Default SMS setting
           };
           
           await setDoc(settingsDocRef, defaultSettings);
@@ -198,6 +205,14 @@ const Settings = () => {
           setEnableKOD(defaultSettings.enableKOD);
           setDineInAvailable(defaultSettings.dineInAvailable);
           setServiceCharge(defaultSettings.serviceCharge);
+          setSendInvoiceSms(defaultSettings.sendInvoiceSms);
+        }
+
+        // --- FETCH LIVE SMS CREDITS (From Userinfo) ---
+        const userInfoRef = doc(db, "Userinfo", uid);
+        const userInfoSnap = await getDoc(userInfoRef);
+        if (userInfoSnap.exists()) {
+            setSmsCredits(userInfoSnap.data().smsCredits || 0);
         }
 
         // --- FETCH CUSTOMERS ---
@@ -323,9 +338,18 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { defaultCustomerId: value });
   };
 
+  // ✅ UPDATED: Auto Print Handler (Disables SMS if enabled)
   const handleAutoPrintChange = async (value) => {
     setAutoPrintInvoice(value);
-    await updateDoc(getSettingsDocRef(), { autoPrintInvoice: value });
+    const updates = { autoPrintInvoice: value };
+    
+    // If turning ON Auto-Print, Turn OFF SMS
+    if (value) {
+        setSendInvoiceSms(false);
+        updates.sendInvoiceSms = false;
+    }
+    
+    await updateDoc(getSettingsDocRef(), updates);
   };
 
   const handleOfferDeliveryChange = async (value) => {
@@ -348,7 +372,6 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { showOrderNo: value });
   };
 
-  // ✅ HANDLER FOR DOUBLE LINE INVOICE
   const handleDoubleLineInvoiceChange = async (value) => {
     setDoubleLineInvoiceItem(value);
     await updateDoc(getSettingsDocRef(), { doubleLineInvoiceItem: value });
@@ -364,23 +387,34 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { enableServiceOrders: value });
   };
 
-  // ✅ HANDLER FOR KOD (KITCHEN ORDERING DISPLAY)
   const handleEnableKODChange = async (value) => {
     setEnableKOD(value);
     await updateDoc(getSettingsDocRef(), { enableKOD: value });
   };
 
-  // ✅ HANDLER FOR DINE-IN
   const handleDineInChange = async (value) => {
     setDineInAvailable(value);
     await updateDoc(getSettingsDocRef(), { dineInAvailable: value });
   };
 
-  // ✅ HANDLER FOR SAVING SERVICE CHARGE
   const handleSaveServiceCharge = async () => {
     await updateDoc(getSettingsDocRef(), { serviceCharge: serviceCharge });
     setEditServiceCharge(false);
     alert("Service charge updated!");
+  };
+
+  // ✅ UPDATED: SMS Handler (Disables Auto-Print if enabled)
+  const handleSendInvoiceSmsChange = async (value) => {
+    setSendInvoiceSms(value);
+    const updates = { sendInvoiceSms: value };
+
+    // If turning ON SMS, Turn OFF Auto-Print
+    if (value) {
+        setAutoPrintInvoice(false);
+        updates.autoPrintInvoice = false;
+    }
+
+    await updateDoc(getSettingsDocRef(), updates);
   };
 
 
@@ -446,6 +480,27 @@ const Settings = () => {
           </div>
         </div>
       </div>
+
+      {/* ✅ NEW SMS & NOTIFICATIONS SECTION */}
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>SMS & Notifications</h3>
+        
+        {/* Credit Display */}
+        <div style={{ padding: '15px', background: '#e0f2fe', borderRadius: '8px', marginBottom: '20px', border: '1px solid #bae6fd', color: '#0369a1' }}>
+            <h4 style={{ margin: '0 0 5px 0', fontSize: '16px' }}>SMS Credits Balance</h4>
+            <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{smsCredits} <span style={{ fontSize: '14px', fontWeight: 'normal' }}>/ 350 (Resets Monthly)</span></div>
+        </div>
+
+        {/* Feature Toggle */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Send invoice to customer as SMS</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleSendInvoiceSmsChange(true)} style={sendInvoiceSms ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleSendInvoiceSmsChange(false)} style={!sendInvoiceSms ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>If enabled, a popup will appear after saving an invoice to send a notification via SMS. <strong>This will automatically disable "Auto-Print".</strong></p>
+        </div>
+      </div>
       
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Invoicing</h3>
@@ -464,7 +519,7 @@ const Settings = () => {
                 <button onClick={() => handleAutoPrintChange(true)} style={autoPrintInvoice ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
                 <button onClick={() => handleAutoPrintChange(false)} style={!autoPrintInvoice ? styles.toggleButtonActive : styles.toggleButton}>No</button>
             </div>
-            <p style={styles.helpText}>If set to 'Yes', the print dialog will open automatically after an invoice is saved.</p>
+            <p style={styles.helpText}>If set to 'Yes', the print dialog will open automatically after an invoice is saved. <strong>This will automatically disable "Send Invoice SMS".</strong></p>
         </div>
 
         <div style={styles.formGroup}>

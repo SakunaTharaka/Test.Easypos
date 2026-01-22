@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { auth, db } from "../firebase";
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
-// Removed unused 'FaStar'
 import { FaCheckCircle, FaSignOutAlt, FaTimes, FaLock } from 'react-icons/fa'; 
 
 const UserDetails = () => {
@@ -14,7 +13,7 @@ const UserDetails = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(1);
-  const [selectedPlan, setSelectedPlan] = useState('monthly'); // Defaults to the special offer
+  const [selectedPlan, setSelectedPlan] = useState('monthly'); 
   const [formData, setFormData] = useState({
     fullName: "",
     phone: "",
@@ -50,7 +49,6 @@ const UserDetails = () => {
       if (docSnap.exists()) {
         const userData = docSnap.data();
         if (userData.status === 'trialing') {
-          // Check if trial is expired logic here...
           navigate("/dashboard");
         } else {
           setFormData({
@@ -84,7 +82,7 @@ const UserDetails = () => {
     }
   };
 
-  // --- OTP LOGIC (Same as before) ---
+  // --- OTP LOGIC ---
   const handleRequestOtp = async () => {
     const phoneRegex = /^0\d{9}$/;
     if (!phoneRegex.test(formData.phone)) {
@@ -117,7 +115,7 @@ const UserDetails = () => {
         await verifyOtpFn({ mobile: formData.phone, code: code });
         setIsPhoneVerified(true);
         setShowOtpModal(false);
-        alert("Phone Verified Successfully! ✅");
+        alert("Phone Verified Successfully!");
     } catch (error) {
         console.error(error);
         alert("Verification Failed: " + error.message);
@@ -183,7 +181,7 @@ const UserDetails = () => {
         ...formData,
         phoneVerified: true,
         registrationDate: serverTimestamp(),
-      });
+      }, { merge: true });
       setStep(2);
     } catch (error) {
       alert("Error saving user info: " + error.message);
@@ -192,23 +190,20 @@ const UserDetails = () => {
     }
   };
 
+  // ✅ UPDATED: Calls the Secure Cloud Function
   const handleStartTrial = async () => {
     setLoading(true);
+    const startTrialFn = httpsCallable(functions, 'startTrial');
+    
     try {
-      const trialStartDate = new Date();
-      const trialEndDate = new Date(trialStartDate);
-      trialEndDate.setDate(trialStartDate.getDate() + 7);
-
-      const userRef = doc(db, "Userinfo", user.uid);
-      await updateDoc(userRef, {
-        selectedPackage: selectedPlan, // 'monthly' (which is the 1800 one) or 'yearly'
-        trialStartDate: trialStartDate,
-        trialEndDate: trialEndDate,
-        status: 'trialing',
-      });
+      // We pass the plan, but the backend decides credits and dates
+      await startTrialFn({ plan: selectedPlan });
+      
+      alert("Trial Activated Successfully! Welcome aboard.");
       navigate("/dashboard");
     } catch (error) {
-      alert("Could not start your trial. Please try again.");
+      console.error("Trial Error:", error);
+      alert("Could not activate trial. " + error.message);
       setLoading(false);
     }
   };
@@ -217,7 +212,6 @@ const UserDetails = () => {
 
   const isNextDisabled = loading || !agreedToTerms || !isPhoneVerified;
 
-  // Features list array for rendering
   const featureList = [
     "Cloud Dashboard Access",
     "1000 Items & Sales",
@@ -288,14 +282,13 @@ const UserDetails = () => {
         )}
 
         {step === 2 && (
-          // Increased maxWidth to 950px to fit 3 cards comfortably
           <div style={{...styles.formContainer, maxWidth: '950px'}}>
             <h2 style={styles.formTitle}>Choose Your Plan</h2>
             <p style={styles.formSubtitle}>All plans begin with a 1-week free trial.</p>
             
             <div style={styles.optionsContainer}>
               
-               {/* --- PLAN 1: SPECIAL OFFER (Rs 1800) - ENHANCED UI --- */}
+               {/* --- PLAN 1: SPECIAL OFFER --- */}
               <div 
                 style={selectedPlan === 'monthly' ? {...styles.planOption, ...styles.selectedOption, ...styles.specialOfferCard} : {...styles.planOption, ...styles.specialOfferCard}} 
                 onClick={() => setSelectedPlan('monthly')}
@@ -316,7 +309,7 @@ const UserDetails = () => {
                 </div>
               </div>
 
-               {/* --- PLAN 2: REGULAR (Rs 2500) - DISABLED/ANCHOR --- */}
+               {/* --- PLAN 2: REGULAR --- */}
                <div style={styles.disabledPlanOption}>
                 <div style={styles.lockedBadge}><FaLock /> Regular Price</div>
                 <h3 style={{...styles.planTitle, color: '#6b7280'}}>Standard Monthly</h3>
@@ -330,20 +323,19 @@ const UserDetails = () => {
                     ))}
                 </div>
                 
-                {/* Overlay to make it unclickable */}
                 <div style={styles.disabledOverlay}>
                     <span style={styles.disabledText}>Select Special Offer Instead</span>
                 </div>
               </div>
 
-               {/* --- PLAN 3: YEARLY (Rs 20000) --- */}
+               {/* --- PLAN 3: YEARLY --- */}
               <div style={selectedPlan === 'yearly' ? {...styles.planOption, ...styles.selectedOption} : styles.planOption} onClick={() => setSelectedPlan('yearly')}>
                 {selectedPlan === 'yearly' && <FaCheckCircle style={styles.checkIcon} />}
                 <div style={styles.saveBadge}>Save 16.67%</div>
                 
                 <h3 style={styles.planTitle}>Yearly Plan</h3>
                 <p style={styles.planPrice}>Rs. 30,000 <span style={styles.pricePer}>/ year</span></p>
-                <div style={{height: '19px'}}></div> {/* Spacer to align with slashed price */}
+                <div style={{height: '19px'}}></div>
 
                  <div style={styles.divider}></div>
                  <div style={styles.featureList}>
@@ -358,7 +350,7 @@ const UserDetails = () => {
             </div>
             
             <button onClick={handleStartTrial} style={loading ? styles.buttonDisabled : styles.button} disabled={loading}>
-              {loading ? 'Starting...' : 'Start Free Trial'}
+              {loading ? 'Activating Trial...' : 'Start Free Trial'}
             </button>
           </div>
         )}
@@ -367,7 +359,6 @@ const UserDetails = () => {
       {showOtpModal && (
         <div style={styles.modalOverlay}>
             <div style={styles.modalContent}>
-                {/* OTP Modal Content ... (Same as before) */}
                 <div style={styles.modalHeader}>
                     <h3 style={{margin:0}}>Enter Verification Code</h3>
                     <FaTimes style={{cursor:'pointer'}} onClick={() => setShowOtpModal(false)} />
