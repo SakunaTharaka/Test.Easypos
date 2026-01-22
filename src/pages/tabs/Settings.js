@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { auth, db } from "../../firebase";
-// Removed unused 'where'
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { AiOutlineEdit, AiOutlineDelete, AiOutlineUpload, AiOutlineLogout } from "react-icons/ai";
@@ -50,34 +49,24 @@ const Settings = () => {
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
   
   const [autoPrintInvoice, setAutoPrintInvoice] = useState(false);
-  
   const [offerDelivery, setOfferDelivery] = useState(false);
   const [openCashDrawerWithPrint, setOpenCashDrawerWithPrint] = useState(false);
   const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false);
   const [showOrderNo, setShowOrderNo] = useState(false); 
-  
-  // ✅ NEW STATE FOR DOUBLE LINE
   const [doubleLineInvoiceItem, setDoubleLineInvoiceItem] = useState(false);
 
-  // --- NEW STATE FOR SERVICE & ORDERS ---
   const [priceCategories, setPriceCategories] = useState([]);
   const [servicePriceCategory, setServicePriceCategory] = useState("");
-  
-  // ✅ NEW TOGGLE STATE
   const [enableServiceOrders, setEnableServiceOrders] = useState(false);
-
-  // ✅ NEW STATE FOR KOD (KITCHEN ORDERING DISPLAY)
   const [enableKOD, setEnableKOD] = useState(false);
-
-  // ✅ NEW STATE FOR DINE-IN
   const [dineInAvailable, setDineInAvailable] = useState(false);
   const [serviceCharge, setServiceCharge] = useState("");
   const [editServiceCharge, setEditServiceCharge] = useState(false);
 
-  // ✅ SMS SETTINGS STATE
+  // ✅ SMS Settings State
   const [sendInvoiceSms, setSendInvoiceSms] = useState(false);
-  const [smsCredits, setSmsCredits] = useState(0);
-
+  const [smsCredits, setSmsCredits] = useState(0);      // Monthly Free
+  const [extraSmsCredits, setExtraSmsCredits] = useState(0); // Purchased Extra
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,109 +107,43 @@ const Settings = () => {
           setShowOrderNo(data.showOrderNo || false); 
           setServicePriceCategory(data.serviceJobPriceCategory || "");
           setEnableServiceOrders(data.enableServiceOrders || false);
-          
-          // ✅ Load new settings
           setDoubleLineInvoiceItem(data.doubleLineInvoiceItem || false);
           setEnableKOD(data.enableKOD || false);
-          
-          // ✅ Load Dine-In Settings
           setDineInAvailable(data.dineInAvailable || false);
           setServiceCharge(data.serviceCharge || "");
-
-          // ✅ Load SMS Settings
           setSendInvoiceSms(data.sendInvoiceSms || false);
 
         } else {
+          // Defaults
           const userInfoRef = doc(db, "Userinfo", uid);
           const userInfoSnap = await getDoc(userInfoRef);
-          
           let initialCompanyName = "My Business";
-          let initialCompanyAddress = "";
-          let initialFullName = auth.currentUser.displayName || "";
-          let initialPhone = "";
-
-          if (userInfoSnap.exists()) {
-            const onboardingData = userInfoSnap.data();
-            initialCompanyName = onboardingData.companyName || "My Business";
-            initialCompanyAddress = onboardingData.companyAddress || "";
-            initialFullName = onboardingData.fullName || "";
-            initialPhone = onboardingData.phone || "";
-          }
+          if (userInfoSnap.exists()) initialCompanyName = userInfoSnap.data().companyName || "My Business";
 
           const defaultSettings = {
-            fullName: initialFullName,
-            email: auth.currentUser.email,
-            phone: initialPhone,
-            companyAddress: initialCompanyAddress,
-            companyName: initialCompanyName,
-            companyLogo: "",
-            inventoryType: "Buy and Sell only",
-            itemCategories: ["Default Category"],
-            itemUnits: ["Units", "Kg", "Metre"],
-            stockReminder: "Do not remind",
-            defaultCustomerId: "",
-            useShiftProduction: false,
-            productionShifts: [],
-            expenseCategories: [],
-            autoPrintInvoice: false,
-            offerDelivery: false,
-            openCashDrawerWithPrint: false,
-            useSinhalaInvoice: false,
-            showOrderNo: false,
-            serviceJobPriceCategory: "",
-            enableServiceOrders: false,
-            doubleLineInvoiceItem: false,
-            enableKOD: false,
-            dineInAvailable: false,
-            serviceCharge: "",
-            sendInvoiceSms: false, // ✅ Default SMS setting
+            fullName: "", email: auth.currentUser.email, phone: "",
+            companyAddress: "", companyName: initialCompanyName, companyLogo: "",
+            inventoryType: "Buy and Sell only", itemCategories: ["Default Category"],
+            itemUnits: ["Units", "Kg"], stockReminder: "Do not remind",
+            autoPrintInvoice: false, sendInvoiceSms: false
           };
-          
           await setDoc(settingsDocRef, defaultSettings);
           setUserInfo(defaultSettings);
-          setFormInput({
-            fullName: defaultSettings.fullName,
-            email: defaultSettings.email,
-            phone: defaultSettings.phone,
-            companyAddress: defaultSettings.companyAddress,
-            companyName: defaultSettings.companyName,
-            companyLogo: defaultSettings.companyLogo,
-          });
-          setInventoryType(defaultSettings.inventoryType);
-          setItemCategories(defaultSettings.itemCategories);
-          setSelectedUnits(defaultSettings.itemUnits);
-          setStockReminder(defaultSettings.stockReminder);
-          setDefaultCustomerId(defaultSettings.defaultCustomerId);
-          setUseShiftProduction(defaultSettings.useShiftProduction);
-          setProductionShifts(defaultSettings.productionShifts);
-          setExpenseCategories(defaultSettings.expenseCategories);
-          setAutoPrintInvoice(defaultSettings.autoPrintInvoice);
-          setOfferDelivery(defaultSettings.offerDelivery);
-          setOpenCashDrawerWithPrint(defaultSettings.openCashDrawerWithPrint);
-          setUseSinhalaInvoice(defaultSettings.useSinhalaInvoice);
-          setShowOrderNo(defaultSettings.showOrderNo);
-          setServicePriceCategory(defaultSettings.serviceJobPriceCategory);
-          setEnableServiceOrders(defaultSettings.enableServiceOrders);
-          setDoubleLineInvoiceItem(defaultSettings.doubleLineInvoiceItem);
-          setEnableKOD(defaultSettings.enableKOD);
-          setDineInAvailable(defaultSettings.dineInAvailable);
-          setServiceCharge(defaultSettings.serviceCharge);
-          setSendInvoiceSms(defaultSettings.sendInvoiceSms);
         }
 
-        // --- FETCH LIVE SMS CREDITS (From Userinfo) ---
+        // ✅ FETCH LIVE SMS CREDITS (Free + Extra)
         const userInfoRef = doc(db, "Userinfo", uid);
         const userInfoSnap = await getDoc(userInfoRef);
         if (userInfoSnap.exists()) {
-            setSmsCredits(userInfoSnap.data().smsCredits || 0);
+            const uData = userInfoSnap.data();
+            setSmsCredits(uData.smsCredits || 0);
+            setExtraSmsCredits(uData.extraSmsCredits || 0); // Load extra credits
         }
 
-        // --- FETCH CUSTOMERS ---
         const customersColRef = collection(db, uid, "customers", "customer_list");
         const customersSnap = await getDocs(customersColRef);
         setCustomers(customersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-        // --- FETCH PRICE CATEGORIES ---
         const catColRef = collection(db, uid, "price_categories", "categories");
         const catSnap = await getDocs(query(catColRef));
         const catData = catSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -251,15 +174,14 @@ const Settings = () => {
       const data = await res.json();
       if (data.secure_url) {
         await updateDoc(getSettingsDocRef(), { companyLogo: data.secure_url });
-        
         setUserInfo((prev) => ({ ...prev, companyLogo: data.secure_url }));
         setFormInput((prev) => ({ ...prev, companyLogo: data.secure_url })); 
-        
         alert("Logo uploaded successfully!");
       }
     } catch (error) { alert("Logo upload failed: " + error.message); }
     setLogoUploading(false);
   };
+
   const handleSave = async () => {
     try {
       const { email, ...updateData } = formInput;
@@ -269,10 +191,12 @@ const Settings = () => {
       alert("Personal info updated successfully!");
     } catch (error) { alert("Failed to update info: " + error.message); }
   };
+
   const handleInventoryTypeChange = async (value) => {
     setInventoryType(value);
     await updateDoc(getSettingsDocRef(), { inventoryType: value });
   };
+
   const handleAddCategory = async () => {
     if (!newCategory.trim()) return;
     const updatedCategories = [...itemCategories, newCategory.trim()];
@@ -280,24 +204,29 @@ const Settings = () => {
     setItemCategories(updatedCategories);
     setNewCategory("");
   };
+
   const handleDeleteCategory = async (category) => {
     const updatedCategories = itemCategories.filter((c) => c !== category);
     await updateDoc(getSettingsDocRef(), { itemCategories: updatedCategories });
     setItemCategories(updatedCategories);
   };
+
   const handleUnitChange = async (unit) => {
     const updatedUnits = selectedUnits.includes(unit) ? selectedUnits.filter(u => u !== unit) : [...selectedUnits, unit];
     setSelectedUnits(updatedUnits);
     await updateDoc(getSettingsDocRef(), { itemUnits: updatedUnits });
   };
+
   const handleStockReminderChange = async (value) => {
     setStockReminder(value);
     await updateDoc(getSettingsDocRef(), { stockReminder: value });
   };
+
   const handleToggleShiftProduction = async (value) => {
     setUseShiftProduction(value);
     await updateDoc(getSettingsDocRef(), { useShiftProduction: value });
   };
+
   const handleAddShift = async () => {
     const nextShiftLetter = String.fromCharCode(65 + productionShifts.length);
     const newShift = `Shift ${nextShiftLetter}`;
@@ -305,6 +234,7 @@ const Settings = () => {
     setProductionShifts(updatedShifts);
     await updateDoc(getSettingsDocRef(), { productionShifts: updatedShifts });
   };
+
   const handleSaveShiftName = async (indexToSave) => {
     if (!editingShift || editingShift.name.trim() === "") return;
     const updatedShifts = productionShifts.map((shift, index) => index === indexToSave ? editingShift.name.trim() : shift);
@@ -312,6 +242,7 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { productionShifts: updatedShifts });
     setEditingShift(null);
   };
+
   const handleDeleteShift = async (indexToDelete) => {
     if (!window.confirm("Are you sure you want to delete this shift?")) return;
     const updatedShifts = productionShifts.filter((_, index) => index !== indexToDelete);
@@ -338,17 +269,14 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { defaultCustomerId: value });
   };
 
-  // ✅ UPDATED: Auto Print Handler (Disables SMS if enabled)
+  // ✅ Auto Print Logic
   const handleAutoPrintChange = async (value) => {
     setAutoPrintInvoice(value);
     const updates = { autoPrintInvoice: value };
-    
-    // If turning ON Auto-Print, Turn OFF SMS
-    if (value) {
-        setSendInvoiceSms(false);
-        updates.sendInvoiceSms = false;
+    if (value) { 
+        setSendInvoiceSms(false); 
+        updates.sendInvoiceSms = false; 
     }
-    
     await updateDoc(getSettingsDocRef(), updates);
   };
 
@@ -403,20 +331,16 @@ const Settings = () => {
     alert("Service charge updated!");
   };
 
-  // ✅ UPDATED: SMS Handler (Disables Auto-Print if enabled)
+  // ✅ SMS Logic
   const handleSendInvoiceSmsChange = async (value) => {
     setSendInvoiceSms(value);
     const updates = { sendInvoiceSms: value };
-
-    // If turning ON SMS, Turn OFF Auto-Print
-    if (value) {
-        setAutoPrintInvoice(false);
-        updates.autoPrintInvoice = false;
+    if (value) { 
+        setAutoPrintInvoice(false); 
+        updates.autoPrintInvoice = false; 
     }
-
     await updateDoc(getSettingsDocRef(), updates);
   };
-
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -430,14 +354,13 @@ const Settings = () => {
   return (
     <div style={styles.container}>
       <div style={styles.headerContainer}><h2 style={styles.header}>Settings</h2><p style={styles.subHeader}>Manage your account and application preferences</p></div>
-      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>
       
-      {/* --- FORM FIELDS MAPPING --- */}
+      {/* Personal Information */}
+      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>
       {["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (
         <div style={styles.formGroup} key={field}>
             <label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>
             {editMode ? (
-                // 🔒 Lock Phone Number just like Email
                 (field === "email" || field === "phone") ? (
                     <input type="text" value={formInput[field]} style={styles.inputDisabled} readOnly/>
                 ) : (
@@ -448,9 +371,9 @@ const Settings = () => {
             )}
         </div>
       ))}
-      
       {editMode && (<div style={styles.buttonGroup}><button style={styles.cancelButton} onClick={() => setEditMode(false)}>Cancel</button><button style={styles.saveButton} onClick={handleSave}>Save Changes</button></div>)}</div>
 
+      {/* Inventory Settings */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Inventory Settings</h3>
         <div style={styles.formGroup}><label style={styles.label}>Inventory Type</label><select value={inventoryType} onChange={(e) => handleInventoryTypeChange(e.target.value)} style={styles.select}><option value="Buy and Sell only">Buy and Sell only</option><option value="Production Selling only">Production Selling only</option><option value="We doing both">We doing both</option></select><p style={styles.helpText}>{inventoryTypeDescriptions[inventoryType]}</p></div>
@@ -460,6 +383,7 @@ const Settings = () => {
         <div style={styles.formGroup}><label style={styles.label}>Measurement Units</label><div style={styles.unitsGrid}>{AVAILABLE_UNITS.map((unit) => (<label key={unit} style={styles.unitCheckbox}><input type="checkbox" checked={selectedUnits.includes(unit)} onChange={() => handleUnitChange(unit)}/>{unit}</label>))}</div></div>
       </div>
       
+      {/* Finance Settings */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Finance Settings</h3>
         <div style={styles.formGroup}>
@@ -481,14 +405,27 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* ✅ NEW SMS & NOTIFICATIONS SECTION */}
+      {/* ✅ NEW SMS & NOTIFICATIONS SECTION (UPDATED) */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>SMS & Notifications</h3>
         
         {/* Credit Display */}
         <div style={{ padding: '15px', background: '#e0f2fe', borderRadius: '8px', marginBottom: '20px', border: '1px solid #bae6fd', color: '#0369a1' }}>
-            <h4 style={{ margin: '0 0 5px 0', fontSize: '16px' }}>SMS Credits Balance</h4>
-            <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{smsCredits} <span style={{ fontSize: '14px', fontWeight: 'normal' }}>/ 350 (Resets Monthly)</span></div>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>SMS Credits Balance</h4>
+            
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}>
+                <span>Monthly Free Plan:</span>
+                <strong>{smsCredits} / 350</strong>
+            </div>
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}>
+                <span>Purchased Packs:</span>
+                <strong>{extraSmsCredits}</strong>
+            </div>
+            
+            <div style={{borderTop: '1px solid #93c5fd', marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold'}}>
+                <span>Total Available:</span>
+                <span>{smsCredits + extraSmsCredits}</span>
+            </div>
         </div>
 
         {/* Feature Toggle */}
@@ -502,6 +439,7 @@ const Settings = () => {
         </div>
       </div>
       
+      {/* Invoicing */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Invoicing</h3>
         <div style={styles.formGroup}>
@@ -558,7 +496,6 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to display the Order Number on your printed invoices.</p>
         </div>
 
-        {/* ✅ NEW TOGGLE: Double line for single item */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Double line for single item in invoice print</label>
             <div style={styles.toggleContainer}>
@@ -570,7 +507,7 @@ const Settings = () => {
 
       </div>
 
-      {/* ✅ RESTAURANT MODE SECTION */}
+      {/* Restaurant Mode */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Resturent Mode</h3>
         <div style={styles.formGroup}>
@@ -582,7 +519,6 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to activate the Kitchen Ordering Display system feature.</p>
         </div>
 
-        {/* ✅ DINE-IN TOGGLE */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Dine-in available</label>
             <div style={styles.toggleContainer}>
@@ -592,7 +528,6 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to allow dine-in orders.</p>
         </div>
 
-        {/* ✅ CONDITIONAL SERVICE CHARGE INPUT */}
         {dineInAvailable && (
             <div style={styles.formGroup}>
                 <label style={styles.label}>Service Charge (Percentage)</label>
@@ -624,7 +559,7 @@ const Settings = () => {
         )}
       </div>
 
-      {/* --- NEW SERVICE AND ORDERS SECTION --- */}
+      {/* Service and Orders */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Service and Orders</h3>
         <div style={styles.formGroup}>

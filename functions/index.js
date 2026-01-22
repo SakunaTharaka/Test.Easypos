@@ -10,28 +10,18 @@ const fs = require('fs');
 admin.initializeApp();
 const db = admin.firestore();
 
-// Set Limits to prevent high costs
+// Set Limits
 setGlobalOptions({ maxInstances: 10 });
 
-// ====================================================
-// ⚙️ CONFIGURATION
-// ====================================================
+// CONFIGURATION
 const TEXT_LK_API_TOKEN = "1594|WMi7mCcEEI3Ajkg4oMG2EeU7cA03k6oKIN81ouJ901ddfb53"; 
 
-// ====================================================
-// 🛠️ HELPER: SEND SMS (With 011 Filter)
-// ====================================================
+// --- HELPER: SEND SMS ---
 async function sendSMS(mobile, message, senderId = "QuickPOS") {
   if (!mobile) return;
-
-  // 1. 🛑 FILTER: Ignore Colombo Landlines
-  if (mobile.toString().startsWith("011")) {
-    console.log(`🚫 Skipped SMS for landline: ${mobile}`);
-    return;
-  }
+  if (mobile.toString().startsWith("011")) return; 
 
   try {
-    // 2. FORMAT: Convert '077...' to '9477...'
     let recipient = mobile.toString();
     if (recipient.startsWith("0")) {
       recipient = "94" + recipient.substring(1);
@@ -55,23 +45,17 @@ async function sendSMS(mobile, message, senderId = "QuickPOS") {
     await axios.post("https://app.text.lk/api/v3/sms/send", payload, config);
   } catch (error) {
     console.error("SMS Error:", error.message);
-    // Don't throw, just log, so transactions don't fail if SMS API is down
   }
 }
 
-// ====================================================
-// 1. 📅 MONTHLY SMS CREDIT RESET
-// ====================================================
+// 1. MONTHLY RESET (Resets FREE credits only)
 exports.resetMonthlySmsCredits = onSchedule({
     schedule: "every day 00:00",
     timeZone: "Asia/Colombo",
 }, async (event) => {
     const today = new Date();
     const currentDay = today.getDate();
-    
-    // Fetch all active users
     const usersSnapshot = await db.collection("Userinfo").get();
-    
     const batch = db.batch();
     let operationCount = 0;
 
@@ -79,9 +63,9 @@ exports.resetMonthlySmsCredits = onSchedule({
         const userData = doc.data();
         if (userData.trialStartDate) {
             const startDate = userData.trialStartDate.toDate ? userData.trialStartDate.toDate() : new Date(userData.trialStartDate);
-            // Check if today is the anniversary day
+            // Check anniversary
             if (startDate.getDate() === currentDay) {
-                // Reset credits to 350
+                // ✅ RESET only 'smsCredits' (Free). 'extraSmsCredits' is UNTOUCHED.
                 batch.update(doc.ref, { smsCredits: 350 });
                 operationCount++;
             }
@@ -90,55 +74,62 @@ exports.resetMonthlySmsCredits = onSchedule({
 
     if (operationCount > 0) {
         await batch.commit();
-        console.log(`Reset SMS credits for ${operationCount} users.`);
+        console.log(`Reset Free SMS credits for ${operationCount} users.`);
     }
 });
 
-// ====================================================
-// 2. 📨 SEND INVOICE SMS (Updated for Smart Credits)
-// ====================================================
+// 2. SEND INVOICE SMS (Uses Free First, Then Extra)
 exports.sendInvoiceSms = onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'User must be logged in.');
     
     const uid = request.auth.uid;
-    // Accepting new parameters from Invoice.js
     const { mobile, customMessage, creditsToDeduct } = request.data;
 
-    if (!mobile || !customMessage) {
-        throw new HttpsError('invalid-argument', 'Missing mobile number or message.');
-    }
+    if (!mobile || !customMessage) throw new HttpsError('invalid-argument', 'Missing data.');
 
-    const creditsCost = creditsToDeduct || 1; // Default to 1 if missing
+    const cost = creditsToDeduct || 1; 
 
     await db.runTransaction(async (transaction) => {
         const userRef = db.collection("Userinfo").doc(uid);
         const userDoc = await transaction.get(userRef);
 
-        if (!userDoc.exists) throw new HttpsError('not-found', 'User profile not found.');
+        if (!userDoc.exists) throw new HttpsError('not-found', 'User not found.');
 
         const userData = userDoc.data();
-        const currentCredits = userData.smsCredits || 0;
+        const freeCredits = userData.smsCredits || 0;
+        const paidCredits = userData.extraSmsCredits || 0; // Extra credits
+        const totalAvailable = freeCredits + paidCredits;
 
-        // 🛑 Check Balance
-        if (currentCredits < creditsCost) {
-            throw new HttpsError('resource-exhausted', `Insufficient SMS credits. Required: ${creditsCost}, Available: ${currentCredits}`);
+        if (totalAvailable < cost) {
+            throw new HttpsError('resource-exhausted', `Insufficient credits. Need ${cost}, have ${totalAvailable}`);
         }
 
-        // 1. Send SMS using "Wayne" Sender ID (Invoice SMS sending )
+        // Send SMS
         await sendSMS(mobile, customMessage, "Wayne");
 
-        // 2. Deduct Credits
+        // Deduct Logic: Use Free First
+        let newFree = freeCredits;
+        let newPaid = paidCredits;
+        let remainingCost = cost;
+
+        if (newFree >= remainingCost) {
+            newFree -= remainingCost;
+        } else {
+            remainingCost -= newFree;
+            newFree = 0;
+            newPaid -= remainingCost; // Deduct remainder from Paid
+        }
+
         transaction.update(userRef, { 
-            smsCredits: currentCredits - creditsCost 
+            smsCredits: newFree,
+            extraSmsCredits: newPaid
         });
     });
 
     return { success: true };
 });
 
-// ====================================================
-// 3. 🖨️ QZ TRAY SIGNATURE
-// ====================================================
+// 3. QZ SIGNATURE
 exports.getQzSignature = onCall((request) => {
     const toSign = request.data.requestToSign;
     try {
@@ -148,86 +139,64 @@ exports.getQzSignature = onCall((request) => {
         const signature = signer.sign(privateKey, 'base64');
         return { signature: signature };
     } catch (err) {
-        console.error("QZ Sign Error:", err);
-        throw new HttpsError('internal', 'Failed to sign print request.');
+        throw new HttpsError('internal', 'Sign Error');
     }
 });
 
-// ====================================================
-// 4. 🔢 REQUEST OTP
-// ====================================================
+// 4. OTP FUNCTIONS
 exports.requestOtp = onCall(async (request) => {
     const mobile = request.data.mobile;
-    if (!mobile) throw new HttpsError('invalid-argument', 'Phone number is required');
+    if (!mobile) throw new HttpsError('invalid-argument', 'Phone required');
 
-    // Check duplicate globally
     const globalDocRef = db.collection('global_settings').doc('verified_numbers');
     const globalDocSnap = await globalDocRef.get();
     if (globalDocSnap.exists) {
         const usedNumbers = globalDocSnap.data().list || [];
-        if (usedNumbers.includes(mobile)) {
-            throw new HttpsError('already-exists', 'Number already registered.');
-        }
+        if (usedNumbers.includes(mobile)) throw new HttpsError('already-exists', 'Number already registered.');
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
     await db.collection('otp_codes').doc(mobile).set({
         code: otp,
         expiresAt: Date.now() + 5 * 60 * 1000, 
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
-
-    const msg = `Your QuickPOS Verification Code is: ${otp}`;
-    await sendSMS(mobile, msg);
-
-    return { success: true, message: "OTP sent successfully" };
+    await sendSMS(mobile, `Your QuickPOS Code: ${otp}`);
+    return { success: true };
 });
 
-// ====================================================
-// 5. ✅ VERIFY OTP
-// ====================================================
 exports.verifyOtp = onCall(async (request) => {
-    const mobile = request.data.mobile;
-    const userCode = request.data.code;
-
-    if (!mobile || !userCode) throw new HttpsError('invalid-argument', 'Missing Data');
-
+    const { mobile, code } = request.data;
     const docRef = db.collection('otp_codes').doc(mobile);
     const docSnap = await docRef.get();
 
-    if (!docSnap.exists) throw new HttpsError('not-found', 'No OTP request found');
-
+    if (!docSnap.exists) throw new HttpsError('not-found', 'OTP not found');
     const data = docSnap.data();
+    
     if (Date.now() > data.expiresAt) {
         await docRef.delete();
-        throw new HttpsError('deadline-exceeded', 'OTP Expired');
+        throw new HttpsError('deadline-exceeded', 'Expired');
     }
 
-    if (data.code === userCode.toString()) {
+    if (data.code === code.toString()) {
         await docRef.delete();
-        // Lock the number globally
         await db.collection('global_settings').doc('verified_numbers').set({
             list: admin.firestore.FieldValue.arrayUnion(mobile)
         }, { merge: true });
-
-        return { success: true, message: "Verified" };
+        return { success: true };
     } else {
         throw new HttpsError('permission-denied', 'Invalid Code');
     }
 });
 
-// ====================================================
-// 6. 👋 WELCOME & EXPIRY NOTIFICATIONS
-// ====================================================
+// 5. WELCOME MSG
 exports.sendWelcomeMessage = onDocumentCreated("Userinfo/{userId}", async (event) => {
     const snapshot = event.data;
     if (!snapshot) return;
     const userData = snapshot.data();
-    const msg = `Hi ${userData.fullName || "Customer"}, Thank you for using QuickPOS! Support: 078 722 3407`;
-    await sendSMS(userData.phone, msg);
+    await sendSMS(userData.phone, `Hi ${userData.fullName}, Welcome to QuickPOS! Support: 078 722 3407`);
 });
 
+// 6. EXPIRY CHECK
 exports.checkSubscriptionExpiry = onSchedule({
     schedule: "every day 09:00",
     timeZone: "Asia/Colombo",
@@ -238,7 +207,6 @@ exports.checkSubscriptionExpiry = onSchedule({
     twoDaysFromNow.setDate(today.getDate() + 2);
 
     const users = await db.collection("Userinfo").where("status", "==", "trialing").get();
-    
     users.docs.forEach(async (doc) => {
         const u = doc.data();
         if(!u.trialEndDate) return;
@@ -253,9 +221,7 @@ exports.checkSubscriptionExpiry = onSchedule({
     });
 });
 
-// ====================================================
-// 7. ✅ NEW: SECURE START TRIAL
-// ====================================================
+// 7. SECURE START TRIAL
 exports.startTrial = onCall(async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'User must be logged in.');
     
@@ -266,14 +232,64 @@ exports.startTrial = onCall(async (request) => {
     const trialEndDate = new Date(trialStartDate);
     trialEndDate.setDate(trialStartDate.getDate() + 7);
 
-    // This runs as Admin, bypassing frontend rules
+    // Initial 350 Free. Extra starts at 0 if missing.
     await db.collection("Userinfo").doc(uid).set({
         selectedPackage: plan || 'monthly',
         trialStartDate: admin.firestore.Timestamp.fromDate(trialStartDate),
         trialEndDate: admin.firestore.Timestamp.fromDate(trialEndDate),
         status: 'trialing',
-        smsCredits: 350 // ✅ Safely initialized
+        smsCredits: 350 
     }, { merge: true });
 
     return { success: true };
+});
+
+// 8. ✅ SECURE: ADMIN ADD CREDITS (Fix for Internal Error)
+exports.adminAddCredits = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required');
+    
+    const { targetUid, amount } = request.data;
+    const credits = parseInt(amount);
+
+    if (!targetUid || isNaN(credits)) throw new HttpsError('invalid-argument', 'Invalid data');
+
+    const userRef = db.collection("Userinfo").doc(targetUid);
+    const userSnap = await userRef.get();
+
+    if (!userSnap.exists) throw new HttpsError('not-found', 'User not found');
+
+    // Use set with merge to safely add the field if it doesn't exist
+    await userRef.set({
+        extraSmsCredits: admin.firestore.FieldValue.increment(credits)
+    }, { merge: true });
+
+    return { success: true, message: `Added ${credits} credits.` };
+});
+
+// 9. ✅ SECURE: ADMIN EXTEND TRIAL
+exports.adminExtendTrial = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Login required');
+
+    const { targetUid, days } = request.data;
+    const daysToAdd = parseInt(days);
+
+    if (!targetUid || isNaN(daysToAdd)) throw new HttpsError('invalid-argument', 'Invalid data');
+
+    const userRef = db.collection("Userinfo").doc(targetUid);
+    const userSnap = await userRef.get();
+    
+    if (!userSnap.exists) throw new HttpsError('not-found', 'User not found');
+
+    const currentEnd = userSnap.data().trialEndDate?.toDate() || new Date();
+    const today = new Date();
+    
+    // If expired, start from today. If active, add to current end date.
+    const baseDate = currentEnd > today ? currentEnd : today;
+    baseDate.setDate(baseDate.getDate() + daysToAdd);
+
+    await userRef.update({
+        trialEndDate: admin.firestore.Timestamp.fromDate(baseDate)
+    });
+
+    return { success: true, newDate: baseDate };
 });

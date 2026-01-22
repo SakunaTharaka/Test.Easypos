@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase';
+import { db, auth } from '../firebase'; 
 import { 
-  collection, getDocs, query, where, doc, updateDoc, Timestamp, 
+  collection, getDocs, query, where, doc, updateDoc, 
   getDoc, setDoc, serverTimestamp, limit, startAfter, orderBy, endBefore, limitToLast 
-} from 'firebase/firestore';
-import { FaSearch, FaSync, FaUsers, FaBullhorn, FaToggleOn, FaToggleOff, FaTools, FaKey, FaChevronLeft, FaChevronRight } from 'react-icons/fa';
+} from 'firebase/firestore'; 
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { FaSearch, FaSync, FaUsers, FaBullhorn, FaToggleOn, FaToggleOff, FaTools, FaKey, FaChevronLeft, FaChevronRight, FaSms } from 'react-icons/fa';
 
 const MasterAdmin = () => {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -17,10 +18,11 @@ const MasterAdmin = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isExtending, setIsExtending] = useState(false);
+  const [isAddingCredits, setIsAddingCredits] = useState(false);
 
   // Pagination State
   const [lastVisible, setLastVisible] = useState(null);
-  const [firstVisible, setFirstVisible] = useState(null); // Keep track for 'Previous' button
+  const [firstVisible, setFirstVisible] = useState(null); 
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
   const [isNextAvailable, setIsNextAvailable] = useState(true);
@@ -32,6 +34,11 @@ const MasterAdmin = () => {
   const [masterPassword, setMasterPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
+
+  const functions = getFunctions();
+
+  // ✅ CONSTANT: The only allowed UID
+  const MASTER_ADMIN_UID = "3EtBxeb8cnUowtmnrufH6XmVO7g2";
 
   useEffect(() => {
     const fetchGlobalSettings = async () => {
@@ -73,6 +80,14 @@ const MasterAdmin = () => {
 
   const handleLogin = (e) => {
     e.preventDefault();
+
+    // ✅ SECURITY CHECK: Validate UID
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== MASTER_ADMIN_UID) {
+        setError('Access Denied: You are not authorized to view this page.');
+        return;
+    }
+
     if (password === masterPassword) {
       setLoggedIn(true);
       setError('');
@@ -82,10 +97,7 @@ const MasterAdmin = () => {
   };
   
   const handleUpdatePassword = async () => {
-    if (newPassword.length < 6) {
-      alert('New password must be at least 6 characters long.');
-      return;
-    }
+    if (newPassword.length < 6) return alert('New password must be at least 6 characters long.');
     setIsUpdatingPass(true);
     try {
       const credRef = doc(db, 'global_settings', 'credentials');
@@ -93,31 +105,19 @@ const MasterAdmin = () => {
       setMasterPassword(newPassword);
       setNewPassword('');
       alert('Master password updated successfully!');
-    } catch (err) {
-      alert(`Failed to update password: ${err.message}`);
-    } finally {
-      setIsUpdatingPass(false);
-    }
+    } catch (err) { alert(`Failed to update password: ${err.message}`); } 
+    finally { setIsUpdatingPass(false); }
   };
 
   const handleUpdateMessage = async () => {
-    if (!announcement.message.trim()) {
-        alert('Please enter a message for the announcement.');
-        return;
-    }
+    if (!announcement.message.trim()) return alert('Please enter a message for the announcement.');
     setIsUpdatingAnn(true);
     try {
         const annRef = doc(db, 'global_settings', 'announcement');
-        await updateDoc(annRef, { 
-            message: announcement.message,
-            lastUpdated: serverTimestamp() 
-        });
+        await updateDoc(annRef, { message: announcement.message, lastUpdated: serverTimestamp() });
         alert('Announcement message has been updated successfully!');
-    } catch (err) {
-        alert(`Failed to update message: ${err.message}`);
-    } finally {
-        setIsUpdatingAnn(false);
-    }
+    } catch (err) { alert(`Failed to update message: ${err.message}`); } 
+    finally { setIsUpdatingAnn(false); }
   };
 
   const handleToggleAnnouncement = async () => {
@@ -125,10 +125,7 @@ const MasterAdmin = () => {
     setAnnouncement(prev => ({ ...prev, isEnabled: newStatus }));
     try {
         const annRef = doc(db, 'global_settings', 'announcement');
-        await updateDoc(annRef, {
-            isEnabled: newStatus,
-            lastUpdated: serverTimestamp()
-        });
+        await updateDoc(annRef, { isEnabled: newStatus, lastUpdated: serverTimestamp() });
     } catch (err) {
         setAnnouncement(prev => ({ ...prev, isEnabled: !newStatus }));
         alert(`Failed to toggle announcement: ${err.message}`);
@@ -148,69 +145,37 @@ const MasterAdmin = () => {
   };
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      alert('Please enter a search query.');
-      return;
-    }
-    setLoading(true);
-    setSelectedUser(null);
-    setUsers([]);
-    setPage(1);
-    setLastVisible(null);
-    setFirstVisible(null);
-    setIsNextAvailable(false); // Disable pagination for search results usually
-
+    if (!searchQuery.trim()) return alert('Please enter a search query.');
+    setLoading(true); setSelectedUser(null); setUsers([]); setPage(1); setLastVisible(null); setFirstVisible(null); setIsNextAvailable(false); 
     try {
       const usersRef = collection(db, 'Userinfo');
-      let q;
       if (searchType === 'uid') {
         const userDoc = await getDoc(doc(usersRef, searchQuery.trim()));
-        if (userDoc.exists()) {
-           setUsers([{ id: userDoc.id, ...userDoc.data() }]);
-        }
+        if (userDoc.exists()) setUsers([{ id: userDoc.id, ...userDoc.data() }]);
       } else {
         const searchTerm = searchQuery.trim();
-        q = query(usersRef, 
-            where(searchType, '>=', searchTerm), 
-            where(searchType, '<=', searchTerm + '\uf8ff'),
-            limit(PAGE_SIZE) // Limit search results too just in case
-        );
+        const q = query(usersRef, where(searchType, '>=', searchTerm), where(searchType, '<=', searchTerm + '\uf8ff'), limit(PAGE_SIZE));
         const querySnapshot = await getDocs(q);
         const foundUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setUsers(foundUsers);
       }
-    } catch (err) {
-      alert(`An error occurred while searching: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { alert(`An error occurred while searching: ${err.message}`); } 
+    finally { setLoading(false); }
   };
 
-  // --- PAGINATION LOGIC ---
-
   const handleShowAll = async () => {
-    setLoading(true);
-    setSelectedUser(null);
-    setUsers([]);
-    setPage(1);
+    setLoading(true); setSelectedUser(null); setUsers([]); setPage(1);
     try {
       const usersRef = collection(db, 'Userinfo');
-      // Order by is crucial for consistent pagination
       const q = query(usersRef, orderBy('companyName'), limit(PAGE_SIZE));
-      
       const querySnapshot = await getDocs(q);
       const allUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
       setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
       setFirstVisible(querySnapshot.docs[0]);
       setUsers(allUsers);
       setIsNextAvailable(querySnapshot.docs.length === PAGE_SIZE);
-
-    } catch (err) {
-      alert(`An error occurred while fetching users: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { alert(`An error occurred while fetching users: ${err.message}`); } 
+    finally { setLoading(false); }
   };
 
   const handleNextPage = async () => {
@@ -218,13 +183,7 @@ const MasterAdmin = () => {
     setLoading(true);
     try {
       const usersRef = collection(db, 'Userinfo');
-      const q = query(
-          usersRef, 
-          orderBy('companyName'), 
-          startAfter(lastVisible), 
-          limit(PAGE_SIZE)
-      );
-      
+      const q = query(usersRef, orderBy('companyName'), startAfter(lastVisible), limit(PAGE_SIZE));
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
           const nextUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -233,15 +192,9 @@ const MasterAdmin = () => {
           setFirstVisible(querySnapshot.docs[0]);
           setPage(prev => prev + 1);
           setIsNextAvailable(querySnapshot.docs.length === PAGE_SIZE);
-      } else {
-          setIsNextAvailable(false);
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Error fetching next page.");
-    } finally {
-      setLoading(false);
-    }
+      } else { setIsNextAvailable(false); }
+    } catch (err) { console.error(err); alert("Error fetching next page."); } 
+    finally { setLoading(false); }
   };
 
   const handlePrevPage = async () => {
@@ -249,13 +202,7 @@ const MasterAdmin = () => {
     setLoading(true);
     try {
       const usersRef = collection(db, 'Userinfo');
-      const q = query(
-          usersRef, 
-          orderBy('companyName'), 
-          endBefore(firstVisible), 
-          limitToLast(PAGE_SIZE)
-      );
-      
+      const q = query(usersRef, orderBy('companyName'), endBefore(firstVisible), limitToLast(PAGE_SIZE));
       const querySnapshot = await getDocs(q);
       if (!querySnapshot.empty) {
           const prevUsers = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -265,80 +212,63 @@ const MasterAdmin = () => {
           setPage(prev => prev - 1);
           setIsNextAvailable(true);
       }
-    } catch (err) {
-      console.error(err);
-      alert("Error fetching previous page.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); alert("Error fetching previous page."); } 
+    finally { setLoading(false); }
   };
-  
-  // --- END PAGINATION LOGIC ---
 
+  // ✅ UPDATED: Added Confirmation Dialog
   const handleExtendTrial = async (days) => {
     if (!selectedUser || isExtending) return;
+
+    const durationText = days === 365 ? "1 Year" : `${days} Days`;
+    const confirmMessage = `Are you sure you want to extend the trial for "${selectedUser.companyName}" by ${durationText}?`;
+
+    if (!window.confirm(confirmMessage)) return; // 🛑 Stops execution if Cancelled
+
     setIsExtending(true);
     try {
-        const userRef = doc(db, "Userinfo", selectedUser.id);
+        const adminExtendTrialFn = httpsCallable(functions, 'adminExtendTrial');
+        await adminExtendTrialFn({ targetUid: selectedUser.id, days: days });
         
-        // ✅ **START: CRITICAL 100% TRUSTABLE DATE LOGIC**
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); 
-        const currentEndDate = selectedUser.trialEndDate.toDate();
-        currentEndDate.setHours(0, 0, 0, 0); 
-
-        let baseDate;
-        if (currentEndDate > today) {
-            baseDate = selectedUser.trialEndDate.toDate();
-        } else {
-            baseDate = new Date();
-        }
-
-        const newEndDate = new Date(baseDate);
-        newEndDate.setDate(baseDate.getDate() + days);
-        // ✅ **END: CRITICAL 100% TRUSTABLE DATE LOGIC**
-
-        await updateDoc(userRef, {
-            trialEndDate: Timestamp.fromDate(newEndDate)
-        });
-
+        const userRef = doc(db, "Userinfo", selectedUser.id);
         const updatedDoc = await getDoc(userRef);
-        setSelectedUser({ id: updatedDoc.id, ...updatedDoc.data() });
+        const newData = { id: updatedDoc.id, ...updatedDoc.data() };
+        setSelectedUser(newData);
+        setUsers(prevUsers => prevUsers.map(u => u.id === selectedUser.id ? newData : u));
+        alert(`Trial extended successfully!`);
+    } catch (err) { alert(`Failed to extend trial: ${err.message}`); } 
+    finally { setIsExtending(false); }
+  };
 
-        // Update the user in the local list so the table updates immediately
-        setUsers(prevUsers => prevUsers.map(u => u.id === selectedUser.id ? { ...u, trialEndDate: Timestamp.fromDate(newEndDate) } : u));
+  // ✅ Add Credits (Already had confirmation, keeping it consistent)
+  const handleAddCredits = async (amount) => {
+      if (!selectedUser || isAddingCredits) return;
+      if (!window.confirm(`Are you sure you want to add ${amount} Extra SMS Credits to "${selectedUser.companyName}"?`)) return;
 
-        alert(`Trial successfully extended to ${newEndDate.toLocaleDateString('en-LK')}!`);
-    } catch (err) {
-        alert(`Failed to extend trial: ${err.message}`);
-    } finally {
-        setTimeout(() => setIsExtending(false), 1000); 
-    }
+      setIsAddingCredits(true);
+      try {
+          const adminAddCreditsFn = httpsCallable(functions, 'adminAddCredits');
+          await adminAddCreditsFn({ targetUid: selectedUser.id, amount: amount });
+
+          const userRef = doc(db, "Userinfo", selectedUser.id);
+          const updatedDoc = await getDoc(userRef);
+          const newData = { id: updatedDoc.id, ...updatedDoc.data() };
+          setSelectedUser(newData);
+          setUsers(prevUsers => prevUsers.map(u => u.id === selectedUser.id ? newData : u));
+          alert(`Successfully added ${amount} SMS Credits!`);
+      } catch (err) { alert(`Failed to add credits: ${err.message}`); } 
+      finally { setIsAddingCredits(false); }
   };
 
   const calculateDaysLeft = (trialEndDate) => {
-    if (!trialEndDate || !trialEndDate.toDate) {
-      return { text: '-', color: '#555' };
-    }
+    if (!trialEndDate || !trialEndDate.toDate) return { text: '-', color: '#555' };
     const today = new Date();
     const endDate = trialEndDate.toDate();
-    
-    today.setHours(0, 0, 0, 0);
-    endDate.setHours(0, 0, 0, 0);
-    
-    const diffTime = endDate - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) {
-      return { text: 'Expired', color: '#e74c3c' };
-    }
-    if (diffDays === 0) {
-      return { text: 'Expires Today', color: '#f59e0b' };
-    }
-    if (diffDays < 5) {
-      return { text: `${diffDays} days`, color: '#e74c3c' };
-    }
-    return { text: `${diffDays} days`, color: '#27ae60' };
+    today.setHours(0, 0, 0, 0); endDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return { text: 'Expired', color: '#e74c3c' };
+    if (diffDays === 0) return { text: 'Expires Today', color: '#f59e0b' };
+    return { text: `${diffDays} days`, color: diffDays < 5 ? '#e74c3c' : '#27ae60' };
   };
 
   if (!loggedIn) {
@@ -347,13 +277,7 @@ const MasterAdmin = () => {
         <div style={styles.loginBox}>
           <h1 style={styles.header}>Master Admin Login</h1>
           <form onSubmit={handleLogin}>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter Master Password"
-              style={styles.input}
-            />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter Master Password" style={styles.input} />
             <button type="submit" style={styles.button}>Login</button>
             {error && <p style={styles.errorText}>{error}</p>}
           </form>
@@ -366,115 +290,69 @@ const MasterAdmin = () => {
     <div style={styles.container}>
       <h1 style={styles.header}>Master Admin Panel</h1>
       
+      {/* Announcements */}
       <div style={styles.announcementContainer}>
           <h2 style={styles.subHeader}><FaBullhorn /> Global Announcement</h2>
-          <textarea
-            placeholder="Type your critical announcement here..."
-            style={styles.textarea}
-            value={announcement.message}
-            onChange={(e) => setAnnouncement({...announcement, message: e.target.value})}
-          />
+          <textarea placeholder="Type your announcement..." style={styles.textarea} value={announcement.message} onChange={(e) => setAnnouncement({...announcement, message: e.target.value})} />
           <div style={styles.announcementControls}>
             <div style={styles.toggleContainer} onClick={handleToggleAnnouncement}>
                 {announcement.isEnabled ? <FaToggleOn size={28} color="#10b981" /> : <FaToggleOff size={28} color="#6b7280" />}
-                <span style={{fontWeight: announcement.isEnabled ? 'bold' : 'normal', color: announcement.isEnabled ? '#10b981' : '#6b7280'}}>
-                    {announcement.isEnabled ? 'Announcement is LIVE' : 'Announcement is OFF'}
-                </span>
+                <span style={{color: announcement.isEnabled ? '#10b981' : '#6b7280'}}>{announcement.isEnabled ? 'LIVE' : 'OFF'}</span>
             </div>
-            <button onClick={handleUpdateMessage} disabled={isUpdatingAnn} style={isUpdatingAnn ? styles.buttonDisabled : styles.button}>
-                {isUpdatingAnn ? 'Updating...' : 'Update Message Text'}
-            </button>
+            <button onClick={handleUpdateMessage} disabled={isUpdatingAnn} style={isUpdatingAnn ? styles.buttonDisabled : styles.button}>{isUpdatingAnn ? 'Updating...' : 'Update'}</button>
           </div>
       </div>
 
+      {/* Maintenance */}
       <div style={styles.maintenanceContainer}>
-        <h2 style={styles.subHeader}><FaTools /> System Maintenance Mode</h2>
+        <h2 style={styles.subHeader}><FaTools /> Maintenance Mode</h2>
         <div style={styles.announcementControls}>
-            <p style={styles.description}>When enabled, all users will be blocked from logging in and will see a maintenance page.</p>
+            <p style={styles.description}>Blocks user login when active.</p>
             <div style={styles.toggleContainer} onClick={handleToggleMaintenanceMode}>
                 {maintenanceMode ? <FaToggleOn size={28} color="#d9534f" /> : <FaToggleOff size={28} color="#6b7280" />}
-                <span style={{fontWeight: maintenanceMode ? 'bold' : 'normal', color: maintenanceMode ? '#d9534f' : '#6b7280'}}>
-                    {maintenanceMode ? 'Maintenance Mode is ACTIVE' : 'Maintenance Mode is OFF'}
-                </span>
+                <span style={{color: maintenanceMode ? '#d9534f' : '#6b7280'}}>{maintenanceMode ? 'ACTIVE' : 'OFF'}</span>
             </div>
         </div>
       </div>
       
+      {/* Password */}
       <div style={styles.passwordContainer}>
-        <h2 style={styles.subHeader}><FaKey /> Change Master Password</h2>
+        <h2 style={styles.subHeader}><FaKey /> Master Password</h2>
         <div style={styles.passwordControls}>
-          <input
-            type="password"
-            placeholder="Enter new password (min. 6 characters)"
-            style={styles.input}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <button onClick={handleUpdatePassword} disabled={isUpdatingPass} style={isUpdatingPass ? styles.buttonDisabled : styles.button}>
-            {isUpdatingPass ? 'Updating...' : 'Update Password'}
-          </button>
+          <input type="password" placeholder="New Password" style={styles.input} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          <button onClick={handleUpdatePassword} disabled={isUpdatingPass} style={isUpdatingPass ? styles.buttonDisabled : styles.button}>{isUpdatingPass ? '...' : 'Update'}</button>
         </div>
       </div>
 
+      {/* Search */}
       <div style={styles.searchContainer}>
-        <select value={searchType} onChange={(e) => setSearchType(e.target.value)} style={styles.select}>
-          <option value="uid">User ID</option>
-          <option value="email">Email</option>
-          <option value="phone">Phone Number</option>
-        </select>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder={`Search by ${searchType}...`}
-          style={styles.input}
-        />
-        <button onClick={handleSearch} disabled={loading} style={styles.button}>
-            {loading ? <FaSync className="spin" /> : <FaSearch />} Search
-        </button>
-        <button onClick={handleShowAll} disabled={loading} style={{...styles.button, backgroundColor: '#10b981'}}>
-            {loading ? <FaSync className="spin" /> : <FaUsers />} Show All
-        </button>
+        <select value={searchType} onChange={(e) => setSearchType(e.target.value)} style={styles.select}><option value="uid">User ID</option><option value="email">Email</option><option value="phone">Phone</option></select>
+        <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search..." style={styles.input} />
+        <button onClick={handleSearch} disabled={loading} style={styles.button}>{loading ? <FaSync className="spin" /> : <FaSearch />}</button>
+        <button onClick={handleShowAll} disabled={loading} style={{...styles.button, backgroundColor: '#10b981'}}>{loading ? <FaSync className="spin" /> : <FaUsers />}</button>
       </div>
 
+      {/* Results */}
       <div style={styles.resultsContainer}>
         <div style={styles.userList}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
             <h2 style={styles.subHeader}>Users ({users.length})</h2>
             <div style={styles.paginationControls}>
-                <button onClick={handlePrevPage} disabled={page === 1 || loading} style={page === 1 || loading ? styles.pageBtnDisabled : styles.pageBtn}><FaChevronLeft /></button>
-                <span style={{fontWeight: 'bold'}}>Page {page}</span>
-                <button onClick={handleNextPage} disabled={!isNextAvailable || loading} style={!isNextAvailable || loading ? styles.pageBtnDisabled : styles.pageBtn}><FaChevronRight /></button>
+                <button onClick={handlePrevPage} disabled={page === 1 || loading} style={styles.pageBtn}><FaChevronLeft /></button>
+                <span>{page}</span>
+                <button onClick={handleNextPage} disabled={!isNextAvailable || loading} style={styles.pageBtn}><FaChevronRight /></button>
             </div>
           </div>
           
           {loading && <p>Loading...</p>}
-          {!loading && users.length === 0 && <p>No users found. Try the 'Show All' button to see all registered users.</p>}
-          
           <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Company Name</th>
-                <th style={styles.th}>Email</th>
-                <th style={styles.th}>Phone</th>
-                <th style={styles.th}>Days Left</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Days</th></tr></thead>
             <tbody>
               {users.map(user => {
-                const daysLeftInfo = calculateDaysLeft(user.trialEndDate);
+                const days = calculateDaysLeft(user.trialEndDate);
                 return (
-                  <tr 
-                    key={user.id} 
-                    onClick={() => setSelectedUser(user)} 
-                    style={selectedUser?.id === user.id ? { ...styles.tr, ...styles.trSelected } : styles.tr}
-                  >
-                    <td style={styles.td}>{user.companyName || "N/A"}</td>
-                    <td style={styles.td}>{user.email}</td>
-                    <td style={styles.td}>{user.phone}</td>
-                    <td style={{...styles.td, color: daysLeftInfo.color, fontWeight: 'bold' }}>
-                      {daysLeftInfo.text}
-                    </td>
+                  <tr key={user.id} onClick={() => setSelectedUser(user)} style={selectedUser?.id === user.id ? styles.trSelected : styles.tr}>
+                    <td style={styles.td}>{user.companyName || "N/A"}</td><td style={styles.td}>{user.email}</td><td style={styles.td}>{user.phone}</td><td style={{...styles.td, color: days.color, fontWeight: 'bold'}}>{days.text}</td>
                   </tr>
                 );
               })}
@@ -483,32 +361,33 @@ const MasterAdmin = () => {
         </div>
 
         <div style={styles.userDetails}>
-          <h2 style={styles.subHeader}>User Details</h2>
+          <h2 style={styles.subHeader}>Details</h2>
           {selectedUser ? (
             <div>
-              <p><strong>User ID:</strong> {selectedUser.id}</p>
-              <p><strong>Full Name:</strong> {selectedUser.fullName}</p>
+              <p><strong>ID:</strong> {selectedUser.id}</p>
               <p><strong>Company:</strong> {selectedUser.companyName}</p>
-              <p><strong>Email:</strong> {selectedUser.email}</p>
               <p><strong>Phone:</strong> {selectedUser.phone}</p>
-              <p><strong>Address:</strong> {selectedUser.companyAddress}</p>
-              <p><strong>Plan:</strong> {selectedUser.selectedPackage}</p>
-              <p style={styles.trialDate}>
-                <strong>Trial Ends:</strong> {selectedUser.trialEndDate?.toDate().toLocaleDateString('en-LK', { year: 'numeric', month: 'long', day: 'numeric' })}
-              </p>
+              
+              <div style={styles.creditInfoBox}>
+                  <div><strong>Free Credits:</strong> {selectedUser.smsCredits || 0} / 350</div>
+                  <div style={{marginTop: '5px', color: '#059669'}}><strong>Extra Credits:</strong> {selectedUser.extraSmsCredits || 0}</div>
+              </div>
+
+              <p style={styles.trialDate}><strong>Ends:</strong> {selectedUser.trialEndDate?.toDate().toLocaleDateString('en-LK')}</p>
               
               <div style={styles.buttonGroup}>
-                <button onClick={() => handleExtendTrial(30)} disabled={isExtending} style={isExtending ? styles.buttonDisabled : styles.button}>
-                  {isExtending ? 'Updating...' : 'Extend 1 Month'}
-                </button>
-                <button onClick={() => handleExtendTrial(365)} disabled={isExtending} style={isExtending ? styles.buttonDisabled : styles.button}>
-                   {isExtending ? 'Updating...' : 'Extend 1 Year'}
-                </button>
+                <button onClick={() => handleExtendTrial(30)} disabled={isExtending} style={styles.button}>1 Month</button>
+                <button onClick={() => handleExtendTrial(365)} disabled={isExtending} style={styles.button}>1 Year</button>
+              </div>
+
+              <h3 style={{...styles.subHeader, marginTop: '30px', fontSize: '1.1em'}}><FaSms /> Add Credit Packs</h3>
+              <div style={styles.creditPackGrid}>
+                  {[100, 300, 500, 1000, 1500, 2500, 3500, 5500].map(amt => (
+                      <button key={amt} onClick={() => handleAddCredits(amt)} disabled={isAddingCredits} style={isAddingCredits ? styles.packBtnDisabled : styles.packBtn}>+{amt}</button>
+                  ))}
               </div>
             </div>
-          ) : (
-            <p>Select a user from the results to see their details.</p>
-          )}
+          ) : <p>Select a user.</p>}
         </div>
       </div>
     </div>
@@ -521,22 +400,21 @@ const styles = {
     loginBox: { padding: '40px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', textAlign: 'center', width: '100%', maxWidth: '400px' },
     header: { color: '#1f2937', marginBottom: '24px' },
     subHeader: { borderBottom: '2px solid #e5e7eb', paddingBottom: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' },
-    announcementContainer: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', marginBottom: '24px' },
+    announcementContainer: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', marginBottom: '24px' },
     maintenanceContainer: { backgroundColor: '#fffbe6', border: '1px solid #ffe58f', padding: '20px', borderRadius: '8px', marginBottom: '24px' },
-    passwordContainer: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', marginBottom: '24px' },
-    description: { margin: '0', color: '#92400e', fontSize: '14px', flex: 1 },
+    passwordContainer: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', marginBottom: '24px' },
     textarea: { width: '100%', minHeight: '80px', padding: '12px', fontSize: '16px', border: '1px solid #d1d5db', borderRadius: '6px', resize: 'vertical', boxSizing: 'border-box' },
     announcementControls: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '16px' },
     passwordControls: { display: 'flex', gap: '12px', alignItems: 'center' },
     toggleContainer: { display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none', fontSize: '14px' },
-    searchContainer: { display: 'flex', gap: '12px', marginBottom: '24px', backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+    searchContainer: { display: 'flex', gap: '12px', marginBottom: '24px', backgroundColor: 'white', padding: '20px', borderRadius: '8px' },
     input: { flex: 1, padding: '12px', fontSize: '16px', border: '1px solid #d1d5db', borderRadius: '6px' },
     select: { padding: '12px', fontSize: '16px', border: '1px solid #d1d5db', borderRadius: '6px' },
     button: { padding: '12px 20px', fontSize: '16px', border: 'none', borderRadius: '6px', backgroundColor: '#2563eb', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
     buttonDisabled: { padding: '12px 20px', fontSize: '16px', border: 'none', borderRadius: '6px', backgroundColor: '#9ca3af', color: 'white', cursor: 'not-allowed' },
     resultsContainer: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' },
-    userList: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', overflowX: 'auto' },
-    userDetails: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' },
+    userList: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', overflowX: 'auto' },
+    userDetails: { backgroundColor: 'white', padding: '20px', borderRadius: '8px' },
     table: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
     th: { textAlign: 'left', padding: '12px', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' },
     td: { padding: '12px', borderBottom: '1px solid #e5e7eb' },
@@ -548,6 +426,10 @@ const styles = {
     paginationControls: { display: 'flex', alignItems: 'center', gap: '10px' },
     pageBtn: { padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center' },
     pageBtnDisabled: { padding: '8px 12px', border: '1px solid #eee', borderRadius: '4px', background: '#f9f9f9', color: '#ccc', cursor: 'not-allowed', display: 'flex', alignItems: 'center' },
+    creditInfoBox: { backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '15px', borderRadius: '6px', margin: '20px 0' },
+    creditPackGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' },
+    packBtn: { padding: '10px', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', transition: '0.2s' },
+    packBtnDisabled: { padding: '10px', backgroundColor: '#bae6fd', color: 'white', border: 'none', borderRadius: '6px', cursor: 'not-allowed', fontWeight: 'bold', fontSize: '13px' }
 };
 
 export default MasterAdmin;
