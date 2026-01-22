@@ -18,15 +18,15 @@ const SalesIncome = () => {
   const [totals, setTotals] = useState({ cash: 0, card: 0, online: 0, grand: 0 });
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Helper: Get Date in Sri Lanka Time (Matches format used in Orders/Invoice pages)
-  const getSriLankaDateString = (dateInput) => {
-    const date = new Date(dateInput);
-    return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // Returns YYYY-MM-DD
-  };
-
   const fetchData = useCallback(async (date) => {
     const uid = auth.currentUser?.uid;
     if (!uid || !date) return;
+
+    // Helper moved inside to ensure fetchData doesn't have changing dependencies
+    const getSriLankaDateString = (dateInput) => {
+      const d = new Date(dateInput);
+      return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); // Returns YYYY-MM-DD
+    };
 
     setLoading(true);
     try {

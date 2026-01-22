@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react"; // Removed useContext
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { auth, db } from "../../firebase"; 
 import {
   collection,
@@ -13,11 +13,15 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 import { FaSave, FaTrash, FaCheckCircle, FaSearch, FaPlus, FaEye } from 'react-icons/fa';
-// Removed unused CashBookContext import
+
+// Moved outside to be stable (fixes dependency issues)
+const paymentOptions = ['Cash', 'Card', 'Online'];
+
+const getSriLankaDate = (dateObj = new Date()) => {
+  return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
+};
 
 const Orders = ({ internalUser }) => {
-  // Removed unused reconciledDates variable
-
   // Data State
   const [priceCategories, setPriceCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null); 
@@ -35,7 +39,6 @@ const Orders = ({ internalUser }) => {
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const [pendingAction, setPendingAction] = useState(null); 
-  const paymentOptions = ['Cash', 'Card', 'Online'];
 
   // View Modal State
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -72,7 +75,32 @@ const Orders = ({ internalUser }) => {
 
   const uid = auth.currentUser ? auth.currentUser.uid : null;
 
-  // 1. Initial Load & Fetch Saved Orders
+  // --- MEMOIZED FETCHERS ---
+  const fetchProvisionalInvoiceNumber = useCallback(async () => {
+    if(!uid) return;
+    const today = new Date();
+    const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const counterDoc = await getDoc(doc(db, uid, "counters"));
+    const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
+    setInvoiceNumber(`ORD-${datePrefix}-${String(dailyCounter + 1).padStart(4, "0")}`);
+  }, [uid]);
+
+  const fetchSavedOrders = useCallback(async () => {
+      setLoadingOrders(true);
+      if(!uid) return;
+      const q = query(collection(db, uid, "data", "orders"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      setSavedOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoadingOrders(false);
+  }, [uid]);
+
+  const resetForm = useCallback(() => {
+    setCheckout([]); setCustomerName(""); setCustomerPhone(""); setDeliveryDate(""); setRemarks(""); 
+    setAdvanceAmount(""); setDeliveryCharge(""); 
+    setItemInput(""); fetchProvisionalInvoiceNumber();
+  }, [fetchProvisionalInvoiceNumber]);
+
+  // 1. Initial Load
   useEffect(() => {
     if(!uid) return;
     const initialize = async () => {
@@ -108,20 +136,11 @@ const Orders = ({ internalUser }) => {
     };
     initialize();
     fetchSavedOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid]);
+  }, [uid, fetchProvisionalInvoiceNumber, fetchSavedOrders]);
 
   useEffect(() => { 
       if (selectedShift) localStorage.setItem('savedSelectedShift', selectedShift); 
   }, [selectedShift]);
-
-  const fetchSavedOrders = async () => {
-      setLoadingOrders(true);
-      const q = query(collection(db, uid, "data", "orders"), orderBy("createdAt", "desc"));
-      const snap = await getDocs(q);
-      setSavedOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoadingOrders(false);
-  };
 
   // 2. Fetch Items
   useEffect(() => {
@@ -151,36 +170,6 @@ const Orders = ({ internalUser }) => {
     setShowDropdown(filtered.length > 0);
     setSelectedIndex(0);
   }, [itemInput, items, tempSelectedItem]);
-
-  // 4. Keyboard Nav
-  useEffect(() => {
-    const handlePaymentConfirmKeyDown = (e) => {
-        if (!showPaymentConfirm) return;
-        const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
-        
-        if (e.key === 'ArrowRight') {
-            setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
-        }
-        if (e.key === 'ArrowLeft') {
-            setConfirmPaymentMethod(paymentOptions[(currentIndex - 1 + paymentOptions.length) % paymentOptions.length]);
-        }
-        
-        if (e.key === 'Enter') handleProcessPayment(confirmPaymentMethod);
-        if (e.key === 'Escape') { setShowPaymentConfirm(false); setPendingAction(null); }
-    };
-    window.addEventListener('keydown', handlePaymentConfirmKeyDown);
-    return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPaymentConfirm, confirmPaymentMethod]);
-
-  const fetchProvisionalInvoiceNumber = async () => {
-    if(!uid) return;
-    const today = new Date();
-    const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const counterDoc = await getDoc(doc(db, uid, "counters"));
-    const dailyCounter = counterDoc.exists() ? counterDoc.data().invoiceCounters?.[datePrefix] || 0 : 0;
-    setInvoiceNumber(`ORD-${datePrefix}-${String(dailyCounter + 1).padStart(4, "0")}`);
-  };
 
   const handleItemKeyDown = (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIndex(prev => (prev < filteredItems.length - 1 ? prev + 1 : prev)); } 
@@ -217,10 +206,6 @@ const Orders = ({ internalUser }) => {
       setItemInput(""); setQtyInput(1); setPriceInput(""); setTempSelectedItem(null); setShowDropdown(false); itemInputRef.current?.focus();
   };
 
-  const getSriLankaDate = (dateObj = new Date()) => {
-    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
-  };
-
   const handleSaveClick = () => {
     if (!selectedCategory) return alert("Please select a Price Category.");
     if (checkout.length === 0) return alert("Please add at least one item.");
@@ -243,14 +228,8 @@ const Orders = ({ internalUser }) => {
       setIsViewModalOpen(true);
   };
 
-  const handleProcessPayment = (method) => {
-      if (!pendingAction) return;
-      setShowPaymentConfirm(false);
-      if (pendingAction.type === 'SAVE') executeSaveOrder(method);
-      else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
-  };
-
-  const executeSaveOrder = async (paymentMethod) => {
+  // --- MEMOIZED ACTIONS ---
+  const executeSaveOrder = useCallback(async (paymentMethod) => {
     setIsSaving(true);
     try {
         await runTransaction(db, async (transaction) => {
@@ -355,9 +334,9 @@ const Orders = ({ internalUser }) => {
         fetchSavedOrders();
     } catch (err) { alert("Error: " + err.message); } 
     finally { setIsSaving(false); setPendingAction(null); }
-  };
+  }, [uid, checkout, settings, deliveryCharge, advanceAmount, internalUser, customerName, customerPhone, deliveryDate, remarks, selectedShift, fetchSavedOrders, resetForm]);
 
-  const executeCompleteOrder = async (order, paymentMethod) => {
+  const executeCompleteOrder = useCallback(async (order, paymentMethod) => {
       setIsSaving(true);
       try {
           await runTransaction(db, async (transaction) => {
@@ -428,7 +407,34 @@ const Orders = ({ internalUser }) => {
           fetchSavedOrders();
       } catch (err) { alert("Error completing: " + err.message); }
       finally { setIsSaving(false); setPendingAction(null); }
-  };
+  }, [uid, internalUser, fetchSavedOrders]);
+
+  const handleProcessPayment = useCallback((method) => {
+      if (!pendingAction) return;
+      setShowPaymentConfirm(false);
+      if (pendingAction.type === 'SAVE') executeSaveOrder(method);
+      else if (pendingAction.type === 'COMPLETE') executeCompleteOrder(pendingAction.order, method);
+  }, [pendingAction, executeSaveOrder, executeCompleteOrder]);
+
+  // 4. Keyboard Nav (Moved after handleProcessPayment def)
+  useEffect(() => {
+    const handlePaymentConfirmKeyDown = (e) => {
+        if (!showPaymentConfirm) return;
+        const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
+        
+        if (e.key === 'ArrowRight') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
+        }
+        if (e.key === 'ArrowLeft') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex - 1 + paymentOptions.length) % paymentOptions.length]);
+        }
+        
+        if (e.key === 'Enter') handleProcessPayment(confirmPaymentMethod);
+        if (e.key === 'Escape') { setShowPaymentConfirm(false); setPendingAction(null); }
+    };
+    window.addEventListener('keydown', handlePaymentConfirmKeyDown);
+    return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
+  }, [showPaymentConfirm, confirmPaymentMethod, handleProcessPayment]);
 
   // --- DELETE ORDER (UPDATED WITH SPECIFIC ID CHECK) ---
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
@@ -470,6 +476,7 @@ const Orders = ({ internalUser }) => {
           await runTransaction(db, async (transaction) => {
               const orderRef = doc(db, uid, "data", "orders", orderId);
               const orderSnap = await transaction.get(orderRef);
+              // ✅ Fixed: Using Error object
               if (!orderSnap.exists()) throw new Error("Order not found");
               const orderData = orderSnap.data();
 
@@ -564,12 +571,6 @@ const Orders = ({ internalUser }) => {
           console.error(e);
           alert("Error deleting: " + e.message); 
       }
-  };
-
-  const resetForm = () => {
-    setCheckout([]); setCustomerName(""); setCustomerPhone(""); setDeliveryDate(""); setRemarks(""); 
-    setAdvanceAmount(""); setDeliveryCharge(""); 
-    setItemInput(""); fetchProvisionalInvoiceNumber();
   };
 
   const subtotal = checkout.reduce((sum, item) => sum + item.price * item.quantity, 0);

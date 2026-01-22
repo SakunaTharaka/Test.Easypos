@@ -1,26 +1,30 @@
-import React, { useState, useEffect, useMemo } from 'react'; // Removed useContext
+import React, { useState, useEffect, useMemo, useCallback } from 'react'; 
 import { db, auth } from '../../firebase'; 
 import { 
   collection, 
   onSnapshot, 
   query, 
-  serverTimestamp,
-  orderBy,
+  serverTimestamp, 
+  orderBy, 
   limit, 
-  startAfter,
+  startAfter, 
   doc, 
   updateDoc, 
-  where,
-  getDocs,
+  where, 
+  getDocs, 
   getDoc, 
   runTransaction 
 } from 'firebase/firestore';
 import { FaCalendarAlt, FaCheckCircle, FaTrash, FaEye, FaSave, FaSearch, FaArrowDown } from 'react-icons/fa';
-// Removed unused CashBookContext import
+
+// Moved constants outside to prevent re-creation on every render
+const paymentOptions = ['Cash', 'Card', 'Online'];
+
+const getSriLankaDate = (dateObj = new Date()) => {
+  return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
+};
 
 const Services = ({ internalUser }) => {
-  // Removed unused reconciledDates context hook
-
   // Form state
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -34,7 +38,6 @@ const Services = ({ internalUser }) => {
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false);
   const [confirmPaymentMethod, setConfirmPaymentMethod] = useState('Cash');
   const [pendingAction, setPendingAction] = useState(null); 
-  const paymentOptions = ['Cash', 'Card', 'Online'];
 
   // App state
   const [isLoading, setIsLoading] = useState(false); 
@@ -144,74 +147,8 @@ const Services = ({ internalUser }) => {
     setFilteredJobs(filtered);
   }, [searchTerm, allJobs, showCompletedJobs]);
 
-  // Keyboard navigation
-  useEffect(() => {
-    const handlePaymentConfirmKeyDown = (e) => {
-        if (!showPaymentConfirm) return;
-        const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
-        
-        if (e.key === 'ArrowRight') {
-            setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
-        }
-        if (e.key === 'ArrowLeft') {
-            setConfirmPaymentMethod(paymentOptions[(currentIndex - 1 + paymentOptions.length) % paymentOptions.length]);
-        }
-        
-        if (e.key === 'Enter') {
-            handleProcessPayment(confirmPaymentMethod);
-        }
-        if (e.key === 'Escape') {
-            setShowPaymentConfirm(false);
-            setPendingAction(null);
-        }
-    };
-    window.addEventListener('keydown', handlePaymentConfirmKeyDown);
-    return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPaymentConfirm, confirmPaymentMethod]);
-
-  const getSriLankaDate = (dateObj = new Date()) => {
-    return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }); 
-  };
-
-  // --- ACTIONS ---
-
-  const handleSaveClick = (e) => {
-    e.preventDefault();
-    if (!customerName || !customerPhone || !jobType || !jobCompleteDate || !totalCharge) { 
-        setError('Customer Name, Phone, Job Type, Est. Completion, and Total Charge are required.'); 
-        return; 
-    }
-    setPendingAction({ type: 'SAVE' });
-    setConfirmPaymentMethod('Cash');
-    setShowPaymentConfirm(true);
-  };
-
-  const handleCompleteClick = (jobId) => {
-       const jobData = allJobs.find(j => j.id === jobId);
-       if (!jobData) { setError("Could not find job details."); return; }
-       
-       const balance = (jobData.totalCharge || 0) - (jobData.advanceAmount || 0);
-       const jobWithBalance = { ...jobData, balance: balance };
-       
-       setPendingAction({ type: 'COMPLETE', job: jobWithBalance });
-       setConfirmPaymentMethod('Cash');
-       setShowPaymentConfirm(true);
-  };
-
-  const handleProcessPayment = (method) => {
-      if (!pendingAction) return;
-      setShowPaymentConfirm(false);
-      
-      if (pendingAction.type === 'SAVE') {
-          executeSaveJob(method);
-      } else if (pendingAction.type === 'COMPLETE') {
-          executeCompleteJob(pendingAction.job, method);
-      }
-  };
-
   // --- SAVE JOB ---
-  const executeSaveJob = async (paymentMethod) => {
+  const executeSaveJob = useCallback(async (paymentMethod) => {
     if (!uid) { setError('User not authenticated.'); return; }
     setIsLoading(true);
     setError(null);
@@ -313,10 +250,10 @@ const Services = ({ internalUser }) => {
       setJobCompleteDate(''); setTotalCharge(''); setAdvanceAmount(''); 
     } catch (err) { console.error(err); setError('Failed to save job.'); } 
     finally { setIsLoading(false); setPendingAction(null); }
-  };
+  }, [uid, totalCharge, advanceAmount, customerName, customerPhone, jobType, internalUser, generalInfo, jobCompleteDate]);
 
   // --- COMPLETE JOB ---
-  const executeCompleteJob = async (jobToComplete, paymentMethod) => {
+  const executeCompleteJob = useCallback(async (jobToComplete, paymentMethod) => {
       if (!uid) return;
       setIsUpdating(true);
 
@@ -401,6 +338,67 @@ const Services = ({ internalUser }) => {
           if (selectedJob?.id === jobToComplete.id) { setIsViewModalOpen(false); setSelectedJob(null); }
       } catch (err) { console.error("Error completing job:", err); setError("Failed to complete job."); } 
       finally { setIsUpdating(false); setPendingAction(null); }
+  }, [uid, internalUser, selectedJob]);
+
+  const handleProcessPayment = useCallback((method) => {
+      if (!pendingAction) return;
+      setShowPaymentConfirm(false);
+      
+      if (pendingAction.type === 'SAVE') {
+          executeSaveJob(method);
+      } else if (pendingAction.type === 'COMPLETE') {
+          executeCompleteJob(pendingAction.job, method);
+      }
+  }, [pendingAction, executeSaveJob, executeCompleteJob]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handlePaymentConfirmKeyDown = (e) => {
+        if (!showPaymentConfirm) return;
+        const currentIndex = paymentOptions.indexOf(confirmPaymentMethod);
+        
+        if (e.key === 'ArrowRight') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex + 1) % paymentOptions.length]);
+        }
+        if (e.key === 'ArrowLeft') {
+            setConfirmPaymentMethod(paymentOptions[(currentIndex - 1 + paymentOptions.length) % paymentOptions.length]);
+        }
+        
+        if (e.key === 'Enter') {
+            handleProcessPayment(confirmPaymentMethod);
+        }
+        if (e.key === 'Escape') {
+            setShowPaymentConfirm(false);
+            setPendingAction(null);
+        }
+    };
+    window.addEventListener('keydown', handlePaymentConfirmKeyDown);
+    return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
+  }, [showPaymentConfirm, confirmPaymentMethod, handleProcessPayment]);
+
+  // --- ACTIONS ---
+
+  const handleSaveClick = (e) => {
+    e.preventDefault();
+    if (!customerName || !customerPhone || !jobType || !jobCompleteDate || !totalCharge) { 
+        setError('Customer Name, Phone, Job Type, Est. Completion, and Total Charge are required.'); 
+        return; 
+    }
+    setPendingAction({ type: 'SAVE' });
+    setConfirmPaymentMethod('Cash');
+    setShowPaymentConfirm(true);
+  };
+
+  const handleCompleteClick = (jobId) => {
+       const jobData = allJobs.find(j => j.id === jobId);
+       if (!jobData) { setError("Could not find job details."); return; }
+       
+       const balance = (jobData.totalCharge || 0) - (jobData.advanceAmount || 0);
+       const jobWithBalance = { ...jobData, balance: balance };
+       
+       setPendingAction({ type: 'COMPLETE', job: jobWithBalance });
+       setConfirmPaymentMethod('Cash');
+       setShowPaymentConfirm(true);
   };
 
   // --- DELETE JOB (UPDATED: SPECIFIC ID LOCK) ---

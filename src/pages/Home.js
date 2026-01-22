@@ -3,7 +3,7 @@ import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { 
   FaTimes, FaStore, FaUsers, FaBoxOpen, FaCog, FaPrint, 
-  FaEnvelope, FaPhone, FaCheckCircle, FaStar, FaArrowRight, FaShieldAlt, FaChartLine 
+  FaEnvelope, FaPhone, FaStar, FaArrowRight, FaShieldAlt, FaChartLine 
 } from 'react-icons/fa';
 
 const Home = () => {

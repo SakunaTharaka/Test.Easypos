@@ -695,7 +695,7 @@ const Invoice = ({ internalUser }) => {
       }
     };
     fetchCustomerData();
-  }, [selectedCustomer, currentCategoryId, items.length]); 
+  }, [selectedCustomer, currentCategoryId, items]); // ✅ UPDATED DEPENDENCY
 
   // ✅ Client-Side Search (Instant)
   useEffect(() => {
@@ -1038,7 +1038,7 @@ const Invoice = ({ internalUser }) => {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [showPaymentConfirm, showFreeIssuePopup, confirmPaymentMethod, executeSaveInvoice]); 
+  }, [showPaymentConfirm, showFreeIssuePopup, confirmPaymentMethod, executeSaveInvoice]); // Removed paymentOptions
 
   const subtotal = checkout.reduce((s, i) => s + i.price * i.quantity, 0);
   

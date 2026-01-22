@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"; // Removed useContext
+import React, { useEffect, useState, useCallback } from "react"; 
 import { auth, db } from "../firebase";
 import { 
     collection, query, where, orderBy, getDocs, getDoc, Timestamp, doc,
@@ -6,13 +6,11 @@ import {
 } from "firebase/firestore";
 import Select from "react-select";
 import { AiOutlineEye, AiOutlineDelete } from "react-icons/ai";
-// Removed unused CashBookContext import
 
 // Define Theme Colors (Matches Dashboard.js)
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa', success: '#10b981', danger: '#ef4444' };
 
 const SalesReport = ({ internalUser }) => {
-  // Removed unused reconciledDates context hook
   
   const [currentInvoices, setCurrentInvoices] = useState([]); 
   const [loading, setLoading] = useState(false);
@@ -66,12 +64,8 @@ const SalesReport = ({ internalUser }) => {
     fetchCustomers();
   }, []);
 
-  useEffect(() => { 
-      fetchInvoices(); 
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCustomers, dateFrom, dateTo, searchTerm, statusFilter, internalUser]); 
-
-  const fetchInvoices = async (direction = "first") => {
+  // ✅ Fixed: Wrapped in useCallback and cursors passed as args to avoid dependency loops
+  const fetchInvoices = useCallback(async (direction = "first", cursorLast = null, cursorFirst = null) => {
     const user = auth.currentUser;
     if (!user) return;
     setLoading(true);
@@ -85,8 +79,9 @@ const SalesReport = ({ internalUser }) => {
       if (dateTo) { const end = new Date(dateTo); end.setHours(23,59,59,999); constraints.push(where("createdAt", "<=", Timestamp.fromDate(end))); }
       if (statusFilter !== "All") constraints.push(where("status", "==", statusFilter));
 
-      if (direction === "next" && lastVisibleDoc) { constraints.push(startAfter(lastVisibleDoc)); constraints.push(limit(ITEMS_PER_PAGE)); } 
-      else if (direction === "prev" && firstVisibleDoc) { constraints = [orderBy("createdAt", "desc"), ...constraints.filter(c => c.type !== 'orderBy'), endBefore(firstVisibleDoc), limitToLast(ITEMS_PER_PAGE)]; } 
+      // Use passed cursors instead of state to allow stable dependencies
+      if (direction === "next" && cursorLast) { constraints.push(startAfter(cursorLast)); constraints.push(limit(ITEMS_PER_PAGE)); } 
+      else if (direction === "prev" && cursorFirst) { constraints = [orderBy("createdAt", "desc"), ...constraints.filter(c => c.type !== 'orderBy'), endBefore(cursorFirst), limitToLast(ITEMS_PER_PAGE)]; } 
       else { constraints.push(limit(ITEMS_PER_PAGE)); }
 
       const finalQuery = query(q, ...constraints);
@@ -108,10 +103,15 @@ const SalesReport = ({ internalUser }) => {
       }
     } catch (err) { console.error("Error:", err); }
     setLoading(false);
-  };
+  }, [selectedCustomers, dateFrom, dateTo, searchTerm, statusFilter]);
 
-  const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next"); };
-  const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev"); };
+  useEffect(() => { 
+      fetchInvoices("first"); 
+  }, [fetchInvoices]); 
+
+  // Pass current cursors to the function
+  const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next", lastVisibleDoc, firstVisibleDoc); };
+  const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev", lastVisibleDoc, firstVisibleDoc); };
 
   // --- DELETE HANDLER (UPDATED SPECIFIC LOCK CHECK) ---
   const handleDelete = async (invoice) => {

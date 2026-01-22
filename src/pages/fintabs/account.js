@@ -22,7 +22,7 @@ import {
   AiOutlineReload, 
   AiOutlineBank, 
   AiOutlineWallet, 
-  AiOutlineGlobal,
+  AiOutlineGlobal, 
   AiOutlineAudit, 
   AiOutlineEdit 
 } from 'react-icons/ai'; 
@@ -257,10 +257,18 @@ const Accounts = () => {
             if (transferFrom.type === 'WALLET') {
                 sourceWalletRef = doc(db, uid, "wallet", "accounts", transferFrom.walletId);
                 const sDoc = await transaction.get(sourceWalletRef);
-                if (!sDoc.exists()) throw new Error("Source wallet not found."); 
+                
+                // ✅ Fixed: Using Error object for throw
+                if (!sDoc.exists()) {
+                    throw new Error("Source wallet not found."); 
+                }
+                
                 currentSourceBalance = Number(sDoc.data().balance) || 0;
                 
-                if (currentSourceBalance < amt) throw new Error(`Insufficient funds in ${transferFrom.label}.`);
+                // ✅ Fixed: Using Error object for throw
+                if (currentSourceBalance < amt) {
+                    throw new Error(`Insufficient funds in ${transferFrom.label}.`);
+                }
             }
 
             // 2. Read Destination (if it's a wallet)

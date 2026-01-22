@@ -7,7 +7,7 @@ const VerifyEmail = () => {
   const navigate = useNavigate();
   const [buttonDisabled, setButtonDisabled] = useState(false);
   const [message, setMessage] = useState("");
-  const [checking, setChecking] = useState(false);
+  // Removed unused 'checking' state
 
   // ---------------------------------------------------------
   // 🧠 SMART CHECKER: Polls Firebase every 3 seconds
@@ -40,7 +40,7 @@ const VerifyEmail = () => {
 
   const handleResendEmail = async () => {
     setButtonDisabled(true);
-    setChecking(true);
+    
     try {
       if (auth.currentUser) {
         await sendEmailVerification(auth.currentUser);
@@ -53,7 +53,7 @@ const VerifyEmail = () => {
         setMessage("Error: " + error.message);
       }
     }
-    setChecking(false);
+    
     // Re-enable button after 60 seconds
     setTimeout(() => setButtonDisabled(false), 60000);
   };

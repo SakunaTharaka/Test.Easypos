@@ -147,6 +147,7 @@ const Expenses = ({ goToSettings }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, searchFilter, dateFilter]);
 
+  // ✅ Fixed useEffect dependency
   useEffect(() => {
       const { amount, cashBook } = formState;
       if (amount && cashBook) {
@@ -155,8 +156,7 @@ const Expenses = ({ goToSettings }) => {
               setFormError(`Amount exceeds the selected cash book balance of Rs. ${balance.toFixed(2)}`);
           } else { setFormError(""); }
       } else { setFormError(""); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formState.amount, formState.cashBook, cashBookBalances]);
+  }, [formState, cashBookBalances]);
 
   const handleSelectChange = (name, selectedOption) => {
       if (name === 'category' && selectedOption?.value === 'ADD_NEW') {

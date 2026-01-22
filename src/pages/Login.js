@@ -57,7 +57,7 @@ const Login = () => {
 
   const handleGoogleLogin = async () => {
     try {
-      const result = await signInWithPopup(auth, provider);
+      await signInWithPopup(auth, provider);
       // Google Auth is automatically verified
       navigate("/user-details");
     } catch (error) {
@@ -256,11 +256,13 @@ const styles = {
 };
 
 // Add this to your global CSS or within a style tag
-const globalStyles = `
+const styleSheet = document.createElement("style");
+styleSheet.innerText = `
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
 `;
+document.head.appendChild(styleSheet);
 
 export default Login;

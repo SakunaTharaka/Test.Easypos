@@ -4,7 +4,6 @@ import {
   collection, 
   query, 
   getDocs, 
-  // Removed unused 'getDoc'
   serverTimestamp, 
   orderBy, 
   doc, 
@@ -445,8 +444,7 @@ const PaymentModal = ({ record, onSave, onCancel, cashBooks, cashBookBalances, w
             setError(`Amount cannot exceed the stock balance of Rs. ${record.balance.toFixed(2)}`); 
         } 
         else { setError(''); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [formData.amount, formData.cashBook, formData.selectedAccount, paymentType, cashBookBalances, wallets, record.balance]);
+    }, [formData, paymentType, cashBookBalances, wallets, record.balance]);
     
     const isFormValid = () => {
         const amount = parseFloat(formData.amount);
