@@ -44,6 +44,11 @@ const Orders = ({ internalUser }) => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
+  // ✅ NEW: Delete Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [orderToDelete, setOrderToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Order Details
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -436,28 +441,24 @@ const Orders = ({ internalUser }) => {
     return () => window.removeEventListener('keydown', handlePaymentConfirmKeyDown);
   }, [showPaymentConfirm, confirmPaymentMethod, handleProcessPayment]);
 
-  // --- DELETE ORDER (UPDATED WITH SPECIFIC ID CHECK) ---
+  // ✅ HANDLER: Request Delete (Opens Modal)
   const handleDeleteOrder = async (orderId, linkedInvoiceId) => {
-      // ✅ 1. Reconciliation Check (Specific ID Check)
-      const orderToDelete = savedOrders.find(o => o.id === orderId);
+      // 1. Reconciliation Check (Specific ID Check)
+      const orderCheck = savedOrders.find(o => o.id === orderId);
       
-      if (orderToDelete && orderToDelete.createdAt) {
-          const dateVal = orderToDelete.createdAt.toDate ? orderToDelete.createdAt.toDate() : new Date(orderToDelete.createdAt);
-          
-          // Generate Local YYYY-MM-DD
+      if (orderCheck && orderCheck.createdAt) {
+          const dateVal = orderCheck.createdAt.toDate ? orderCheck.createdAt.toDate() : new Date(orderCheck.createdAt);
           const year = dateVal.getFullYear();
           const month = String(dateVal.getMonth() + 1).padStart(2, '0');
           const day = String(dateVal.getDate()).padStart(2, '0');
           const dateStr = `${year}-${month}-${day}`;
 
           try {
-              // Fetch the Locked Document for this specific date
               const lockRef = doc(db, uid, 'user_data', 'locked_documents', dateStr);
               const lockSnap = await getDoc(lockRef);
 
               if (lockSnap.exists()) {
                   const lockedIds = lockSnap.data().lockedIds || [];
-                  // Check if THIS order ID is in the locked list
                   if (lockedIds.includes(orderId)) {
                       alert(`Cannot delete Order. It has been explicitly reconciled and locked.`);
                       return;
@@ -470,13 +471,21 @@ const Orders = ({ internalUser }) => {
           }
       }
 
-      if(!window.confirm("Delete this order and linked invoices? This will deduct amounts from wallet.")) return;
+      setOrderToDelete({ id: orderId, linkedInvoiceId: linkedInvoiceId });
+      setIsDeleteModalOpen(true);
+  };
+
+  // ✅ ACTION: Confirm Delete (Runs Transaction)
+  const confirmDeleteOrder = async () => {
+      if (!orderToDelete || !uid) return;
+      setIsDeleting(true);
       
+      const { id: orderId, linkedInvoiceId } = orderToDelete;
+
       try {
           await runTransaction(db, async (transaction) => {
               const orderRef = doc(db, uid, "data", "orders", orderId);
               const orderSnap = await transaction.get(orderRef);
-              // ✅ Fixed: Using Error object
               if (!orderSnap.exists()) throw new Error("Order not found");
               const orderData = orderSnap.data();
 
@@ -567,9 +576,13 @@ const Orders = ({ internalUser }) => {
           });
 
           fetchSavedOrders();
+          setIsDeleteModalOpen(false); // Close Modal on success
       } catch(e) { 
           console.error(e);
           alert("Error deleting: " + e.message); 
+      } finally {
+          setIsDeleting(false);
+          setOrderToDelete(null);
       }
   };
 
@@ -817,6 +830,22 @@ const Orders = ({ internalUser }) => {
         </div>
       )}
 
+      {/* ✅ DELETE CONFIRM MODAL */}
+      {isDeleteModalOpen && (
+          <div style={styles.modalOverlay}>
+              <div style={styles.modalContentSmall}>
+                  <h3 style={{...styles.modalTitle, color: '#ef4444'}}>Delete Order?</h3>
+                  <p style={styles.modalText}>This will delete the order and all linked invoices (Advance/Balance) and deduct amounts from your wallet.</p>
+                  <div style={styles.modalBtnRow}>
+                      <button style={styles.btnSecondary} onClick={() => setIsDeleteModalOpen(false)}>Cancel</button>
+                      <button style={styles.btnDanger} onClick={confirmDeleteOrder} disabled={isDeleting}>
+                          {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };
@@ -858,6 +887,7 @@ const styles = {
   totalRow: { fontSize: '14px', color: '#4b5563', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
   balanceRow: { fontSize: '18px', color: '#ef4444', display: 'flex', justifyContent: 'flex-end', gap: '20px' },
   btnPrimary: { width: '100%', padding: '12px', background: '#00A1FF', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', fontSize: '16px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', transition: 'background 0.2s' },
+  btnDanger: { padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
   btnDisabled: { width: '100%', padding: '12px', background: '#9ca3af', color: 'white', border: 'none', borderRadius: '4px', cursor: 'not-allowed' },
   listHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   checkboxLabel: { fontSize: '13px', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', textTransform: 'uppercase', fontWeight: '600' },
@@ -881,6 +911,10 @@ const styles = {
   confirmButtonActive: { padding: '10px 24px', border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer', background: '#3b82f6', color: 'white', fontWeight: '600', flex: 1 },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(1px)' },
   modalContentWide: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '700px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', animation: 'fadeIn 0.2s ease', overflow: 'hidden' },
+  // ✅ Added styles for delete modal
+  modalContentSmall: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '400px', padding: '20px', textAlign: 'center', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' },
+  modalText: { color: '#4b5563', marginBottom: '20px', fontSize: '14px' },
+  modalBtnRow: { display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '20px' },
   modalHeader: { padding: '16px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: '#1f2937' },
   modalBody: { padding: '20px' },

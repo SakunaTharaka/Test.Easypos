@@ -17,7 +17,9 @@ const SalesReport = ({ internalUser }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [allCustomers, setAllCustomers] = useState([]);
   
-  // New State for Deleting Buffer
+  // ✅ NEW: Delete Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [invoiceToDelete, setInvoiceToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Filters
@@ -113,8 +115,8 @@ const SalesReport = ({ internalUser }) => {
   const handleNextPage = () => { if (!isNextPageAvailable) return; setCurrentPage(p => p + 1); fetchInvoices("next", lastVisibleDoc, firstVisibleDoc); };
   const handlePrevPage = () => { if (currentPage <= 1) return; setCurrentPage(p => p - 1); fetchInvoices("prev", lastVisibleDoc, firstVisibleDoc); };
 
-  // --- DELETE HANDLER (UPDATED SPECIFIC LOCK CHECK) ---
-  const handleDelete = async (invoice) => {
+  // ✅ STEP 1: REQUEST DELETE (Permission & Lock Check)
+  const requestDelete = async (invoice) => {
       // 1. Admin Permission Check
       if (!internalUser?.isAdmin) {
           alert("Access Denied: You do not have permission to delete invoices.");
@@ -127,21 +129,17 @@ const SalesReport = ({ internalUser }) => {
       // 2. Reconciliation Check (Specific ID Check)
       if (invoice.createdAt) {
           const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
-          
-          // Generate Local YYYY-MM-DD
           const year = dateVal.getFullYear();
           const month = String(dateVal.getMonth() + 1).padStart(2, '0');
           const day = String(dateVal.getDate()).padStart(2, '0');
           const dateStr = `${year}-${month}-${day}`;
 
           try {
-              // Fetch the Locked Document for this specific date
               const lockRef = doc(db, user.uid, 'user_data', 'locked_documents', dateStr);
               const lockSnap = await getDoc(lockRef);
 
               if (lockSnap.exists()) {
                   const lockedIds = lockSnap.data().lockedIds || [];
-                  // Check if THIS invoice ID is in the locked list
                   if (lockedIds.includes(invoice.id)) {
                       alert(`Cannot delete Invoice ${invoice.invoiceNumber}. It has been explicitly reconciled and locked.`);
                       return;
@@ -154,22 +152,29 @@ const SalesReport = ({ internalUser }) => {
           }
       }
 
-      // 3. Confirmation
-      if (!window.confirm(`Delete Invoice ${invoice.invoiceNumber}? This will deduct the amount from your wallet and reverse daily sales.`)) return;
+      // 3. Open Modal
+      setInvoiceToDelete(invoice);
+      setIsDeleteModalOpen(true);
+  };
 
-      // START BUFFERING
-      setIsDeleting(true);
+  // ✅ STEP 2: CONFIRM DELETE (Execute Transaction)
+  const confirmDelete = async () => {
+      if (!invoiceToDelete) return;
+      const user = auth.currentUser;
+      if (!user) return;
+
+      setIsDeleting(true); // Show Spinner
 
       try {
-          // STEP 1: PRE-FETCH KOT REFERENCES
+          // A. PRE-FETCH KOT REFERENCES
           let kotDocsToDeleteRefs = [];
-          if (invoice.createdAt && invoice.invoiceNumber) {
+          if (invoiceToDelete.createdAt && invoiceToDelete.invoiceNumber) {
              try {
-                const dateVal = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
+                const dateVal = invoiceToDelete.createdAt.toDate ? invoiceToDelete.createdAt.toDate() : new Date(invoiceToDelete.createdAt);
                 const dailyDateString = dateVal.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' });
                 
                 const kotColRef = collection(db, user.uid, "kot", dailyDateString);
-                const kotQuery = query(kotColRef, where("invoiceNumber", "==", invoice.invoiceNumber));
+                const kotQuery = query(kotColRef, where("invoiceNumber", "==", invoiceToDelete.invoiceNumber));
                 const kotSnapshot = await getDocs(kotQuery); 
                 
                 if (!kotSnapshot.empty) {
@@ -180,9 +185,9 @@ const SalesReport = ({ internalUser }) => {
              }
           }
 
-          // STEP 2: RUN TRANSACTION
+          // B. RUN TRANSACTION
           await runTransaction(db, async (transaction) => {
-              const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoice.id);
+              const invoiceRef = doc(db, user.uid, "invoices", "invoice_list", invoiceToDelete.id);
               const invoiceSnap = await transaction.get(invoiceRef);
               if (!invoiceSnap.exists()) throw new Error("Invoice does not exist."); 
               const invData = invoiceSnap.data();
@@ -271,14 +276,15 @@ const SalesReport = ({ internalUser }) => {
               transaction.delete(invoiceRef);
           });
 
-          setCurrentInvoices(prev => prev.filter(i => i.id !== invoice.id));
+          setCurrentInvoices(prev => prev.filter(i => i.id !== invoiceToDelete.id));
 
       } catch (err) {
           console.error(err);
           alert("Error deleting invoice: " + err.message); 
       } finally {
-          // STOP BUFFERING
           setIsDeleting(false);
+          setIsDeleteModalOpen(false);
+          setInvoiceToDelete(null);
       }
   };
 
@@ -345,9 +351,10 @@ const SalesReport = ({ internalUser }) => {
                         </td>
                         <td style={{...styles.td, textAlign: 'right'}}>
                             <button style={styles.iconBtn} onClick={() => handleView(inv.id)}><AiOutlineEye size={18} color="#3b82f6" /></button>
+                            {/* ✅ Updated: Use requestDelete instead of direct call */}
                             <button 
                                 style={{...styles.iconBtn, opacity: internalUser?.isAdmin ? 1 : 0.5, cursor: internalUser?.isAdmin ? 'pointer' : 'not-allowed'}} 
-                                onClick={() => handleDelete(inv)}
+                                onClick={() => requestDelete(inv)}
                                 title={internalUser?.isAdmin ? "Delete Invoice" : "Only Admins can delete"}
                             >
                                 <AiOutlineDelete size={18} color="#ef4444" />
@@ -362,6 +369,25 @@ const SalesReport = ({ internalUser }) => {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20, gap: 10 }}>
           <button onClick={handlePrevPage} disabled={currentPage === 1} style={styles.pageBtn}>Previous</button><span>Page {currentPage}</span><button onClick={handleNextPage} disabled={!isNextPageAvailable} style={styles.pageBtn}>Next</button>
       </div>
+
+      {/* ✅ DELETE CONFIRM MODAL */}
+      {isDeleteModalOpen && (
+          <div style={styles.modalOverlay}>
+              <div style={styles.modalContentSmall}>
+                  <h3 style={{...styles.modalTitle, color: '#ef4444'}}>Delete Invoice?</h3>
+                  <p style={styles.modalText}>
+                      Deleting Invoice <strong>{invoiceToDelete?.invoiceNumber}</strong> will reverse sales, deduct the amount from your wallet, and delete linked records (KOTs/Jobs).
+                  </p>
+                  <div style={styles.modalBtnRow}>
+                      <button style={styles.btnSecondary} onClick={() => setIsDeleteModalOpen(false)}>Cancel</button>
+                      <button style={styles.btnDanger} onClick={confirmDelete} disabled={isDeleting}>
+                          {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };
@@ -384,7 +410,7 @@ const styles = {
     iconBtn: { background: 'none', border: 'none', cursor: 'pointer', padding: '4px', marginRight: '5px' },
     pageBtn: { padding: '8px 16px', background: 'white', border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer' },
     
-    // NEW STYLES FOR OVERLAY (MATCHING DASHBOARD.JS)
+    // OVERLAY STYLES
     overlay: { 
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
         backgroundColor: 'rgba(255, 255, 255, 0.9)', 
@@ -399,7 +425,16 @@ const styles = {
         width: "60px", height: "60px", 
         animation: "spin 1s linear infinite, color-rotate 2s linear infinite", 
         marginBottom: "24px" 
-    }
+    },
+
+    // ✅ NEW MODAL STYLES (MATCHING SERVICES/ORDERS)
+    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000, backdropFilter: 'blur(1px)' },
+    modalContentSmall: { background: 'white', borderRadius: '8px', width: '90%', maxWidth: '400px', padding: '20px', textAlign: 'center', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' },
+    modalTitle: { margin: 0, fontSize: '18px', fontWeight: '600', color: '#1f2937', marginBottom: '10px' },
+    modalText: { color: '#4b5563', marginBottom: '20px', fontSize: '14px', lineHeight: '1.5' },
+    modalBtnRow: { display: 'flex', justifyContent: 'center', gap: '10px', marginTop: '20px' },
+    btnSecondary: { padding: '8px 16px', background: 'white', border: '1px solid #d1d5db', color: '#374151', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
+    btnDanger: { padding: '8px 16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '600', cursor: 'pointer' },
 };
 
 export default SalesReport;

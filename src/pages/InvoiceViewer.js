@@ -116,8 +116,10 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
-            {/* ✅ Show Order Type if available */}
-            {invoice.orderType && <p><strong>Order Type:</strong> {invoice.orderType}</p>}
+            {/* ✅ UPDATED: Show Order Type ONLY if dineInAvailable is true in settings */}
+            {companyInfo?.dineInAvailable && invoice.orderType && (
+                <p><strong>Order Type:</strong> {invoice.orderType}</p>
+            )}
 
             {isOrder && orderDetails && orderDetails.deliveryDate && (
                  <p style={{marginTop: 5, fontWeight: 'bold'}}>
