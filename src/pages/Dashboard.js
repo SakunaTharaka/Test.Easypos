@@ -34,6 +34,9 @@ const SalesReport = lazy(() => import("./SalesReport"));
 const Help = lazy(() => import("./Help"));
 const StockOutBal = lazy(() => import("./tabs/StockOutBal"));
 
+// ✅ NEW: Import Customer Return Page
+const CustomerReturn = lazy(() => import("./CustomerReturn"));
+
 // --- ACCOUNTS PAGE ---
 const Accounts = lazy(() => import("./fintabs/account"));
 
@@ -279,7 +282,8 @@ const Dashboard = () => {
     let setActiveSubTab = () => {};
 
     if (activeTab === "Inventory") {
-      subTabs = ["Purchasing Order", "Stock-In", "Waste & Usage", "Stores Balance", "Buy&Sell Balance"];
+      // ✅ ADDED: Customer Return Sub-tab
+      subTabs = ["Purchasing Order", "Stock-In", "Waste & Usage", "Customer Return", "Stores Balance", "Buy&Sell Balance"];
       if (showProductionTabs) subTabs.push("Add Production", "Production Balance");
       activeSubTab = activeInventoryTab;
       setActiveSubTab = setActiveInventoryTab;
@@ -347,6 +351,8 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Waste & Usage" && <StockOut internalUser={internalLoggedInUser} />}
+            {/* ✅ RENDER Customer Return Component */}
+            {activeInventoryTab === "Customer Return" && <CustomerReturn />}
             {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />}
             {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}
@@ -379,7 +385,7 @@ const Dashboard = () => {
         </div>
       );
       case "Admin": return <Admin internalUsers={internalUsers} setInternalUsers={setInternalUsers} />;
-      case "KOD": return <KitchenDisplay />; // ✅ KOD RENDER
+      case "KOD": return <KitchenDisplay />; 
       default: return null;
     }
   };

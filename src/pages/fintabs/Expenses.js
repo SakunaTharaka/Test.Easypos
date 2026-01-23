@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from "react";
 import { db, auth } from "../../firebase";
 import { 
-    collection, query, getDocs, serverTimestamp, orderBy, doc, getDoc, // ✅ Added getDoc
-    runTransaction, limit, startAfter, where, deleteDoc 
+    collection, query, getDocs, serverTimestamp, orderBy, doc, getDoc,
+    runTransaction, limit, startAfter, where, deleteDoc, increment 
 } from "firebase/firestore";
 import { AiOutlineSearch, AiOutlineDelete } from "react-icons/ai";
 import Select from "react-select";
@@ -63,29 +63,58 @@ const Expenses = ({ goToSettings }) => {
     const user = auth.currentUser;
     if (!user) { setLoading(false); return; }
     const uid = user.uid;
+    
     const expensesCollection = collection(db, uid, 'user_data', 'expenses');
     const paymentsCollection = collection(db, uid, 'stock_payments', 'payments');
+    // We also check the main expense list where returns are saved
+    const returnsCollection = collection(db, uid, 'expenses', 'expense_list');
 
     try {
         const searchUpper = search.toUpperCase();
-        if (searchUpper.startsWith('EXP') || searchUpper.startsWith('P') || searchUpper.startsWith('SI-')) {
+        
+        // --- SEARCH LOGIC ---
+        if (searchUpper.startsWith('EXP') || searchUpper.startsWith('P') || searchUpper.startsWith('SI-') || searchUpper.startsWith('RET')) {
             let searchResults = [];
-            if (searchUpper.startsWith('EXP')) {
-                const q = query(expensesCollection, where('expenseId', '==', search));
-                searchResults = (await getDocs(q)).docs.map(d => ({ ...d.data(), id: d.id, type: 'Expense' }));
-            } else if (searchUpper.startsWith('P')) {
-                const q = query(paymentsCollection, where('paymentId', '==', search));
-                searchResults = (await getDocs(q)).docs.map(d => ({ ...d.data(), id: d.id, type: 'Payment', createdAt: d.data().paidAt }));
-            } else if (searchUpper.startsWith('SI-')) {
-                const q = query(paymentsCollection, where('stockInId', '==', search));
+            
+            if (searchUpper.startsWith('EXP') || searchUpper.startsWith('RET')) {
+                // 1. Search Standard Expenses
+                const q1 = query(expensesCollection, where('expenseId', '==', search));
+                const snap1 = await getDocs(q1);
+                const res1 = snap1.docs.map(d => ({ ...d.data(), id: d.id, type: 'Expense' }));
+
+                // 2. Search Return-based Expenses (saved in expenses/expense_list)
+                // Note: CustomerReturn.js saves ID as 'id' (e.g. EXP-123) and also has 'relatedReturnId'
+                // We search by ID or relatedReturnId if user types RET-...
+                let q2;
+                if (searchUpper.startsWith('RET')) {
+                     q2 = query(returnsCollection, where('relatedReturnId', '==', search));
+                } else {
+                     q2 = query(returnsCollection, where('id', '==', search));
+                }
+                
+                const snap2 = await getDocs(q2);
+                const res2 = snap2.docs.map(d => ({ 
+                    ...d.data(), 
+                    id: d.id, 
+                    type: 'Return', 
+                    cashBookName: d.data().cashBook 
+                }));
+
+                searchResults = [...res1, ...res2];
+
+            } else if (searchUpper.startsWith('P') || searchUpper.startsWith('SI-')) {
+                const searchField = searchUpper.startsWith('P') ? 'paymentId' : 'stockInId';
+                const q = query(paymentsCollection, where(searchField, '==', search));
                 searchResults = (await getDocs(q)).docs.map(d => ({ ...d.data(), id: d.id, type: 'Payment', createdAt: d.data().paidAt }));
             }
+            
             setCombinedData(searchResults);
             setHasNextPage(false);
             setLoading(false);
             return;
         }
 
+        // --- PAGINATION LOGIC ---
         const buildQuery = (coll, timestampField) => {
             let q = query(coll, orderBy(timestampField, 'desc'));
             if (date) {
@@ -95,30 +124,51 @@ const Expenses = ({ goToSettings }) => {
             }
             const cursor = pageCursors[page - 1];
             if (cursor) {
-                q = query(q, startAfter(cursor));
+                q = query(q, startAfter(cursor)); 
             }
             return query(q, limit(PAGE_SIZE));
         };
 
         const expensesQuery = buildQuery(expensesCollection, 'createdAt');
         const paymentsQuery = buildQuery(paymentsCollection, 'paidAt');
+        const returnsQuery = buildQuery(returnsCollection, 'createdAt');
         
-        const [expensesSnap, paymentsSnap] = await Promise.all([getDocs(expensesQuery), getDocs(paymentsQuery)]);
+        const [expensesSnap, paymentsSnap, returnsSnap] = await Promise.all([
+            getDocs(expensesQuery), 
+            getDocs(paymentsQuery),
+            getDocs(returnsQuery)
+        ]);
         
         const expensesData = expensesSnap.docs.map(d => ({ ...d.data(), id: d.id, type: 'Expense' }));
         const paymentsData = paymentsSnap.docs.map(d => ({ ...d.data(), id: d.id, type: 'Payment', createdAt: d.data().paidAt }));
+        const returnsData = returnsSnap.docs.map(d => ({ 
+            ...d.data(), 
+            id: d.id, 
+            type: 'Return', 
+            cashBookName: d.data().cashBook 
+        }));
 
-        const combined = [...expensesData, ...paymentsData]
-            .sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+        const combined = [...expensesData, ...paymentsData, ...returnsData]
+            .sort((a, b) => {
+                const dateA = a.createdAt?.toMillis() || 0;
+                const dateB = b.createdAt?.toMillis() || 0;
+                return dateB - dateA; 
+            });
 
         const pageData = combined.slice(0, PAGE_SIZE);
         setCombinedData(pageData);
 
         if (pageData.length > 0) {
             const lastDocOnPage = pageData[pageData.length - 1];
-            const originalSnap = lastDocOnPage.type === 'Expense' 
-                ? expensesSnap.docs.find(doc => doc.id === lastDocOnPage.id)
-                : paymentsSnap.docs.find(doc => doc.id === lastDocOnPage.id);
+            let originalSnap = null;
+
+            if (lastDocOnPage.type === 'Expense') {
+                originalSnap = expensesSnap.docs.find(doc => doc.id === lastDocOnPage.id);
+            } else if (lastDocOnPage.type === 'Payment') {
+                originalSnap = paymentsSnap.docs.find(doc => doc.id === lastDocOnPage.id);
+            } else if (lastDocOnPage.type === 'Return') {
+                originalSnap = returnsSnap.docs.find(doc => doc.id === lastDocOnPage.id);
+            }
             
             setPageCursors(prev => {
                 const newCursors = [...prev];
@@ -147,7 +197,6 @@ const Expenses = ({ goToSettings }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, searchFilter, dateFilter]);
 
-  // ✅ Fixed useEffect dependency
   useEffect(() => {
       const { amount, cashBook } = formState;
       if (amount && cashBook) {
@@ -209,45 +258,101 @@ const Expenses = ({ goToSettings }) => {
     setIsSubmitting(false);
   };
   
-  // --- UPDATED DELETE HANDLER ---
+  // --- REWRITTEN DELETE HANDLER ---
   const handleDelete = async (item) => {
       const itemDate = (item.createdAt || item.paidAt)?.toDate();
       if (!itemDate) return alert("Cannot delete: transaction has no valid date.");
       
       const uid = auth.currentUser.uid;
-      
-      // ✅ 1. Specific Reconciliation Lock Check
-      // Manually construct YYYY-MM-DD using Local Time components
-      const year = itemDate.getFullYear();
-      const month = String(itemDate.getMonth() + 1).padStart(2, '0');
-      const day = String(itemDate.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
+      const dateStr = itemDate.toISOString().split('T')[0]; // Simple YYYY-MM-DD
 
+      // 1. Check Locks
       try {
           const lockRef = doc(db, uid, 'user_data', 'locked_documents', dateStr);
           const lockSnap = await getDoc(lockRef);
-
-          if (lockSnap.exists()) {
-              const lockedIds = lockSnap.data().lockedIds || [];
-              // Check if THIS specific ID is in the locked list
-              if (lockedIds.includes(item.id)) {
-                  alert(`Cannot delete this transaction. It has been explicitly reconciled and locked.`);
-                  return;
-              }
+          if (lockSnap.exists() && lockSnap.data().lockedIds?.includes(item.id)) {
+              alert(`Cannot delete. This transaction is locked/reconciled.`);
+              return;
           }
       } catch (e) {
-          console.error("Error verifying lock status:", e);
-          alert("System error verifying reconciliation status. Please try again.");
-          return;
+          console.error("Lock check failed", e);
+          return alert("System error checking locks.");
       }
 
       if (!window.confirm(`Are you sure you want to delete this ${item.type}?`)) return;
 
+      // 2. Handle 'Return' Type (Complex Revert)
+      if (item.type === 'Return' || item.relatedReturnId) {
+          try {
+              // We need to fetch the original Return ID to find the items that were returned
+              const returnId = item.relatedReturnId;
+              if (!returnId) throw new Error("Missing Return ID linkage.");
+
+              const returnsRef = collection(db, uid, "returns", "return_list");
+              const q = query(returnsRef, where("returnId", "==", returnId));
+              const querySnap = await getDocs(q);
+
+              if (querySnap.empty) {
+                  // Fallback: If return record is gone but expense remains, just delete expense
+                  if(window.confirm("Original Return record not found. Just delete this expense entry?")) {
+                      await deleteDoc(doc(db, uid, 'expenses', 'expense_list', item.id));
+                      alert("Expense entry cleaned up.");
+                      refreshBalances();
+                      fetchData(currentPage, searchFilter, dateFilter);
+                  }
+                  return;
+              }
+
+              const returnDoc = querySnap.docs[0];
+              const returnData = returnDoc.data();
+
+              // EXECUTE REVERT TRANSACTION
+              await runTransaction(db, async (transaction) => {
+                  // A. Revert Wallet (Add money back)
+                  const walletDocId = returnData.refundMethod ? returnData.refundMethod.toLowerCase() : 'cash';
+                  // Only update if it's a tracked wallet type
+                  if (['cash', 'card', 'online'].includes(walletDocId)) {
+                      const walletRef = doc(db, uid, "wallet", "accounts", walletDocId);
+                      const wSnap = await transaction.get(walletRef);
+                      if (wSnap.exists()) {
+                          transaction.update(walletRef, { balance: increment(Number(returnData.refundAmount)) });
+                      }
+                  }
+
+                  // B. Revert Inventory (Remove items that were added back)
+                  if (returnData.items && Array.isArray(returnData.items)) {
+                      returnData.items.forEach(rItem => {
+                          if (rItem.condition === "Good" && rItem.itemId) {
+                              const itemRef = doc(db, uid, "items", "item_list", rItem.itemId);
+                              transaction.update(itemRef, { qtyOnHand: increment(-rItem.qty) });
+                          }
+                      });
+                  }
+
+                  // C. Delete Documents
+                  transaction.delete(returnDoc.ref); // Delete from returns/return_list
+                  transaction.delete(doc(db, uid, 'expenses', 'expense_list', item.id)); // Delete from expenses/expense_list
+              });
+
+              alert("Return deleted. Wallet refunded & Stock corrected.");
+              refreshBalances();
+              setCurrentPage(1);
+              setPageCursors([null]);
+              fetchData(1, searchFilter, dateFilter);
+
+          } catch (error) {
+              console.error(error);
+              alert("Failed to revert return: " + error.message);
+          }
+          return;
+      }
+
+      // 3. Handle Standard Expense / Payment Delete
       const collectionPath = item.type === 'Expense' ? `/${uid}/user_data/expenses` : `/${uid}/stock_payments/payments`;
       try {
           await deleteDoc(doc(db, collectionPath, item.id));
           alert(`${item.type} deleted successfully.`);
-          await refreshBalances();
+          refreshBalances();
           setCurrentPage(1);
           setPageCursors([null]);
           fetchData(1, searchFilter, dateFilter);
@@ -311,7 +416,7 @@ const Expenses = ({ goToSettings }) => {
             <div style={{ ...styles.formGroup, flex: 2 }}>
                 <div style={styles.searchInputContainer}>
                     <AiOutlineSearch style={styles.searchIcon}/>
-                    <input type="text" placeholder="Search by ID (EXP..., P..., SI-...). Text search disabled for pagination." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} style={{...styles.input, paddingLeft: '35px'}}/>
+                    <input type="text" placeholder="Search by ID (EXP..., P..., SI-..., RET-...). Text search disabled for pagination." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} style={{...styles.input, paddingLeft: '35px'}}/>
                 </div>
             </div>
             <div style={{...styles.formGroup, flexDirection: 'row', alignItems: 'center', gap: '10px'}}>
@@ -321,7 +426,7 @@ const Expenses = ({ goToSettings }) => {
         </div>
         <div style={styles.tableContainer}>
           <table style={styles.table}>
-            <thead><tr><th style={styles.th}>Date</th><th style={styles.th}>Payment/Exp ID</th><th style={styles.th}>Stock ID</th><th style={styles.th}>Type</th><th style={styles.th}>Details</th><th style={styles.th}>Amount</th><th style={styles.th}>Action</th></tr></thead>
+            <thead><tr><th style={styles.th}>Date</th><th style={styles.th}>Transaction ID</th><th style={styles.th}>Ref ID</th><th style={styles.th}>Type</th><th style={styles.th}>Details</th><th style={styles.th}>Amount</th><th style={styles.th}>Action</th></tr></thead>
             <tbody>
               {loading ? (
                   <tr><td colSpan={7} style={styles.loadingCell}>Loading...</td></tr>
@@ -329,15 +434,20 @@ const Expenses = ({ goToSettings }) => {
                   combinedData.map(item => (
                       <tr key={item.id}>
                           <td style={styles.td}>{item.createdAt?.toDate().toLocaleDateString()}</td>
-                          <td style={styles.td}>{item.paymentId || item.expenseId}</td>
-                          <td style={styles.td}>{item.type === 'Payment' ? item.stockInId : 'N/A'}</td>
+                          <td style={styles.td}>{item.paymentId || item.expenseId || item.id}</td>
+                          <td style={styles.td}>{item.type === 'Payment' ? item.stockInId : (item.relatedReturnId || 'N/A')}</td>
                           <td style={styles.td}>
-                              <span style={{ ...styles.typeBadge, backgroundColor: item.type === 'Expense' ? '#e74c3c' : '#3498db' }}>{item.type}</span>
+                              <span style={{ 
+                                  ...styles.typeBadge, 
+                                  backgroundColor: item.type === 'Expense' ? '#e74c3c' : item.type === 'Payment' ? '#3498db' : '#f39c12' 
+                              }}>
+                                  {item.type}
+                              </span>
                           </td>
                           <td style={styles.td}>
-                              <div>{item.details || item.receiverName}</div>
+                              <div>{item.details || item.receiverName || item.description}</div>
                               <div style={styles.subText}>
-                                  {item.type === 'Expense' 
+                                  {(item.type === 'Expense' || item.type === 'Return') 
                                     ? `Paid from: ${item.cashBookName || 'N/A'}` 
                                     : `Method: ${item.method}${item.method === 'Online Payment' && item.walletName ? ` from ${item.walletName}` : ''}`}
                               </div>
