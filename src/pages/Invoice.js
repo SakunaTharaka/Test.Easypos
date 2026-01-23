@@ -264,6 +264,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       )}
 
+      {/* ✅ CUSTOM RETURN POLICY (Shows on all invoices if set) */}
+      {companyInfo?.returnPolicy && (
+        <div style={{marginTop: 20, borderTop: '1px dotted #ccc', paddingTop: 10, fontSize: '0.8em', textAlign: 'center', color: '#444'}}>
+            <strong style={{textTransform: 'uppercase', fontSize: '0.9em'}}>Return Policy</strong>
+            <p style={{marginTop: 3, whiteSpace: 'pre-wrap', lineHeight: '1.4'}}>{companyInfo.returnPolicy}</p>
+        </div>
+      )}
+
       {isServiceOrder ? (
           <div style={{marginTop: 30, borderTop: '1px solid #000', paddingTop: 10, fontSize: '0.8em'}}>
             <p><strong>Terms:</strong> Please bring this receipt when collecting your item. Items not collected within 30 days may be disposed of.</p>

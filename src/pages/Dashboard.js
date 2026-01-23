@@ -279,7 +279,7 @@ const Dashboard = () => {
     let setActiveSubTab = () => {};
 
     if (activeTab === "Inventory") {
-      subTabs = ["Purchasing Order", "Stock-In", "Stock-Out", "Stores Balance", "Buy&Sell Balance"];
+      subTabs = ["Purchasing Order", "Stock-In", "Waste & Usage", "Stores Balance", "Buy&Sell Balance"];
       if (showProductionTabs) subTabs.push("Add Production", "Production Balance");
       activeSubTab = activeInventoryTab;
       setActiveSubTab = setActiveInventoryTab;
@@ -346,7 +346,7 @@ const Dashboard = () => {
         return (
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
-            {activeInventoryTab === "Stock-Out" && <StockOut internalUser={internalLoggedInUser} />}
+            {activeInventoryTab === "Waste & Usage" && <StockOut internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />}
             {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}

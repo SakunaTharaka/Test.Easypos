@@ -54,6 +54,10 @@ const Settings = () => {
   const [useSinhalaInvoice, setUseSinhalaInvoice] = useState(false);
   const [showOrderNo, setShowOrderNo] = useState(false); 
   const [doubleLineInvoiceItem, setDoubleLineInvoiceItem] = useState(false);
+  
+  // ✅ Return Policy State
+  const [returnPolicy, setReturnPolicy] = useState("");
+  const [editReturnPolicy, setEditReturnPolicy] = useState(false);
 
   const [priceCategories, setPriceCategories] = useState([]);
   const [servicePriceCategory, setServicePriceCategory] = useState("");
@@ -152,6 +156,7 @@ const Settings = () => {
             dineInAvailable: false,
             serviceCharge: "",
             sendInvoiceSms: false,
+            returnPolicy: "",
           };
           await setDoc(settingsDocRef, finalData);
         }
@@ -188,6 +193,7 @@ const Settings = () => {
         setDineInAvailable(finalData.dineInAvailable || false);
         setServiceCharge(finalData.serviceCharge || "");
         setSendInvoiceSms(finalData.sendInvoiceSms || false);
+        setReturnPolicy(finalData.returnPolicy || ""); 
 
         // --- FETCH SUBCOLLECTIONS ---
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -390,6 +396,17 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), updates);
   };
 
+  // ✅ Save Return Policy with Edit/Save Logic
+  const handleSaveReturnPolicy = async () => {
+    try {
+        await updateDoc(getSettingsDocRef(), { returnPolicy: returnPolicy });
+        setEditReturnPolicy(false); // Switch back to view mode
+        alert("Return policy updated successfully!");
+    } catch (e) {
+        alert("Failed to save return policy: " + e.message);
+    }
+  };
+
   const handleLogout = async () => {
     await auth.signOut();
     navigate("/");
@@ -536,6 +553,37 @@ const Settings = () => {
                 <button onClick={() => handleDoubleLineInvoiceChange(false)} style={!doubleLineInvoiceItem ? styles.toggleButtonActive : styles.toggleButton}>No</button>
             </div>
             <p style={styles.helpText}>Enable this to split item details into two lines on the printed invoice.</p>
+        </div>
+
+        {/* ✅ NEW: Return Policy Field with Edit Toggle */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Return Policy</label>
+            
+            {editReturnPolicy ? (
+                <>
+                    <textarea
+                        value={returnPolicy}
+                        onChange={(e) => setReturnPolicy(e.target.value)}
+                        style={{...styles.input, minHeight: '80px', resize: 'vertical'}}
+                        placeholder="Enter your return policy here (e.g., 'Goods once sold cannot be returned')..."
+                    />
+                    <div style={{marginTop: '10px', display: 'flex', gap: '10px'}}>
+                        <button onClick={handleSaveReturnPolicy} style={{...styles.saveButton, backgroundColor: '#3498db'}}>Save Policy</button>
+                        <button onClick={() => setEditReturnPolicy(false)} style={styles.cancelButton}>Cancel</button>
+                    </div>
+                </>
+            ) : (
+                <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                    <div style={{...styles.inputDisabled, minHeight: '60px', color: '#333', whiteSpace: 'pre-wrap'}}>
+                        {returnPolicy || "No return policy set."}
+                    </div>
+                    <button onClick={() => setEditReturnPolicy(true)} style={{...styles.editButton, width: 'fit-content'}}>
+                        <AiOutlineEdit /> Edit Policy
+                    </button>
+                </div>
+            )}
+            
+            <p style={styles.helpText}>This text will appear at the bottom of your printed invoices.</p>
         </div>
 
       </div>
