@@ -63,10 +63,9 @@ const Settings = () => {
   const [serviceCharge, setServiceCharge] = useState("");
   const [editServiceCharge, setEditServiceCharge] = useState(false);
 
-  // ✅ SMS Settings State
   const [sendInvoiceSms, setSendInvoiceSms] = useState(false);
-  const [smsCredits, setSmsCredits] = useState(0);      // Monthly Free
-  const [extraSmsCredits, setExtraSmsCredits] = useState(0); // Purchased Extra
+  const [smsCredits, setSmsCredits] = useState(0);
+  const [extraSmsCredits, setExtraSmsCredits] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -77,69 +76,120 @@ const Settings = () => {
       }
       const uid = currentUser.uid;
       const settingsDocRef = doc(db, uid, "settings");
+      const userInfoRef = doc(db, "Userinfo", uid);
 
       try {
-        const docSnap = await getDoc(settingsDocRef);
-        
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setUserInfo(data);
-          setFormInput({
-            fullName: data.fullName || "",
-            email: data.email || auth.currentUser.email,
-            phone: data.phone || "",
-            companyAddress: data.companyAddress || "",
-            companyName: data.companyName || "",
-            companyLogo: data.companyLogo || "",
-          });
-          setInventoryType(data.inventoryType || "Buy and Sell only");
-          setItemCategories(data.itemCategories || []);
-          setSelectedUnits(data.itemUnits || ["Units", "Kg", "Metre"]);
-          setStockReminder(data.stockReminder || "Do not remind");
-          setDefaultCustomerId(data.defaultCustomerId || "");
-          setUseShiftProduction(data.useShiftProduction || false);
-          setProductionShifts(data.productionShifts || []);
-          setExpenseCategories(data.expenseCategories || []);
-          setAutoPrintInvoice(data.autoPrintInvoice || false);
-          setOfferDelivery(data.offerDelivery || false);
-          setOpenCashDrawerWithPrint(data.openCashDrawerWithPrint || false);
-          setUseSinhalaInvoice(data.useSinhalaInvoice || false); 
-          setShowOrderNo(data.showOrderNo || false); 
-          setServicePriceCategory(data.serviceJobPriceCategory || "");
-          setEnableServiceOrders(data.enableServiceOrders || false);
-          setDoubleLineInvoiceItem(data.doubleLineInvoiceItem || false);
-          setEnableKOD(data.enableKOD || false);
-          setDineInAvailable(data.dineInAvailable || false);
-          setServiceCharge(data.serviceCharge || "");
-          setSendInvoiceSms(data.sendInvoiceSms || false);
+        // 1. Fetch BOTH Settings and UserInfo (Registration Data)
+        const [settingsSnap, userInfoSnap] = await Promise.all([
+            getDoc(settingsDocRef),
+            getDoc(userInfoRef)
+        ]);
+
+        let finalData = {};
+        let registrationData = {};
+
+        if (userInfoSnap.exists()) {
+            registrationData = userInfoSnap.data();
+            setSmsCredits(registrationData.smsCredits || 0);
+            setExtraSmsCredits(registrationData.extraSmsCredits || 0);
+        }
+
+        if (settingsSnap.exists()) {
+          // --- SCENARIO 1: SETTINGS EXIST ---
+          finalData = settingsSnap.data();
+
+          // 🛠️ AUTO-FIX: If Settings are missing Phone/Name but Registration has them, SYNC IT.
+          let updatesNeeded = {};
+          if (!finalData.phone && registrationData.phone) {
+              finalData.phone = registrationData.phone;
+              updatesNeeded.phone = registrationData.phone;
+          }
+          if (!finalData.fullName && registrationData.fullName) {
+              finalData.fullName = registrationData.fullName;
+              updatesNeeded.fullName = registrationData.fullName;
+          }
+          if (!finalData.companyAddress && registrationData.companyAddress) {
+              finalData.companyAddress = registrationData.companyAddress;
+              updatesNeeded.companyAddress = registrationData.companyAddress;
+          }
+          if (!finalData.companyName && registrationData.companyName) {
+              finalData.companyName = registrationData.companyName;
+              updatesNeeded.companyName = registrationData.companyName;
+          }
+
+          // Apply fixes to DB if any found
+          if (Object.keys(updatesNeeded).length > 0) {
+              await updateDoc(settingsDocRef, updatesNeeded);
+              console.log("Auto-fixed missing settings data from registration profile.");
+          }
 
         } else {
-          // Defaults
-          const userInfoRef = doc(db, "Userinfo", uid);
-          const userInfoSnap = await getDoc(userInfoRef);
-          let initialCompanyName = "My Business";
-          if (userInfoSnap.exists()) initialCompanyName = userInfoSnap.data().companyName || "My Business";
-
-          const defaultSettings = {
-            fullName: "", email: auth.currentUser.email, phone: "",
-            companyAddress: "", companyName: initialCompanyName, companyLogo: "",
-            inventoryType: "Buy and Sell only", itemCategories: ["Default Category"],
-            itemUnits: ["Units", "Kg"], stockReminder: "Do not remind",
-            autoPrintInvoice: false, sendInvoiceSms: false
+          // --- SCENARIO 2: FIRST TIME LOAD (Create Defaults) ---
+          finalData = {
+            fullName: registrationData.fullName || "",
+            email: auth.currentUser.email,
+            phone: registrationData.phone || "",
+            companyAddress: registrationData.companyAddress || "",
+            companyName: registrationData.companyName || "My Business",
+            companyLogo: "",
+            inventoryType: "Buy and Sell only",
+            itemCategories: ["Default Category"],
+            itemUnits: ["Units", "Kg", "Metre"],
+            stockReminder: "Do not remind",
+            defaultCustomerId: "",
+            useShiftProduction: false,
+            productionShifts: [],
+            expenseCategories: [],
+            autoPrintInvoice: false,
+            offerDelivery: false,
+            openCashDrawerWithPrint: false,
+            useSinhalaInvoice: false,
+            showOrderNo: false,
+            serviceJobPriceCategory: "",
+            enableServiceOrders: false,
+            doubleLineInvoiceItem: false,
+            enableKOD: false,
+            dineInAvailable: false,
+            serviceCharge: "",
+            sendInvoiceSms: false,
           };
-          await setDoc(settingsDocRef, defaultSettings);
-          setUserInfo(defaultSettings);
+          await setDoc(settingsDocRef, finalData);
         }
 
-        // ✅ FETCH LIVE SMS CREDITS (Free + Extra)
-        const userInfoRef = doc(db, "Userinfo", uid);
-        const userInfoSnap = await getDoc(userInfoRef);
-        if (userInfoSnap.exists()) {
-            const uData = userInfoSnap.data();
-            setSmsCredits(uData.smsCredits || 0);
-            setExtraSmsCredits(uData.extraSmsCredits || 0); // Load extra credits
-        }
+        // --- SET STATE WITH FINAL DATA ---
+        setUserInfo(finalData);
+        setFormInput({
+            fullName: finalData.fullName || "",
+            email: finalData.email || auth.currentUser.email,
+            phone: finalData.phone || "",
+            companyAddress: finalData.companyAddress || "",
+            companyName: finalData.companyName || "",
+            companyLogo: finalData.companyLogo || "",
+        });
 
+        // Set remaining states
+        setInventoryType(finalData.inventoryType || "Buy and Sell only");
+        setItemCategories(finalData.itemCategories || []);
+        setSelectedUnits(finalData.itemUnits || ["Units", "Kg", "Metre"]);
+        setStockReminder(finalData.stockReminder || "Do not remind");
+        setDefaultCustomerId(finalData.defaultCustomerId || "");
+        setUseShiftProduction(finalData.useShiftProduction || false);
+        setProductionShifts(finalData.productionShifts || []);
+        setExpenseCategories(finalData.expenseCategories || []);
+        setAutoPrintInvoice(finalData.autoPrintInvoice || false);
+        setOfferDelivery(finalData.offerDelivery || false);
+        setOpenCashDrawerWithPrint(finalData.openCashDrawerWithPrint || false);
+        setUseSinhalaInvoice(finalData.useSinhalaInvoice || false); 
+        setShowOrderNo(finalData.showOrderNo || false); 
+        setServicePriceCategory(finalData.serviceJobPriceCategory || "");
+        setEnableServiceOrders(finalData.enableServiceOrders || false);
+        setDoubleLineInvoiceItem(finalData.doubleLineInvoiceItem || false);
+        setEnableKOD(finalData.enableKOD || false);
+        setDineInAvailable(finalData.dineInAvailable || false);
+        setServiceCharge(finalData.serviceCharge || "");
+        setSendInvoiceSms(finalData.sendInvoiceSms || false);
+
+        // --- FETCH SUBCOLLECTIONS ---
         const customersColRef = collection(db, uid, "customers", "customer_list");
         const customersSnap = await getDocs(customersColRef);
         setCustomers(customersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -269,7 +319,6 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { defaultCustomerId: value });
   };
 
-  // ✅ Auto Print Logic
   const handleAutoPrintChange = async (value) => {
     setAutoPrintInvoice(value);
     const updates = { autoPrintInvoice: value };
@@ -331,7 +380,6 @@ const Settings = () => {
     alert("Service charge updated!");
   };
 
-  // ✅ SMS Logic
   const handleSendInvoiceSmsChange = async (value) => {
     setSendInvoiceSms(value);
     const updates = { sendInvoiceSms: value };
@@ -405,30 +453,15 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* ✅ NEW SMS & NOTIFICATIONS SECTION (UPDATED) */}
+      {/* SMS & Notifications */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>SMS & Notifications</h3>
-        
-        {/* Credit Display */}
         <div style={{ padding: '15px', background: '#e0f2fe', borderRadius: '8px', marginBottom: '20px', border: '1px solid #bae6fd', color: '#0369a1' }}>
             <h4 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>SMS Credits Balance</h4>
-            
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}>
-                <span>Monthly Free Plan:</span>
-                <strong>{smsCredits} / 350</strong>
-            </div>
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}>
-                <span>Purchased Packs:</span>
-                <strong>{extraSmsCredits}</strong>
-            </div>
-            
-            <div style={{borderTop: '1px solid #93c5fd', marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold'}}>
-                <span>Total Available:</span>
-                <span>{smsCredits + extraSmsCredits}</span>
-            </div>
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}><span>Monthly Free Plan:</span><strong>{smsCredits} / 350</strong></div>
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px'}}><span>Purchased Packs:</span><strong>{extraSmsCredits}</strong></div>
+            <div style={{borderTop: '1px solid #93c5fd', marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold'}}><span>Total Available:</span><span>{smsCredits + extraSmsCredits}</span></div>
         </div>
-
-        {/* Feature Toggle */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Send invoice to customer as SMS</label>
             <div style={styles.toggleContainer}>

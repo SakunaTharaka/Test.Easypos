@@ -23,16 +23,56 @@ const TermsAndConditions = () => {
         <h3 style={styles.subSectionTitle}>Refund Policy</h3>
         <p>All paid subscriptions are strictly non-refundable. Cancellation of a subscription will prevent future billing, but no partial refunds or credits will be issued for unused periods. Certain exceptions may apply where required by applicable law.</p>
 
-        <h2 style={styles.sectionTitle}>3. Intellectual Property</h2>
+        {/* ✅ SMS SERVICES SECTION */}
+        <h2 style={styles.sectionTitle}>3. SMS Services & Credit Policy</h2>
+        <p>Our Service includes an SMS notification feature allowing users to send invoices and updates to their customers. The usage of this feature is governed by the following credit policies:</p>
+        
+        <h3 style={styles.subSectionTitle}>3.1 Credit Types</h3>
+        <p>We distinguish between two types of SMS credits:</p>
+        <ul>
+            <li><strong>Monthly Free Credits:</strong> A recurring allocation of credits (e.g., 350 credits) provided automatically with your active subscription.</li>
+            <li><strong>Extra Purchased Credits:</strong> Additional credit packs purchased separately by you as "Top-ups".</li>
+        </ul>
+
+        <h3 style={styles.subSectionTitle}>3.2 Reset & Expiration Policy</h3>
+        <p><strong>Monthly Free Credits:</strong> These credits are valid for exactly one billing month. They automatically reset on the calendar day of your original subscription registration. </p>
+        <ul>
+            <li><em>Example:</em> If you registered on January 15th, your Free Credits will reset to the plan limit on the 15th of every subsequent month.</li>
+            <li><em>Rollover:</em> Unused Free Credits <strong>DO NOT rollover</strong> to the next month. They expire at the reset time and are replaced by the new month's allocation.</li>
+            <li><em>End-of-Month Logic:</em> If your reset date falls on a day that does not exist in the current month (e.g., the 31st), the reset will occur on the last available day of that month (e.g., February 28th or April 30th).</li>
+        </ul>
+        <p><strong>Extra Purchased Credits:</strong> These credits <strong>NEVER expire</strong> as long as your account remains active. They carry over indefinitely from month to month until used.</p>
+
+        <h3 style={styles.subSectionTitle}>3.3 Usage Priority</h3>
+        <p>The system automatically prioritizes the usage of your <strong>Monthly Free Credits first</strong>. Once your Free allocation is exhausted, the system will begin deducting from your Extra Purchased Credits. This ensures you maximize the value of your free monthly allowance.</p>
+
+        <h3 style={styles.subSectionTitle}>3.4 Account Expiry & Termination</h3>
+        <p>SMS Credits (both Free and Extra) are tied to your active Service subscription. If your subscription expires, is cancelled, or is terminated for any reason:</p>
+        <ul>
+            <li>You will immediately lose access to the SMS feature.</li>
+            <li>All remaining credits are frozen.</li>
+            <li>Credits are non-transferable and non-refundable.</li>
+        </ul>
+
+        {/* ✅ NEW SUBSECTION: COST CALCULATION */}
+        <h3 style={styles.subSectionTitle}>3.5 Cost Calculation (Character Limit)</h3>
+        <p>SMS credits are deducted based on the character length of the message being sent. Standard GSM encoding rules apply:</p>
+        <ul>
+            <li><strong>1 Credit</strong> is deducted for every <strong>160 characters</strong> (or part thereof).</li>
+            <li>Messages exceeding 160 characters will be split into multiple parts and charged accordingly (e.g., a message with 165 characters will cost 2 Credits).</li>
+            <li>The system will display an estimated credit cost before sending.</li>
+        </ul>
+
+        <h2 style={styles.sectionTitle}>4. Intellectual Property</h2>
         <h3 style={styles.subSectionTitle}>Ownership</h3>
         <p>The Service, including all content, features, source code, design, graphics, logos, trademarks, and other intellectual property, remains the exclusive property of Wayne Software Company and its licensors.</p>
         <h3 style={styles.subSectionTitle}>Restrictions</h3>
         <p>You may not copy, modify, reproduce, distribute, sell, license, or otherwise exploit any part of the Service without our prior written consent. Unauthorized use of our trademarks or branding in connection with any product or service is strictly prohibited.</p>
 
-        <h2 style={styles.sectionTitle}>4. User Responsibilities</h2>
+        <h2 style={styles.sectionTitle}>5. User Responsibilities</h2>
         <p>You are responsible for maintaining the confidentiality of your account credentials. You agree not to use the Service for any unlawful, fraudulent, or unauthorized purposes. You must comply with all applicable laws and regulations when using the Service. You are solely responsible for backing up any data you upload or generate through the Service.</p>
 
-        <h2 style={styles.sectionTitle}>5. Limitation of Liability</h2>
+        <h2 style={styles.sectionTitle}>6. Limitation of Liability</h2>
         <p>To the maximum extent permitted by law, Wayne Software Company, its directors, employees, partners, agents, suppliers, and affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages. This includes, without limitation, damages for:</p>
         <ul>
             <li>Loss of profits, revenue, or anticipated savings,</li>
@@ -42,13 +82,13 @@ const TermsAndConditions = () => {
         </ul>
         <p>Our total aggregate liability for any claims relating to the Service shall not exceed the amount paid by you to us in the twelve (12) months preceding the claim.</p>
 
-        <h2 style={styles.sectionTitle}>6. Termination</h2>
+        <h2 style={styles.sectionTitle}>7. Termination</h2>
         <p>We may suspend or terminate your account and access to the Service immediately, without prior notice, if you breach these Terms or engage in activities harmful to the Service or other users. Upon termination, your right to use the Service will immediately cease. Sections relating to Intellectual Property, Limitation of Liability, and Governing Law shall survive termination.</p>
 
-        <h2 style={styles.sectionTitle}>7. Governing Law</h2>
+        <h2 style={styles.sectionTitle}>8. Governing Law</h2>
         <p>These Terms shall be governed by and construed in accordance with the laws of Sri Lanka, without regard to its conflict of law provisions. Any disputes arising from or relating to these Terms shall be subject to the exclusive jurisdiction of the courts of Sri Lanka.</p>
 
-        <h2 style={styles.sectionTitle}>8. Changes to Terms</h2>
+        <h2 style={styles.sectionTitle}>9. Changes to Terms</h2>
         <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. If a revision is material, we will provide at least thirty (30) days’ notice before the new Terms take effect. What constitutes a material change will be determined solely by us. Continued use of the Service after such changes constitutes acceptance of the updated Terms.</p>
       </div>
     </div>
@@ -97,4 +137,3 @@ const styles = {
 };
 
 export default TermsAndConditions;
-

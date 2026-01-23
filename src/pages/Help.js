@@ -54,11 +54,11 @@ const Help = () => {
         </div>
       </div>
 
-      {/* ✅ **UPDATED: Terms & Conditions Section** */}
+      {/* ✅ SMS POLICY IN HELP PAGE */}
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Terms and Conditions</h3>
         <div style={styles.termsContainer}>
-            <p><strong>Last Updated: October 05, 2025</strong></p>
+            <p><strong>Last Updated: October 08, 2025</strong></p>
             <p>Please read these Terms and Conditions (“Terms”, “Terms and Conditions”) carefully before using our web application (the “Service”). These Terms constitute a legally binding agreement between you (“User”, “you”, or “your”) and Wayne Software Company (“Company”, “we”, “our”, or “us”).</p>
             <p>By accessing or using the Service, you agree to be bound by these Terms. If you do not agree with any part of these Terms, you may not access or use the Service.</p>
             
@@ -75,16 +75,37 @@ const Help = () => {
             <h5>Refund Policy</h5>
             <p>All paid subscriptions are strictly non-refundable. Cancellation of a subscription will prevent future billing, but no partial refunds or credits will be issued for unused periods. Certain exceptions may apply where required by applicable law.</p>
             
-            <h4 style={styles.termsHeading}>3. Intellectual Property</h4>
+            <h4 style={styles.termsHeading}>3. SMS Services & Credit Policy</h4>
+            
+            <h5>3.1 Credit Types</h5>
+            <p><strong>Monthly Free Credits:</strong> Included with your subscription (e.g., 350 credits). They reset monthly on your registration anniversary date.</p>
+            <p><strong>Extra Purchased Credits:</strong> Bought separately as Top-ups. These never expire as long as your account is active.</p>
+
+            <h5>3.2 Reset & Expiration</h5>
+            <p><strong>Monthly Reset:</strong> Free credits reset to the plan limit on the specific day of the month you registered. Unused free credits expire at reset (no rollover). If your reset date is the 31st, during shorter months (like Feb/Apr), the reset happens on the last day of the month.</p>
+            <p><strong>No Expiration for Extras:</strong> Purchased credits roll over indefinitely.</p>
+
+            <h5>3.3 Usage Priority</h5>
+            <p>The system uses your <strong>Monthly Free Credits first</strong>. Extra Purchased Credits are only used after free credits are finished.</p>
+
+            <h5>3.4 Account Expiry</h5>
+            <p>If your subscription expires, all credits are frozen immediately. Credits are non-refundable.</p>
+
+            {/* ✅ NEW: COST CALCULATION */}
+            <h5>3.5 Credit Cost Calculation</h5>
+            <p><strong>Standard Rate:</strong> 1 Credit is deducted for every 160 characters (or part thereof).</p>
+            <p><strong>Long Messages:</strong> Messages longer than 160 characters will cost multiple credits (e.g., 161 chars = 2 Credits).</p>
+
+            <h4 style={styles.termsHeading}>4. Intellectual Property</h4>
             <h5>Ownership</h5>
             <p>The Service, including all content, features, source code, design, graphics, logos, trademarks, and other intellectual property, remains the exclusive property of Wayne Software Company and its licensors.</p>
             <h5>Restrictions</h5>
             <p>You may not copy, modify, reproduce, distribute, sell, license, or otherwise exploit any part of the Service without our prior written consent. Unauthorized use of our trademarks or branding in connection with any product or service is strictly prohibited.</p>
             
-            <h4 style={styles.termsHeading}>4. User Responsibilities</h4>
+            <h4 style={styles.termsHeading}>5. User Responsibilities</h4>
             <p>You are responsible for maintaining the confidentiality of your account credentials. You agree not to use the Service for any unlawful, fraudulent, or unauthorized purposes. You must comply with all applicable laws and regulations when using the Service. You are solely responsible for backing up any data you upload or generate through the Service.</p>
             
-            <h4 style={styles.termsHeading}>5. Limitation of Liability</h4>
+            <h4 style={styles.termsHeading}>6. Limitation of Liability</h4>
             <p>To the maximum extent permitted by law, Wayne Software Company, its directors, employees, partners, agents, suppliers, and affiliates shall not be liable for any indirect, incidental, special, consequential, or punitive damages. This includes, without limitation, damages for:</p>
             <ul>
                 <li>Loss of profits, revenue, or anticipated savings,</li>
@@ -94,13 +115,13 @@ const Help = () => {
             </ul>
             <p>Our total aggregate liability for any claims relating to the Service shall not exceed the amount paid by you to us in the twelve (12) months preceding the claim.</p>
             
-            <h4 style={styles.termsHeading}>6. Termination</h4>
+            <h4 style={styles.termsHeading}>7. Termination</h4>
             <p>We may suspend or terminate your account and access to the Service immediately, without prior notice, if you breach these Terms or engage in activities harmful to the Service or other users. Upon termination, your right to use the Service will immediately cease. Sections relating to Intellectual Property, Limitation of Liability, and Governing Law shall survive termination.</p>
             
-            <h4 style={styles.termsHeading}>7. Governing Law</h4>
+            <h4 style={styles.termsHeading}>8. Governing Law</h4>
             <p>These Terms shall be governed by and construed in accordance with the laws of Sri Lanka, without regard to its conflict of law provisions. Any disputes arising from or relating to these Terms shall be subject to the exclusive jurisdiction of the courts of Sri Lanka.</p>
             
-            <h4 style={styles.termsHeading}>8. Changes to Terms</h4>
+            <h4 style={styles.termsHeading}>9. Changes to Terms</h4>
             <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. If a revision is material, we will provide at least thirty (30) days’ notice before the new Terms take effect. What constitutes a material change will be determined solely by us. Continued use of the Service after such changes constitutes acceptance of the updated Terms.</p>
         </div>
       </div>
