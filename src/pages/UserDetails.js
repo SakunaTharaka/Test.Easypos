@@ -28,7 +28,51 @@ const UserDetails = () => {
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState(new Array(6).fill(""));
   const [otpLoading, setOtpLoading] = useState(false);
+  
+  // --- OTP TIMER STATE ---
+  const [otpCooldown, setOtpCooldown] = useState(0); // Time remaining in seconds
+  const [otpAttemptCount, setOtpAttemptCount] = useState(0); // Tracks progressive delays
+  
   const inputRefs = useRef([]);
+
+  // --- 1. INITIALIZE TIMER FROM STORAGE ---
+  useEffect(() => {
+    // Restore attempt count
+    const storedAttempts = localStorage.getItem('otp_attempts');
+    if (storedAttempts) {
+        setOtpAttemptCount(parseInt(storedAttempts, 10));
+    }
+
+    // Restore active cooldown
+    const storedNextAllowed = localStorage.getItem('otp_next_allowed');
+    if (storedNextAllowed) {
+        const remaining = Math.ceil((parseInt(storedNextAllowed, 10) - Date.now()) / 1000);
+        if (remaining > 0) {
+            setOtpCooldown(remaining);
+        }
+    }
+  }, []);
+
+  // --- 2. TIMER TICK LOGIC ---
+  useEffect(() => {
+    let interval;
+    if (otpCooldown > 0) {
+        interval = setInterval(() => {
+            setOtpCooldown((prev) => {
+                if (prev <= 1) return 0;
+                return prev - 1;
+            });
+        }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [otpCooldown]);
+
+  // Helper to format seconds into MM:SS
+  const formatTimer = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -84,15 +128,36 @@ const UserDetails = () => {
 
   // --- OTP LOGIC ---
   const handleRequestOtp = async () => {
+    // Check if cooldown is active
+    if (otpCooldown > 0) return;
+
     const phoneRegex = /^0\d{9}$/;
     if (!phoneRegex.test(formData.phone)) {
         alert("Please enter a valid 10-digit Sri Lankan phone number starting with 0 (e.g., 0771234567).");
         return;
     }
+
     setOtpLoading(true);
     const requestOtpFn = httpsCallable(functions, 'requestOtp');
     try {
         await requestOtpFn({ mobile: formData.phone });
+        
+        // --- START COOLDOWN LOGIC ---
+        // Determine wait time based on attempts: 60s, 120s, 300s, 1800s
+        let waitTime = 60;
+        if (otpAttemptCount === 1) waitTime = 120;       // 2 mins
+        else if (otpAttemptCount === 2) waitTime = 300;  // 5 mins
+        else if (otpAttemptCount >= 3) waitTime = 1800;  // 30 mins
+
+        // Save to state and storage
+        const nextAllowedTime = Date.now() + (waitTime * 1000);
+        localStorage.setItem('otp_next_allowed', nextAllowedTime);
+        localStorage.setItem('otp_attempts', otpAttemptCount + 1);
+
+        setOtpAttemptCount(prev => prev + 1);
+        setOtpCooldown(waitTime);
+        // ----------------------------
+
         setOtpLoading(false);
         setOtp(new Array(6).fill("")); 
         setShowOtpModal(true);
@@ -115,6 +180,8 @@ const UserDetails = () => {
         await verifyOtpFn({ mobile: formData.phone, code: code });
         setIsPhoneVerified(true);
         setShowOtpModal(false);
+        // Optional: Reset cooldown on success if you want, 
+        // but typically we leave it to prevent spamming new numbers immediately.
         alert("Phone Verified Successfully!");
     } catch (error) {
         console.error(error);
@@ -190,13 +257,11 @@ const UserDetails = () => {
     }
   };
 
-  // ✅ UPDATED: Calls the Secure Cloud Function
   const handleStartTrial = async () => {
     setLoading(true);
     const startTrialFn = httpsCallable(functions, 'startTrial');
     
     try {
-      // We pass the plan, but the backend decides credits and dates
       await startTrialFn({ plan: selectedPlan });
       
       alert("Trial Activated Successfully! Welcome aboard.");
@@ -216,7 +281,8 @@ const UserDetails = () => {
     "Cloud Dashboard Access",
     "1000 Items & Sales",
     "Daily Business Reports",
-    "Premium 24/7 Support"
+    "Premium 24/7 Support",
+    "Free 350 Credits to send invoices via SMS Every Month"
   ];
 
   return (
@@ -253,10 +319,10 @@ const UserDetails = () => {
                 ) : (
                     <button 
                         onClick={handleRequestOtp} 
-                        style={otpLoading ? styles.verifyBtnDisabled : styles.verifyBtn}
-                        disabled={otpLoading || !formData.phone}
+                        style={(otpLoading || otpCooldown > 0) ? styles.verifyBtnDisabled : styles.verifyBtn}
+                        disabled={otpLoading || !formData.phone || otpCooldown > 0}
                     >
-                        {otpLoading ? "Sending..." : "Verify"}
+                        {otpLoading ? "Sending..." : (otpCooldown > 0 ? `Wait ${formatTimer(otpCooldown)}` : "Verify")}
                     </button>
                 )}
             </div>
@@ -298,7 +364,7 @@ const UserDetails = () => {
                 
                 <h3 style={{...styles.planTitle, color: '#2563eb'}}>Monthly Special</h3>
                 <p style={styles.planPrice}>Rs. 1,800 <span style={styles.pricePer}>/ month</span></p>
-                <div style={styles.priceSlash}>Was Rs. 2,500</div>
+                <div style={styles.priceSlash}>Was Rs. 3,000</div>
 
                 <div style={styles.divider}></div>
                 <div style={styles.featureList}>
@@ -340,7 +406,7 @@ const UserDetails = () => {
                  <div style={styles.divider}></div>
                  <div style={styles.featureList}>
                     <p style={{fontWeight:'bold', color: '#166534', marginBottom: '8px'}}>✅ Best Value Features:</p>
-                    <p style={styles.featureItem}>✔️ <strong>Pay Once a Year</strong></p>
+                    <p style={styles.featureItem}>✔️ <strong>Pay Once per Year</strong></p>
                     {featureList.map((feature, i) => (
                         <p key={i} style={styles.featureItem}>✔️ {feature}</p>
                     ))}
@@ -446,8 +512,8 @@ const styles = {
     logoutButton: { position: 'absolute', top: '20px', right: '20px', display: 'flex', alignItems: 'center', padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontWeight: '600', fontSize: '14px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', transition: 'all 0.2s ease', zIndex: 10 },
 
     phoneInputContainer: { display: 'flex', alignItems: 'center', gap: '10px', margin: '10px 0' },
-    verifyBtn: { padding: '14px 20px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' },
-    verifyBtnDisabled: { padding: '14px 20px', background: '#a7f3d0', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'not-allowed', fontSize: '14px' },
+    verifyBtn: { padding: '14px 20px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', minWidth: '100px' },
+    verifyBtnDisabled: { padding: '14px 20px', background: '#a7f3d0', color: '#065f46', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'not-allowed', fontSize: '14px', minWidth: '100px' },
     verifiedBadge: { display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: 'bold', fontSize: '14px', padding: '14px 20px', background: '#ecfdf5', borderRadius: '8px' },
     
     modalOverlay: { position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 },

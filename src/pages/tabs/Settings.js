@@ -421,7 +421,29 @@ const Settings = () => {
       <div style={styles.headerContainer}><h2 style={styles.header}>Settings</h2><p style={styles.subHeader}>Manage your account and application preferences</p></div>
       
       {/* Personal Information */}
-      <div style={styles.section}><div style={styles.sectionHeader}><h3 style={styles.sectionTitle}>Personal Information</h3>{!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}</div><div style={styles.formGroup}><label style={styles.label}>Company Logo</label><div style={styles.logoContainer}>{userInfo?.companyLogo ? (<img src={userInfo.companyLogo} alt="Company Logo" style={styles.logoImage} />) : (<div style={styles.logoPlaceholder}>{userInfo?.companyName?.charAt(0) || "C"}</div>)}<div style={styles.fileInputContainer}><label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}><AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}<input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} /></label></div></div></div>
+      <div style={styles.section}>
+        <div style={styles.sectionHeader}>
+            <h3 style={styles.sectionTitle}>Personal Information</h3>
+            {!editMode && (<button style={styles.editButton} onClick={() => setEditMode(true)}><AiOutlineEdit size={16} /> Edit</button>)}
+        </div>
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Company Logo</label>
+            <div style={styles.logoContainer}>
+                {/* ✅ MODIFIED: Show person.jpg as default if no companyLogo is set */}
+                <img 
+                    src={userInfo?.companyLogo || "/person.jpg"} 
+                    alt="Company Logo" 
+                    style={styles.logoImage} 
+                />
+                
+                <div style={styles.fileInputContainer}>
+                    <label htmlFor="logo-upload" style={logoUploading ? styles.uploadButtonDisabled : styles.uploadButton}>
+                        <AiOutlineUpload size={16} /> {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                        <input id="logo-upload" type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files[0])} disabled={logoUploading} style={styles.hiddenFileInput} />
+                    </label>
+                </div>
+            </div>
+        </div>
       {["companyName", "fullName", "email", "phone", "companyAddress"].map((field) => (
         <div style={styles.formGroup} key={field}>
             <label style={styles.label}>{field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1')}</label>

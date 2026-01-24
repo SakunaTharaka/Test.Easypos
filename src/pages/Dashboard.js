@@ -423,7 +423,12 @@ const Dashboard = () => {
         <div style={styles.topBar}>
           <div style={{...styles.headerLeft, cursor: 'pointer'}} onClick={() => setActiveTab("Settings")} title="Go to Settings">
             <div style={styles.logoPlaceholder}>
-              {userInfo?.companyLogo ? ( <img src={userInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} /> ) : ( userInfo?.companyName?.charAt(0) || "B" )}
+              {/* ✅ MODIFIED: Show person.jpg as default if no companyLogo is set */}
+              <img 
+                src={userInfo?.companyLogo || "/person.jpg"} 
+                alt="Logo" 
+                style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} 
+              />
             </div>
             <div style={styles.topInfo}>
               <h2 style={styles.companyName}>{userInfo?.companyName || "Business"}</h2>

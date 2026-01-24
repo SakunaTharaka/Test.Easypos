@@ -4,16 +4,18 @@ import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
+// InvoiceHeader Component
 const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady, isServiceOrder }) => {
     return (
         <div style={styles.topBar}>
             <div style={styles.headerLeft}>
                 <div style={styles.logoPlaceholder}>
-                    {companyInfo?.companyLogo ? (
-                        <img src={companyInfo.companyLogo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}/>
-                    ) : (
-                        companyInfo?.companyName?.charAt(0) || "B"
-                    )}
+                    {/* Shows /person.jpg if no company logo is set in DB */}
+                    <img 
+                        src={companyInfo?.companyLogo || "/person.jpg"} 
+                        alt="Logo" 
+                        style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}
+                    />
                 </div>
                 <div style={styles.topInfo}>
                     <h2 style={styles.companyName}>{companyInfo?.companyName || "Business"}</h2>
@@ -37,6 +39,7 @@ const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady, isServiceOrder }) =
     );
 };
 
+// PrintableLayout Component
 const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderDetails }) => {
   if (!invoice || (!Array.isArray(invoice.items) && !serviceJob && !orderDetails)) {
     return null;
@@ -50,11 +53,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   // --- Calculations ---
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
   const deliveryCharge = Number(invoice.deliveryCharge) || 0;
-  
-  // ✅ Retrieve Service Charge
   const serviceCharge = Number(invoice.serviceCharge) || 0;
-
-  // ✅ Add Service Charge to Total
   const invTotal = invSubtotal + deliveryCharge + serviceCharge;
   
   const invReceived = invoice.received !== undefined ? Number(invoice.received) : (Number(invoice.advanceAmount) || 0);
@@ -68,7 +67,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const orderAdvance = orderDetails ? Number(orderDetails.advanceAmount || 0) : invReceived;
   const orderBalance = orderAdvance === 0 ? 0 : (orderTotal - orderAdvance);
 
-  // Calculate Total Savings
   const totalSave = invoice.items ? invoice.items.reduce((sum, item) => {
     const orig = item.originalPrice || item.price;
     return sum + (orig - item.price) * item.quantity;
@@ -81,9 +79,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   };
 
   const getColumnCount = () => {
-      let count = 2; // Qty + Total
-      if (invoice.isDiscountable) count += 1; // Original Price
-      count += 1; // Rate
+      let count = 2; 
+      if (invoice.isDiscountable) count += 1; 
+      count += 1; 
       return count; 
   };
 
@@ -116,7 +114,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
-            {/* ✅ UPDATED: Show Order Type ONLY if dineInAvailable is true in settings */}
             {companyInfo?.dineInAvailable && invoice.orderType && (
                 <p><strong>Order Type:</strong> {invoice.orderType}</p>
             )}
@@ -192,11 +189,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                 <td style={{ ...styles.td, paddingTop: '0px' }}>
                                    <span style={{color: '#555', fontSize: '0.9em'}}>x </span>{item.quantity}
                                 </td>
-
                                 {invoice.isDiscountable && (
                                     <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                                 )}
-
                                 <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px' }}>{item.price.toFixed(2)}</td>
                                 <td style={{ ...styles.td, ...styles.tdRight, paddingTop: '0px', fontWeight: 'bold' }}>{(item.quantity * item.price).toFixed(2)}</td>
                             </tr>
@@ -212,11 +207,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                                 )}
                             </td>
                             <td style={{ ...styles.td, ...styles.tdCenter }}>{item.quantity}</td>
-                            
                             {invoice.isDiscountable && (
                                 <td style={{ ...styles.td, ...styles.tdRight }}>{(item.originalPrice || item.price).toFixed(2)}</td>
                             )}
-
                             <td style={{ ...styles.td, ...styles.tdRight }}>{item.price.toFixed(2)}</td>
                             <td style={{ ...styles.td, ...styles.tdRight }}>{(item.quantity * item.price).toFixed(2)}</td>
                         </tr>
@@ -234,76 +227,30 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 
                 {isServiceOrder ? (
                     <div style={{border: '2px solid #000', padding: '10px', marginTop: '15px', borderRadius: '4px'}}>
-                        <div style={styles.totalRow}>
-                            <strong>Total Job Amount:</strong>
-                            <span>Rs. {jobTotal.toFixed(2)}</span>
-                        </div>
-                        <div style={styles.totalRow}>
-                            <strong>Advance Paid:</strong>
-                            <span>Rs. {jobAdvance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>Total Job Amount:</strong><span>Rs. {jobTotal.toFixed(2)}</span></div>
+                        <div style={styles.totalRow}><strong>Advance Paid:</strong><span>Rs. {jobAdvance.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
-                            <strong>Balance Due:</strong>
-                            <span>Rs. {jobBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}><strong>Balance Due:</strong><span>Rs. {jobBalance.toFixed(2)}</span></div>
                     </div>
                 ) : isOrder ? (
                      <div style={{border: '1px dashed #000', padding: '10px', marginTop: '15px'}}>
                         <div style={styles.totalRow}><strong>Subtotal:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
-                        {deliveryCharge > 0 && (
-                            <div style={styles.totalRow}><strong>Delivery Charge:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
-                        )}
+                        {deliveryCharge > 0 && (<div style={styles.totalRow}><strong>Delivery Charge:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>)}
                         <div style={styles.totalRow}><strong>Grand Total:</strong><span>Rs. {orderTotal.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={styles.totalRow}>
-                            <strong>Advance Paid:</strong>
-                            <span>Rs. {orderAdvance.toFixed(2)}</span>
-                        </div>
-                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}>
-                            <strong>Balance Due:</strong>
-                            <span>Rs. {orderBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>Advance Paid:</strong><span>Rs. {orderAdvance.toFixed(2)}</span></div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.2em', marginTop: '5px' }}><strong>Balance Due:</strong><span>Rs. {orderBalance.toFixed(2)}</span></div>
                      </div>
                 ) : (
                     <>
-                        <div style={styles.totalRow}>
-                            <strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong>
-                            <span>Rs. {invSubtotal.toFixed(2)}</span>
-                        </div>
-                        
-                        {invoice.isDiscountable && totalSave > 0 && (
-                            <div style={styles.totalRow}>
-                                <span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span>
-                                <span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span>
-                            </div>
-                        )}
-
-                        {deliveryCharge > 0 && (
-                            <div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>
-                        )}
-
-                        {/* ✅ Show Service Charge if greater than 0 */}
-                        {serviceCharge > 0 && (
-                            <div style={styles.totalRow}>
-                                <strong>Service Charge:</strong>
-                                <span>Rs. {serviceCharge.toFixed(2)}</span>
-                            </div>
-                        )}
-
-                        <div style={styles.totalRow}>
-                            <strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong>
-                            <span>Rs. {invTotal.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>{isSinhala ? "එකතුව" : "Subtotal"}:</strong><span>Rs. {invSubtotal.toFixed(2)}</span></div>
+                        {invoice.isDiscountable && totalSave > 0 && (<div style={styles.totalRow}><span>{isSinhala ? "ඔබේ ඉතිරිය" : "Your Total Save"}:</span><span style={{ fontWeight: 'bold' }}>Rs. {totalSave.toFixed(2)}</span></div>)}
+                        {deliveryCharge > 0 && (<div style={styles.totalRow}><strong>Delivery:</strong><span>Rs. {deliveryCharge.toFixed(2)}</span></div>)}
+                        {serviceCharge > 0 && (<div style={styles.totalRow}><strong>Service Charge:</strong><span>Rs. {serviceCharge.toFixed(2)}</span></div>)}
+                        <div style={styles.totalRow}><strong>{isSinhala ? "මුළු මුදල" : "Grand Total"}:</strong><span>Rs. {invTotal.toFixed(2)}</span></div>
                         <hr style={styles.hr} />
-                        <div style={styles.totalRow}>
-                            <strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong>
-                            <span>Rs. {invReceived.toFixed(2)}</span>
-                        </div>
-                        <div style={{ ...styles.totalRow, fontSize: '1.1em' }}>
-                            <strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong>
-                            <span>Rs. {invBalance.toFixed(2)}</span>
-                        </div>
+                        <div style={styles.totalRow}><strong>{isSinhala ? "ලැබුණු මුදල" : "Amount Received"}:</strong><span>Rs. {invReceived.toFixed(2)}</span></div>
+                        <div style={{ ...styles.totalRow, fontSize: '1.1em' }}><strong>{isSinhala ? "ඉතිරි මුදල" : "Balance"}:</strong><span>Rs. {invBalance.toFixed(2)}</span></div>
                     </>
                 )}
             </div>
@@ -319,7 +266,6 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       )}
 
-      {/* ✅ CUSTOM RETURN POLICY (Shows on all invoices if set) */}
       {companyInfo?.returnPolicy && (
         <div style={{marginTop: 20, borderTop: '1px dotted #ccc', paddingTop: 10, fontSize: '0.8em', textAlign: 'center', color: '#444'}}>
             <strong style={{textTransform: 'uppercase', fontSize: '0.9em'}}>Return Policy</strong>
@@ -340,6 +286,7 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   );
 };
 
+// Main Component
 const InvoiceViewer = () => {
   const { invoiceId } = useParams();
   const navigate = useNavigate(); 
@@ -358,7 +305,6 @@ const InvoiceViewer = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
   
-  // ✅ 1. Get Internal User Logic
   const getCurrentInternal = () => {
     try {
       const stored = localStorage.getItem("internalLoggedInUser");
@@ -367,17 +313,17 @@ const InvoiceViewer = () => {
   };
   const internalLoggedInUser = getCurrentInternal();
 
-  // ✅ 2. Tabs Configuration
-  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "Settings", "Help"];
+  const allTabs = ["Dashboard", "Invoicing", "Service and Orders", "Inventory", "Sales Report", "Finance", "Items & Customers", "Admin", "KOD", "Settings", "Help"];
+  
   const [enableServiceOrders, setEnableServiceOrders] = useState(false);
+  const [enableKOD, setEnableKOD] = useState(false);
 
-  // ✅ 3. Filter Visible Tabs
   const visibleTabs = allTabs.filter(tab => {
     if (tab === "Service and Orders" && !enableServiceOrders) return false;
+    if (tab === "KOD" && !enableKOD) return false;
     
     if (internalLoggedInUser?.isAdmin) return true;
 
-    // Restricted tabs for non-admins
     const restrictedTabs = ["Finance", "Admin", "Settings"];
     return !restrictedTabs.includes(tab);
   });
@@ -388,6 +334,23 @@ const InvoiceViewer = () => {
         window.print();
     }, 50);
   };
+
+  // ✅ UPDATED: Fixed Title & Favicon
+  useEffect(() => {
+    // 1. Force Tab Title (Always "Wayne ERP Systems")
+    document.title = "Wayne ERP Systems";
+
+    // 2. Force Tab Icon (Always "/my-logo.ico")
+    const logoUrl = "/my-logo.ico"; 
+    
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.getElementsByTagName('head')[0].appendChild(link);
+    }
+    link.href = logoUrl;
+  }, []); // Run once on mount
 
   useEffect(() => {
     const fetchInvoiceData = async (user) => {
@@ -418,8 +381,8 @@ const InvoiceViewer = () => {
         if (settingsSnap.exists()) {
           const settingsData = settingsSnap.data();
           setCompanyInfo(settingsData);
-          // ✅ Set Feature Toggle from Settings
           setEnableServiceOrders(settingsData.enableServiceOrders === true);
+          setEnableKOD(settingsData.enableKOD === true);
 
           if (!settingsData.companyLogo) { setIsImageLoaded(true); }
         } else {
@@ -491,30 +454,18 @@ const InvoiceViewer = () => {
         }
       `}</style>
 
-      {/* ✅ SIDEBAR ADDED HERE (No Print) */}
+      {/* Sidebar */}
       <div className="no-print">
+          <div style={styles.sidebarTriggerArea} onMouseEnter={() => setIsSidebarOpen(true)} />
           <div
-            style={styles.sidebarTriggerArea}
-            onMouseEnter={() => setIsSidebarOpen(true)}
-          />
-          <div
-            style={{
-              ...styles.sidebar,
-              ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed),
-            }}
-            onMouseLeave={() => {
-              setIsSidebarOpen(false);
-              setHoveredTab(null);
-            }}
+            style={{ ...styles.sidebar, ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed) }}
+            onMouseLeave={() => { setIsSidebarOpen(false); setHoveredTab(null); }}
           >
             <div style={styles.sidebarTabs}>
               {visibleTabs.map((tab) => (
                 <div
                   key={tab}
-                  style={{
-                    ...styles.sidebarTab,
-                    ...(hoveredTab === tab ? styles.sidebarTabHover : {}),
-                  }}
+                  style={{ ...styles.sidebarTab, ...(hoveredTab === tab ? styles.sidebarTabHover : {}) }}
                   onClick={() => navigate('/dashboard')}
                   onMouseEnter={() => setHoveredTab(tab)}
                   onMouseLeave={() => setHoveredTab(null)}
@@ -550,7 +501,7 @@ const InvoiceViewer = () => {
   );
 };
 
-// ✅ UPDATED Theme Colors & Styles for Sidebar
+// Styles
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa' };
 
 const styles = {
@@ -587,7 +538,7 @@ const styles = {
     fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" 
   },
 
-  // ✅ SIDEBAR STYLES (MATCHING DASHBOARD)
+  // Sidebar
   sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 3000, },
   sidebar: { 
       position: 'fixed', top: 0, left: 0, bottom: 0, width: '260px', 
@@ -607,7 +558,7 @@ const styles = {
   },
   sidebarTabHover: { color: '#fff', background: 'rgba(255, 255, 255, 0.15)', },
 
-  // --- Invoice Body Styles ---
+  // Invoice Layout
   invoiceBox: { padding: '5px', color: '#000', boxSizing: 'border-box' },
   logo: { maxWidth: '80px', maxHeight: '80px', marginBottom: '10px' },
   companyNameText: { fontSize: '1.4em', margin: '0 0 5px 0', fontWeight: 'bold' },
