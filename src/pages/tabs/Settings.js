@@ -502,7 +502,7 @@ const Settings = () => {
             <div style={{borderTop: '1px solid #93c5fd', marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 'bold'}}><span>Total Available:</span><span>{smsCredits + extraSmsCredits}</span></div>
         </div>
         <div style={styles.formGroup}>
-            <label style={styles.label}>Send invoice to customer as SMS</label>
+            <label style={styles.label}>Send invoice to customer as SMS after save the invoice</label>
             <div style={styles.toggleContainer}>
                 <button onClick={() => handleSendInvoiceSmsChange(true)} style={sendInvoiceSms ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
                 <button onClick={() => handleSendInvoiceSmsChange(false)} style={!sendInvoiceSms ? styles.toggleButtonActive : styles.toggleButton}>No</button>

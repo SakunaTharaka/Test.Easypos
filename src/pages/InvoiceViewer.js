@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom'; 
 import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getFunctions, httpsCallable } from "firebase/functions"; // ✅ Added for SMS
 
 // InvoiceHeader Component
-const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady, isServiceOrder }) => {
+const InvoiceHeader = ({ companyInfo, onPrint, onSendSms, isPrintReady, isServiceOrder }) => {
     return (
         <div style={styles.topBar}>
             <div style={styles.headerLeft}>
@@ -27,6 +28,15 @@ const InvoiceHeader = ({ companyInfo, onPrint, isPrintReady, isServiceOrder }) =
             
             <div style={styles.headerRight}>
                 <div style={styles.printButtonsContainer}>
+                    {/* ✅ NEW SEND SMS BUTTON */}
+                    <button 
+                        onClick={onSendSms} 
+                        disabled={!isPrintReady} 
+                        style={isPrintReady ? styles.smsButton : styles.headerPrintBtnDisabled}
+                    >
+                        Send SMS
+                    </button>
+
                     <button onClick={() => onPrint('80mm')} disabled={!isPrintReady} style={isPrintReady ? styles.headerPrintBtn : styles.headerPrintBtnDisabled}>
                         Print 80mm
                     </button>
@@ -304,6 +314,14 @@ const InvoiceViewer = () => {
   // Sidebar Logic
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
+
+  // ✅ SMS STATE
+  const [showSmsPopup, setShowSmsPopup] = useState(false);
+  const [smsMobileNumber, setSmsMobileNumber] = useState("");
+  const [isSendingSms, setIsSendingSms] = useState(false);
+  const [smsMessagePreview, setSmsMessagePreview] = useState("");
+  const [smsCreditsEstimate, setSmsCreditsEstimate] = useState(1);
+  const smsInputRef = useRef(null); 
   
   const getCurrentInternal = () => {
     try {
@@ -335,14 +353,10 @@ const InvoiceViewer = () => {
     }, 50);
   };
 
-  // ✅ UPDATED: Fixed Title & Favicon
+  // ✅ Force Tab Title & Favicon
   useEffect(() => {
-    // 1. Force Tab Title (Always "Wayne ERP Systems")
     document.title = "Wayne ERP Systems";
-
-    // 2. Force Tab Icon (Always "/my-logo.ico")
     const logoUrl = "/my-logo.ico"; 
-    
     let link = document.querySelector("link[rel~='icon']");
     if (!link) {
       link = document.createElement('link');
@@ -350,7 +364,7 @@ const InvoiceViewer = () => {
       document.getElementsByTagName('head')[0].appendChild(link);
     }
     link.href = logoUrl;
-  }, []); // Run once on mount
+  }, []); 
 
   useEffect(() => {
     const fetchInvoiceData = async (user) => {
@@ -399,6 +413,83 @@ const InvoiceViewer = () => {
     const unsubscribe = onAuthStateChanged(auth, (user) => { fetchInvoiceData(user); });
     return () => unsubscribe();
   }, [invoiceId]);
+
+  // ✅ Auto-Focus SMS Input when popup opens
+  useEffect(() => {
+    if (showSmsPopup) {
+        setTimeout(() => smsInputRef.current?.focus(), 50);
+    }
+  }, [showSmsPopup]);
+
+  // ✅ GENERATE SMS PREVIEW (Matches Invoice.js Logic)
+  const generateSmsPreview = (inv, appSettings) => {
+      const company = (appSettings?.companyName || "Store").substring(0, 25); 
+      const invNo = inv.invoiceNumber;
+      const total = inv.total.toFixed(2);
+      
+      let itemsStr = inv.items
+          .filter(i => !i.isFreeIssue) 
+          .map(i => `${i.itemName} x${i.quantity}`)
+          .join(", ");
+      
+      if (itemsStr.length > 600) {
+          itemsStr = itemsStr.substring(0, 597) + "...";
+      }
+
+      return `${company}\nInv:${invNo}\nItems:${itemsStr}\nTotal:${total}\nThank you!`;
+  };
+
+  // ✅ CLICK HANDLER: Prepare Data & Show Modal
+  const handleOpenSmsModal = () => {
+      if(!invoice) return;
+      
+      setSmsMobileNumber(invoice.customerTelephone || "");
+      const msg = generateSmsPreview(invoice, companyInfo);
+      setSmsMessagePreview(msg);
+      
+      // Credit Calculation: 1 credit per 160 characters
+      const estimatedCost = Math.ceil(msg.length / 160);
+      setSmsCreditsEstimate(estimatedCost);
+
+      setShowSmsPopup(true);
+  };
+
+  // ✅ SEND SMS FUNCTION
+  const handleSendSms = async () => {
+      if (isSendingSms) return; 
+
+      if (!smsMobileNumber || smsMobileNumber.length < 9) {
+          alert("Please enter a valid mobile number.");
+          return;
+      }
+      
+      setIsSendingSms(true); 
+      const functions = getFunctions();
+      const sendInvoiceSmsFn = httpsCallable(functions, 'sendInvoiceSms');
+      
+      try {
+          const dateStr = invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : new Date().toLocaleDateString();
+          
+          await sendInvoiceSmsFn({
+              mobile: smsMobileNumber,
+              invoiceNo: invoice.invoiceNumber,
+              customerName: invoice.customerName,
+              amount: invoice.total,
+              date: dateStr,
+              customMessage: smsMessagePreview,
+              creditsToDeduct: smsCreditsEstimate
+          });
+          
+          alert("SMS Sent Successfully!");
+          setShowSmsPopup(false);
+          setSmsMobileNumber("");
+      } catch (error) {
+          console.error(error);
+          alert("Failed to send SMS: " + error.message);
+      } finally {
+          setIsSendingSms(false); 
+      }
+  };
 
   if (loading) return <p style={{ textAlign: 'center', marginTop: '50px' }}>Loading Document...</p>;
   if (!invoice) return <p style={{ textAlign: 'center', marginTop: '50px' }}>Document not found.</p>;
@@ -481,6 +572,7 @@ const InvoiceViewer = () => {
         <InvoiceHeader 
             companyInfo={companyInfo} 
             onPrint={handlePrint} 
+            onSendSms={handleOpenSmsModal} 
             isPrintReady={isPrintReady}
             isServiceOrder={isServiceOrder}
         />
@@ -497,6 +589,150 @@ const InvoiceViewer = () => {
             />
         </div>
       </div>
+
+      {/* ✅ SMS POPUP MODAL (No Print) */}
+      {showSmsPopup && (
+        <div style={styles.modalOverlay} className="no-print">
+          <div style={styles.modalContent}>
+            {/* Header */}
+            <div style={{background: 'linear-gradient(135deg, #00A1FF 0%, #0077FF 100%)', padding: '20px', textAlign: 'center'}}>
+                <h3 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: '600' }}>Send Invoice SMS</h3>
+            </div>
+
+            <div style={{padding: '24px'}}>
+                <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#4b5563', lineHeight: '1.5' }}>
+                    Send this invoice details to the customer via SMS.
+                </p>
+                
+                {/* Credit Info */}
+                <div style={{
+                    background: '#eff6ff', 
+                    padding: '12px 16px', 
+                    borderRadius: '8px', 
+                    marginBottom: '24px', 
+                    fontSize: '14px', 
+                    color: '#1e40af', 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    border: '1px solid #bfdbfe'
+                }}>
+                    <span style={{fontWeight: '500'}}>Estimated Cost:</span>
+                    <strong style={{fontSize: '16px'}}>
+                        {smsMessagePreview.length} chars ({smsCreditsEstimate} Credits)
+                    </strong>
+                </div>
+
+                {/* Input Field */}
+                <div style={{marginBottom: '24px'}}>
+                    <label style={{display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase'}}>
+                        Mobile Number
+                    </label>
+                    <input 
+                        ref={smsInputRef} 
+                        type="text" 
+                        value={smsMobileNumber}
+                        disabled={isSendingSms} 
+                        onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            if (val.length <= 10) setSmsMobileNumber(val);
+                        }}
+                        onKeyDown={(e) => { 
+                            if (isSendingSms) return; 
+                            if (e.key === 'Enter') handleSendSms();
+                            if (e.key === 'Escape') setShowSmsPopup(false); 
+                        }}
+                        placeholder="07XXXXXXXX"
+                        maxLength="10"
+                        style={{
+                            width: '100%', 
+                            padding: '14px', 
+                            fontSize: '18px', 
+                            border: '2px solid #e5e7eb', 
+                            borderRadius: '8px', 
+                            textAlign: 'center',
+                            letterSpacing: '1.5px',
+                            fontWeight: '600',
+                            color: isSendingSms ? '#9ca3af' : '#1f2937',
+                            backgroundColor: isSendingSms ? '#f3f4f6' : 'white',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                            cursor: isSendingSms ? 'not-allowed' : 'text'
+                        }}
+                        onFocus={(e) => !isSendingSms && (e.target.style.borderColor = '#00A1FF')}
+                        onBlur={(e) => !isSendingSms && (e.target.style.borderColor = '#e5e7eb')}
+                    />
+                </div>
+                
+                {/* Preview */}
+                <div style={{textAlign: 'left', marginBottom: '24px'}}>
+                    <label style={{display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase'}}>
+                        Message Preview
+                    </label>
+                    <div style={{
+                        fontSize: '12px', 
+                        color: '#4b5563', 
+                        border: '1px solid #e5e7eb', 
+                        borderRadius: '8px', 
+                        padding: '12px', 
+                        background: '#f9fafb', 
+                        whiteSpace: 'pre-wrap', 
+                        maxHeight: '120px', 
+                        overflowY: 'auto',
+                        lineHeight: '1.4'
+                    }}>
+                        {smsMessagePreview}
+                    </div>
+                </div>
+
+                <div style={{display: 'flex', gap: '12px'}}>
+                    <button 
+                        onClick={() => { if (!isSendingSms) setShowSmsPopup(false); }} 
+                        style={{ 
+                            padding: '14px 20px', 
+                            background: 'white', 
+                            color: isSendingSms ? '#9ca3af' : '#374151', 
+                            border: '1px solid #d1d5db',
+                            borderRadius: '8px', 
+                            cursor: isSendingSms ? 'not-allowed' : 'pointer',
+                            fontWeight: '600',
+                            fontSize: '14px',
+                            flex: 1,
+                            transition: 'background 0.2s'
+                        }}
+                        disabled={isSendingSms}
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleSendSms} 
+                        style={{ 
+                            padding: '14px 20px', 
+                            background: isSendingSms ? '#93c5fd' : '#00A1FF', 
+                            color: 'white', 
+                            border: 'none',
+                            borderRadius: '8px', 
+                            cursor: isSendingSms ? 'wait' : 'pointer',
+                            fontWeight: '600',
+                            fontSize: '14px',
+                            flex: 1,
+                            boxShadow: isSendingSms ? 'none' : '0 4px 6px -1px rgba(0, 161, 255, 0.3)',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}
+                        disabled={isSendingSms}
+                    >
+                        {isSendingSms ? "Sending..." : "Send SMS"}
+                    </button>
+                </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </>
   );
 };
@@ -537,6 +773,12 @@ const styles = {
     background: "rgba(255, 255, 255, 0.1)", color: "rgba(255, 255, 255, 0.5)", cursor: "not-allowed", 
     fontWeight: "600", fontSize: "14px", fontFamily: "'Inter', sans-serif" 
   },
+  smsButton: {
+    padding: "10px 18px", border: "1px solid rgba(255, 255, 255, 0.3)", borderRadius: "8px",
+    background: "#10b981", color: "#fff", cursor: "pointer", fontWeight: "600",
+    fontSize: "14px", fontFamily: "'Inter', sans-serif", backdropFilter: 'blur(10px)', transition: 'all 0.3s ease',
+    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+  },
 
   // Sidebar
   sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 3000, },
@@ -575,6 +817,22 @@ const styles = {
   hr: { border: 'none', borderTop: '1px dashed #000' },
   footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
   creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
+
+  // Modal Styles
+  modalOverlay: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 2000,
+  },
+  modalContent: {
+    width: '420px',
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+    fontFamily: "'Inter', sans-serif"
+  }
 };
 
 export default InvoiceViewer;
