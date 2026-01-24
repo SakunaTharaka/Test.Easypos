@@ -351,8 +351,8 @@ const Dashboard = () => {
           <div style={styles.inventoryContent}>
             {activeInventoryTab === "Stock-In" && <Inventory internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Waste & Usage" && <StockOut internalUser={internalLoggedInUser} />}
-            {/* ✅ RENDER Customer Return Component */}
-            {activeInventoryTab === "Customer Return" && <CustomerReturn />}
+            {/* ✅ UPDATED: Passing Internal User Prop */}
+            {activeInventoryTab === "Customer Return" && <CustomerReturn internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Buy&Sell Balance" && <StockOutBal />}
             {activeInventoryTab === "Add Production" && showProductionTabs && <AddProduction internalUser={internalLoggedInUser} />}
             {activeInventoryTab === "Production Balance" && showProductionTabs && <ProductionBalance />}

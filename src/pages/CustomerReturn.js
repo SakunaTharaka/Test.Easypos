@@ -18,11 +18,11 @@ import {
 import { 
   AiOutlineSearch, 
   AiOutlineReload, 
-  AiOutlineLoading,
-  AiOutlinePrinter,
-  AiOutlineDelete,
-  AiOutlineLeft,
-  AiOutlineRight
+  AiOutlineLoading, 
+  AiOutlinePrinter, 
+  AiOutlineDelete, 
+  AiOutlineLeft, 
+  AiOutlineRight 
 } from "react-icons/ai";
 
 // --- INTERNAL PRINT COMPONENT ---
@@ -79,6 +79,7 @@ const ReturnReceipt = ({ data, companyName }) => {
                 <p style={{ margin: '5px 0', fontSize: '12px' }}>Return ID: {data.returnId}</p>
                 <p style={{ margin: 0, fontSize: '12px' }}>Orig. Inv: {data.originalInvoice}</p>
                 <p style={{ margin: 0, fontSize: '12px' }}>Date: {data.createdAt?.toDate ? data.createdAt.toDate().toLocaleString() : new Date().toLocaleString()}</p>
+                <p style={{ margin: 0, fontSize: '12px' }}>Processed By: {data.processedBy || "Admin"}</p>
             </div>
             
             <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', marginBottom: '10px' }}>
@@ -121,7 +122,8 @@ const ReturnReceipt = ({ data, companyName }) => {
     );
 };
 
-const CustomerReturn = () => {
+// ✅ MAIN COMPONENT
+const CustomerReturn = ({ internalUser }) => {
   const [invoiceId, setInvoiceId] = useState("");
   const [invoiceData, setInvoiceData] = useState(null);
   const [returnItems, setReturnItems] = useState({}); 
@@ -137,7 +139,7 @@ const CustomerReturn = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterDate, setFilterDate] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageCursors, setPageCursors] = useState([null]); // Stores the first doc of each page
+  const [pageCursors, setPageCursors] = useState([null]); 
   const [hasNextPage, setHasNextPage] = useState(false);
   const PAGE_SIZE = 40;
 
@@ -159,7 +161,6 @@ const CustomerReturn = () => {
       fetchSettings();
   }, []);
 
-  // --- SEARCH INVOICE TO RETURN ---
   const handleSearch = async () => {
     if (!invoiceId.trim()) return alert("Please enter an Invoice Number.");
     setLoading(true);
@@ -238,7 +239,6 @@ const CustomerReturn = () => {
 
     try {
       await runTransaction(db, async (transaction) => {
-        // --- READS ---
         const walletDocId = refundMethod.toLowerCase();
         let walletRef = null;
         let walletSnap = null;
@@ -259,7 +259,6 @@ const CustomerReturn = () => {
             }
         }
 
-        // --- CHECKS ---
         if (walletRef && walletSnap) {
             if (!walletSnap.exists()) throw new Error(`Wallet ${refundMethod} not found.`);
             const currentBal = Number(walletSnap.data().balance) || 0;
@@ -268,7 +267,6 @@ const CustomerReturn = () => {
             }
         }
 
-        // --- WRITES ---
         const returnId = "RET-" + Date.now();
         const expenseId = "EXP-" + Date.now();
         const returnDate = serverTimestamp();
@@ -308,7 +306,8 @@ const CustomerReturn = () => {
             items: itemsProcessedData,
             createdAt: returnDate,
             dateString: dateString,
-            processedBy: "Admin"
+            processedBy: internalUser?.username || "Admin",
+            isLocked: false // ✅ Default to unlocked
         });
 
         const expenseRef = doc(db, uid, "expenses", "expense_list", expenseId);
@@ -326,7 +325,8 @@ const CustomerReturn = () => {
             cashBook: refundMethod,
             cashBookId: walletDocId, 
             relatedReturnId: returnId,
-            type: 'expense' 
+            type: 'expense',
+            isLocked: false // ✅ Default to unlocked
         });
       });
 
@@ -335,7 +335,6 @@ const CustomerReturn = () => {
       setInvoiceId("");
       setReturnItems({});
       setRefundTotal(0);
-      // Refresh History
       setCurrentPage(1);
       setPageCursors([null]);
       fetchHistory(1, searchQuery, filterDate);
@@ -350,7 +349,14 @@ const CustomerReturn = () => {
 
   const handleDeleteReturn = async (returnData) => {
     if (!returnData || !returnData.id) return alert("Error: Missing Return ID.");
-    if (!window.confirm("🔴 Undo this return? Money will be added back to wallet, and items removed from stock.")) return;
+    
+    // ✅ CHECK: If return is locked by reconciliation
+    if (returnData.isLocked) {
+        alert("⛔ Access Denied: This return has been reconciled and LOCKED.\n\nYou cannot delete transactions that have already been finalized in the daily reconciliation.");
+        return;
+    }
+
+    if (!window.confirm("Undo this return? Money will be added back to wallet, and items removed from stock.")) return;
 
     setLoading(true);
     const user = auth.currentUser;
@@ -387,7 +393,6 @@ const CustomerReturn = () => {
         });
 
         alert("Return Deleted & Reverted!");
-        // Refresh Current View
         fetchHistory(currentPage, searchQuery, filterDate);
 
     } catch (error) {
@@ -397,7 +402,6 @@ const CustomerReturn = () => {
     }
   };
 
-  // --- UPDATED HISTORY FETCH WITH SEARCH & PAGINATION ---
   const fetchHistory = async (page, search, date) => {
       const user = auth.currentUser;
       if (!user) return;
@@ -407,36 +411,23 @@ const CustomerReturn = () => {
           const ref = collection(db, user.uid, "returns", "return_list");
           let q;
 
-          // 1. Search Mode (Overrides pagination)
           if (search && search.trim() !== "") {
               const term = search.trim();
               if (term.toUpperCase().startsWith("RET")) {
                   q = query(ref, where("returnId", "==", term));
               } else {
-                  // Assume Invoice Search
                   q = query(ref, where("originalInvoice", "==", term));
               }
               const snap = await getDocs(q);
               setRecentReturns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
               setHasNextPage(false);
           } 
-          // 2. Date Filter Mode
           else if (date && date !== "") {
-               // Assuming 'dateString' field exists (YYYY-MM-DD). If not, range query on createdAt is needed.
-               // We added dateString in the process function above, so this works for NEW records.
-               // For old records without dateString, this might return empty.
-               q = query(ref, where("dateString", "==", date)); // Simple equality if field exists
-               
-               // If you want to support older records without dateString, you need a range query on createdAt:
-               // const start = new Date(date); start.setHours(0,0,0,0);
-               // const end = new Date(date); end.setHours(23,59,59,999);
-               // q = query(ref, where("createdAt", ">=", start), where("createdAt", "<=", end));
-               
+               q = query(ref, where("dateString", "==", date)); 
                const snap = await getDocs(q);
                setRecentReturns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
                setHasNextPage(false);
           }
-          // 3. Pagination Mode (Default)
           else {
               let baseQuery = query(ref, orderBy("createdAt", "desc"));
               
@@ -450,12 +441,11 @@ const CustomerReturn = () => {
               const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
               setRecentReturns(docs);
 
-              // Setup cursor for next page
               if (docs.length === PAGE_SIZE) {
                   const lastDoc = snap.docs[snap.docs.length - 1];
                   setPageCursors(prev => {
                       const newCursors = [...prev];
-                      newCursors[page] = lastDoc; // Store cursor for next page (index matches page number)
+                      newCursors[page] = lastDoc; 
                       return newCursors;
                   });
                   setHasNextPage(true);
@@ -472,9 +462,7 @@ const CustomerReturn = () => {
       }
   };
 
-  // Triggers
   useEffect(() => {
-      // Reset to page 1 when filters change
       setCurrentPage(1);
       setPageCursors([null]);
   }, [searchQuery, filterDate]);
@@ -497,7 +485,6 @@ const CustomerReturn = () => {
         <p style={styles.subHeader}>Process returns, restock items, and issue refunds.</p>
       </div>
 
-      {/* --- INVOICE LOOKUP SECTION --- */}
       <div style={styles.card}>
         <div style={styles.searchBar}>
             <input type="text" placeholder="Scan Invoice Number (e.g., INV-2025-001)" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} style={styles.input} />
@@ -545,7 +532,6 @@ const CustomerReturn = () => {
           </div>
       )}
       
-      {/* --- HISTORY SECTION --- */}
       <div style={{...styles.card, marginTop: '30px'}}>
           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'15px', flexWrap:'wrap', gap:'10px'}}>
              <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
@@ -553,7 +539,6 @@ const CustomerReturn = () => {
                  <h3 style={{...styles.cardTitle, margin: 0}}>Return History</h3>
              </div>
              
-             {/* HISTORY CONTROLS */}
              <div style={{display:'flex', gap:'10px'}}>
                  <input 
                     type="text" 
@@ -576,23 +561,32 @@ const CustomerReturn = () => {
 
           <div style={{overflowX: 'auto'}}>
             <table style={styles.table}>
-                <thead><tr><th style={styles.th}>Return ID</th><th style={styles.th}>Date</th><th style={styles.th}>Original Inv</th><th style={styles.th}>Refund</th><th style={styles.th}>Action</th></tr></thead>
+                <thead><tr><th style={styles.th}>Return ID</th><th style={styles.th}>Date</th><th style={styles.th}>Original Inv</th><th style={styles.th}>Refund</th><th style={styles.th}>Processed By</th><th style={styles.th}>Action</th></tr></thead>
                 <tbody>
                     {historyLoading ? (
-                         <tr><td colSpan="5" style={styles.tdCenter}><AiOutlineLoading className="spin" /> Loading...</td></tr>
+                         <tr><td colSpan="6" style={styles.tdCenter}><AiOutlineLoading className="spin" /> Loading...</td></tr>
                     ) : recentReturns.length === 0 ? (
-                         <tr><td colSpan="5" style={styles.tdCenter}>No returns found matching criteria.</td></tr> 
+                         <tr><td colSpan="6" style={styles.tdCenter}>No returns found matching criteria.</td></tr> 
                     ) : (
                       recentReturns.map((r, idx) => (
-                          <tr key={idx}>
-                              <td style={styles.td}>{r.returnId}</td>
+                          <tr key={idx} style={r.isLocked ? {backgroundColor: '#f3f4f6', opacity: 0.8} : {}}>
+                              <td style={styles.td}>
+                                  {r.returnId}
+                                  {r.isLocked && <span style={{marginLeft: '5px'}}>🔒</span>}
+                              </td>
                               <td style={styles.td}>{r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString() : r.dateString}</td>
                               <td style={styles.td}>{r.originalInvoice}</td>
                               <td style={{...styles.td, color: '#c0392b', fontWeight:'bold'}}>- Rs. {Number(r.refundAmount).toFixed(2)}</td>
+                              <td style={styles.td}>{r.processedBy || "Admin"}</td>
                               <td style={{...styles.td, whiteSpace: 'nowrap'}}>
                                   <div style={{display:'flex', gap:'10px'}}>
                                       <button onClick={() => handlePrint(r)} style={styles.printBtn}><AiOutlinePrinter /> Print</button>
-                                      <button onClick={() => handleDeleteReturn(r)} style={styles.deleteBtn}><AiOutlineDelete /> Delete</button>
+                                      {/* ✅ Conditional Rendering or Disabled Button for Locked Items */}
+                                      {r.isLocked ? (
+                                           <span style={{fontSize: '11px', color: '#999', fontStyle: 'italic', padding: '8px'}}>Locked</span>
+                                      ) : (
+                                           <button onClick={() => handleDeleteReturn(r)} style={styles.deleteBtn}><AiOutlineDelete /> Delete</button>
+                                      )}
                                   </div>
                               </td>
                           </tr>
@@ -602,7 +596,6 @@ const CustomerReturn = () => {
             </table>
           </div>
           
-          {/* PAGINATION CONTROLS */}
           {!searchQuery && !filterDate && !historyLoading && (
               <div style={styles.pagination}>
                   <button 

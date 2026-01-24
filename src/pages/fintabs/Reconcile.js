@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useContext, useRef } from 'rea
 import { db, auth } from '../../firebase';
 import { 
     collection, query, where, getDocs, doc, setDoc, addDoc, 
-    serverTimestamp, orderBy, limit, startAfter, endBefore, arrayUnion 
+    serverTimestamp, orderBy, limit, startAfter, endBefore, arrayUnion, writeBatch 
 } from 'firebase/firestore';
 import { CashBookContext } from '../../context/CashBookContext';
 import { AiOutlineLock, AiOutlineUnlock, AiOutlineEye, AiOutlinePrinter, AiOutlineLeft, AiOutlineRight } from 'react-icons/ai';
@@ -71,10 +71,10 @@ const ReconciliationReportModal = ({ report, onClose }) => {
                                             <tbody>
                                                 {value.list.map((item, idx) => (
                                                     <tr key={idx}>
-                                                        <td>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</td>
+                                                        <td>{item.invoiceNumber || item.returnId || item.expenseId || item.paymentId || 'N/A'}</td>
                                                         <td>{item.details || item.customerName || item.receiverName || 'N/A'}</td>
-                                                        <td>{item.issuedBy || item.createdBy || item.paidBy}</td>
-                                                        <td>Rs. {(item.total || item.amount || 0).toFixed(2)}</td>
+                                                        <td>{item.issuedBy || item.processedBy || item.createdBy || item.paidBy}</td>
+                                                        <td>Rs. {(item.total || item.refundAmount || item.amount || 0).toFixed(2)}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -154,20 +154,24 @@ const Reconcile = () => {
                 }
             }
 
-            // 2. Fetch Transactions
-            const [invoicesSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
+            // 2. Fetch Transactions (Invoices, Returns, Expenses, Payments)
+            const [invoicesSnap, returnsSnap, expensesSnap, stockPaymentsSnap] = await Promise.all([
                 getDocs(query(
                     collection(db, uid, 'invoices', 'invoice_list'), 
                     where('createdAt', queryOperator, queryStartTime), 
                     where('createdAt', '<=', endOfDay)
                 )),
-                
+                // ✅ Added Returns Fetching
+                getDocs(query(
+                    collection(db, uid, 'returns', 'return_list'), 
+                    where('createdAt', queryOperator, queryStartTime), 
+                    where('createdAt', '<=', endOfDay)
+                )),
                 getDocs(query(
                     collection(db, uid, 'user_data', 'expenses'), 
                     where('createdAt', queryOperator, queryStartTime), 
                     where('createdAt', '<=', endOfDay)
                 )),
-                
                 getDocs(query(
                     collection(db, uid, 'stock_payments', 'payments'), 
                     where('paidAt', queryOperator, queryStartTime), 
@@ -175,8 +179,8 @@ const Reconcile = () => {
                 ))
             ]);
 
-            // Map data with ID for locking later
             const allInvoices = invoicesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const allReturns = returnsSnap.docs.map(d => ({ id: d.id, ...d.data() })); // ✅ Returns Data
             const allExpenses = expensesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
             const allStockPayments = stockPaymentsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
             
@@ -188,6 +192,7 @@ const Reconcile = () => {
                 cardSales: { list: cardSalesList, total: cardSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
                 onlineSales: { list: onlineSalesList, total: onlineSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
                 cashSales: { list: cashSalesList, total: cashSalesList.reduce((s,i) => s + (Number(i.total) || 0), 0) },
+                returns: { list: allReturns, total: allReturns.reduce((s,r) => s + (Number(r.refundAmount) || 0), 0) }, // ✅ Returns Summary
                 expenses: { list: allExpenses, total: allExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0) },
                 stockPayments: { list: allStockPayments, total: allStockPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0) },
             });
@@ -261,7 +266,7 @@ const Reconcile = () => {
         }
     }
     
-    // ✅ NEW: Reconcile Logic - Saves IDs to a single document
+    // ✅ RECONCILE & LOCK LOGIC
     const handleReconcile = async () => {
         if (!window.confirm("Save Reconciliation? This will lock the listed transactions from deletion.")) return;
         setIsReconciling(true);
@@ -270,7 +275,7 @@ const Reconcile = () => {
         const uid = user.uid;
         
         try {
-            // 1. Create the History Report (Snapshot of what happened)
+            // 1. Create History Report
             await addDoc(collection(db, uid, 'user_data', 'reconciliation_history'), {
                 summary: summaryData,
                 reconciliationDate: selectedDate,
@@ -278,11 +283,12 @@ const Reconcile = () => {
                 reconciledBy: internalUser?.username || user.email
             });
 
-            // 2. Lock Documents (Collect IDs)
+            // 2. Lock Documents (Both List & Individual Flags)
             const allItemsToLock = [
                 ...summaryData.cardSales.list,
                 ...summaryData.onlineSales.list,
                 ...summaryData.cashSales.list,
+                ...summaryData.returns.list, // ✅ Include Returns
                 ...summaryData.expenses.list,
                 ...summaryData.stockPayments.list
             ];
@@ -290,16 +296,49 @@ const Reconcile = () => {
             const allIds = allItemsToLock.map(item => item.id).filter(id => id);
 
             if (allIds.length > 0) {
-                // ✅ Store IDs in: uid -> user_data -> locked_documents -> {DATE}
+                // A. Add to Locked Documents List (Log)
                 const lockedDocsRef = doc(db, uid, 'user_data', 'locked_documents', selectedDate);
-                
                 await setDoc(lockedDocsRef, {
-                    lockedIds: arrayUnion(...allIds), // Append IDs to today's list
+                    lockedIds: arrayUnion(...allIds), 
                     lastReconciledAt: serverTimestamp()
                 }, { merge: true });
+
+                // ✅ B. Batch Update: Set 'isLocked: true' on individual documents
+                const batch = writeBatch(db);
+                
+                // Helper to add updates to batch
+                const addToBatch = (list, collectionPath) => {
+                    list.forEach(item => {
+                        if (item.id) {
+                            const ref = doc(db, uid, collectionPath, item.id);
+                            batch.update(ref, { isLocked: true });
+                        }
+                    });
+                };
+
+                addToBatch([...summaryData.cardSales.list, ...summaryData.onlineSales.list, ...summaryData.cashSales.list], 'invoices/invoice_list');
+                addToBatch(summaryData.returns.list, 'returns/return_list'); // ✅ Lock Returns
+                addToBatch(summaryData.expenses.list, 'user_data/expenses'); // Note: 'user_data/expenses' is a collection group usually, check exact path. 
+                // Based on fetch: collection(db, uid, 'user_data', 'expenses') -> Wait, expenses structure in fetch was collection(db, uid, 'user_data', 'expenses'). 
+                // Wait, in previous files expenses were in "expenses/expense_list". 
+                // Let's check the fetch query above: `collection(db, uid, 'user_data', 'expenses')`. 
+                // This looks inconsistent with CustomerReturn.js which uses `expenses/expense_list`.
+                // I will use the path defined in the fetch query of THIS file for consistency within this file, 
+                // BUT I should correct it if it's wrong. 
+                // *Self-Correction*: The user provided `CustomerReturn.js` uses `collection(db, uid, "expenses", "expense_list")`.
+                // The provided `Reconcile.js` (original) uses `collection(db, uid, 'user_data', 'expenses')`.
+                // This is a discrepancy in the user's existing code. I should probably stick to what `Reconcile.js` was doing to avoid breaking *it*, 
+                // OR fix it. Given I cannot see `Expenses.js`, I will stick to the path used in `fetchSummaryData` of `Reconcile.js`. 
+                // HOWEVER, for Returns, I know the path is `returns/return_list`.
+                
+                // For Expenses in THIS file, let's follow the fetch logic:
+                addToBatch(summaryData.expenses.list, 'user_data/expenses'); 
+                addToBatch(summaryData.stockPayments.list, 'stock_payments/payments');
+
+                await batch.commit();
             }
 
-            // 3. Mark Date as Reconciled (For UI Banner)
+            // 3. Mark Date
             if (!isDateReconciled) {
                 await setDoc(doc(db, uid, 'user_data', 'reconciliations', selectedDate), {
                     reconciledAt: serverTimestamp(),
@@ -326,9 +365,9 @@ const Reconcile = () => {
                 <ul style={styles.summaryList}>
                     {items.map((item, idx) => (
                         <li key={idx} style={styles.summaryListItem}>
-                          <span>{item.invoiceNumber || item.expenseId || item.paymentId || 'N/A'}</span>
-                          <span>Rs. {(Number(item.total) || Number(item.amount) || 0).toFixed(2)}</span>
-                          <span style={{color: '#6c757d'}}>by {item.issuedBy || item.createdBy || item.paidBy}</span>
+                          <span>{item.invoiceNumber || item.returnId || item.expenseId || item.paymentId || 'N/A'}</span>
+                          <span>Rs. {(Number(item.total) || Number(item.refundAmount) || Number(item.amount) || 0).toFixed(2)}</span>
+                          <span style={{color: '#6c757d'}}>by {item.issuedBy || item.processedBy || item.createdBy || item.paidBy}</span>
                         </li>
                     ))}
                 </ul>
@@ -360,6 +399,8 @@ const Reconcile = () => {
                         {renderSummarySection("Card Sales", summaryData.cardSales.list, summaryData.cardSales.total)}
                         {renderSummarySection("Online Sales", summaryData.onlineSales.list, summaryData.onlineSales.total)}
                         {renderSummarySection("Cash Sales", summaryData.cashSales.list, summaryData.cashSales.total)}
+                        {/* ✅ Added Returns Section */}
+                        {renderSummarySection("Returns", summaryData.returns.list, summaryData.returns.total)}
                         {renderSummarySection("Expenses", summaryData.expenses.list, summaryData.expenses.total)}
                         {renderSummarySection("Stock Payments", summaryData.stockPayments.list, summaryData.stockPayments.total)}
                     </div>
@@ -382,6 +423,7 @@ const Reconcile = () => {
                                 <th style={styles.th}>Reconciled At</th>
                                 <th style={styles.th}>Cash Sales</th>
                                 <th style={styles.th}>Card Sales</th>
+                                <th style={styles.th}>Returns</th> {/* ✅ Added Column */}
                                 <th style={styles.th}>Expenses</th>
                                 <th style={styles.th}>Stock Payments</th>
                                 <th style={styles.th}>Reconciled By</th>
@@ -389,12 +431,14 @@ const Reconcile = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {historyLoading ? (<tr><td colSpan="7" style={styles.noData}>Loading history...</td></tr>) 
+                            {historyLoading ? (<tr><td colSpan="8" style={styles.noData}>Loading history...</td></tr>) 
                             : reconciliationHistory.length > 0 ? reconciliationHistory.map(rec => (
                                 <tr key={rec.id}>
                                     <td style={styles.td}>{rec.reconciledAt?.toDate().toLocaleString()}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.cashSales.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.cardSales.total || 0).toFixed(2)}</td>
+                                    {/* ✅ Added Data Cell */}
+                                    <td style={{...styles.td, color: '#dc2626'}}>Rs. {(rec.summary.returns?.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.expenses.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>Rs. {(rec.summary.stockPayments.total || 0).toFixed(2)}</td>
                                     <td style={styles.td}>{rec.reconciledBy}</td>
@@ -404,7 +448,7 @@ const Reconcile = () => {
                                         </button>
                                     </td>
                                 </tr>
-                            )) : (<tr><td colSpan="7" style={styles.noData}>No reconciliation reports found for this date.</td></tr>)}
+                            )) : (<tr><td colSpan="8" style={styles.noData}>No reconciliation reports found for this date.</td></tr>)}
                         </tbody>
                     </table>
                 </div>
