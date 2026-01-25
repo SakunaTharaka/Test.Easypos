@@ -52,7 +52,17 @@ const Inventory = ({ internalUser }) => {
   const [currentQty, setCurrentQty] = useState(1);
   const [currentPrice, setCurrentPrice] = useState("");
   const [currentUnit, setCurrentUnit] = useState("");
+  
+  // ✅ NEW: Expiration State
+  const [currentExpireDate, setCurrentExpireDate] = useState("");
+  const [enableExpire, setEnableExpire] = useState(false);
+
+  // ✅ NEW: Refs for Focus Management
   const itemSelectRef = useRef(null);
+  const qtyInputRef = useRef(null);
+  const unitInputRef = useRef(null);
+  const priceInputRef = useRef(null);
+  const expireInputRef = useRef(null);
   
   // --- Search & Filter State ---
   const [search, setSearch] = useState("");
@@ -118,7 +128,7 @@ const Inventory = ({ internalUser }) => {
 
     const fetchDropdownData = async () => {
       try {
-        // 1. Fetch Units from Settings
+        // 1. Fetch Units & Settings
         const settingsRef = doc(db, uid, "settings");
         const settingsSnap = await getDoc(settingsRef);
         
@@ -128,6 +138,10 @@ const Inventory = ({ internalUser }) => {
            const data = settingsSnap.data();
            if (data.itemUnits && data.itemUnits.length > 0) {
              fetchedUnits = data.itemUnits;
+           }
+           // ✅ CHECK SETTING: Expire Maintain
+           if (data.expireMaintain) {
+               setEnableExpire(true);
            }
         }
         
@@ -200,16 +214,39 @@ const Inventory = ({ internalUser }) => {
     if (stagedItems.some(item => item.value === currentItem.value)) {
         return alert("This item is already in the list.");
     }
-    setStagedItems([...stagedItems, { ...currentItem, quantity: Number(currentQty), price: Number(currentPrice), unit: currentUnit }]);
+
+    setStagedItems([...stagedItems, { 
+        ...currentItem, 
+        quantity: Number(currentQty), 
+        price: Number(currentPrice), 
+        unit: currentUnit,
+        expireDate: currentExpireDate || null // ✅ Store Expiry
+    }]);
     
     // Reset fields
     setCurrentItem(null);
     setCurrentQty(1);
     setCurrentPrice("");
+    setCurrentExpireDate(""); // ✅ Reset Expiry
     // Reset unit to default (first item in units array)
     setCurrentUnit(units.length > 0 ? units[0] : "");
     
-    itemSelectRef.current?.focus();
+    // ✅ AUTO-FOCUS: Jump back to Select Item
+    setTimeout(() => {
+        itemSelectRef.current?.focus();
+    }, 100);
+  };
+  
+  // ✅ Handle Enter Key Navigation
+  const handleKeyDown = (e, nextRef, isAdd = false) => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        if (isAdd) {
+            handleAddItemToStage();
+        } else if (nextRef?.current) {
+            nextRef.current.focus();
+        }
+    }
   };
 
   const handleDeleteStagedItem = (index) => setStagedItems(stagedItems.filter((_, i) => i !== index));
@@ -245,7 +282,8 @@ const Inventory = ({ internalUser }) => {
                 name: item.name || label.split(" (")[0],
                 unit: item.unit || "",
                 category: item.category || "",
-                type: item.type || ""
+                type: item.type || "",
+                expireDate: item.expireDate || null // ✅ Save to Firestore
             })),
             addedBy,
             createdAt: serverTimestamp(),
@@ -466,49 +504,137 @@ const Inventory = ({ internalUser }) => {
         <div style={styles.modalOverlay}>
           <div style={styles.modal}>
             <div style={styles.modalHeader}><h3 style={styles.modalTitle}>Record New Stock-In</h3><button style={styles.closeButton} onClick={() => setShowModal(false)}>&times;</button></div>
-            <div style={styles.formGrid}>
-              <div style={styles.formGroup}><label style={styles.label}>Supplier Name</label><input value={supplierInfo.name} onChange={e => setSupplierInfo({...supplierInfo, name: e.target.value})} style={styles.input} /></div>
-              
-              <div style={styles.formGroup}>
-                  <label style={styles.label}>Supplier Mobile</label>
-                  <input 
-                      value={supplierInfo.mobile} 
-                      onChange={(e) => {
-                          const val = e.target.value.replace(/[^0-9]/g, '');
-                          setSupplierInfo({...supplierInfo, mobile: val});
-                      }} 
-                      style={styles.input} 
-                      maxLength="10"
-                      placeholder="07XXXXXXXX"
-                  />
-              </div>
+            
+            {/* ✅ NEW: Scrollable Modal Body */}
+            <div style={styles.modalBody}>
+                <div style={styles.formGrid}>
+                <div style={styles.formGroup}><label style={styles.label}>Supplier Name</label><input value={supplierInfo.name} onChange={e => setSupplierInfo({...supplierInfo, name: e.target.value})} style={styles.input} /></div>
+                
+                <div style={styles.formGroup}>
+                    <label style={styles.label}>Supplier Mobile</label>
+                    <input 
+                        value={supplierInfo.mobile} 
+                        onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            setSupplierInfo({...supplierInfo, mobile: val});
+                        }} 
+                        style={styles.input} 
+                        maxLength="10"
+                        placeholder="07XXXXXXXX"
+                    />
+                </div>
 
-              <div style={styles.formGroupFull}><label style={styles.label}>Supplier Company</label><input value={supplierInfo.company} onChange={e => setSupplierInfo({...supplierInfo, company: e.target.value})} style={styles.input} /></div>
-              <div style={styles.formGroupFull}><label style={styles.label}>Reference Purchase Order (Optional)</label><Select options={purchaseOrders} value={selectedPO} onChange={setSelectedPO} placeholder="Search by PO ID..." isClearable /></div>
-              <hr style={styles.hr} />
-              <div style={styles.formGroupFull}>
-                  <label style={styles.label}>Add Items</label>
-                  <div style={styles.itemEntry}>
-                      <div style={{flex: 3}}><Select ref={itemSelectRef} options={stockableItems} value={currentItem} onChange={setCurrentItem} placeholder="Search item..."/></div>
-                      <div style={{flex: 1}}><input type="number" placeholder="Qty" value={currentQty} onChange={e => setCurrentQty(e.target.value)} style={styles.input}/></div>
-                      <div style={{flex: 1}}>
-                          <select value={currentUnit} onChange={e => setCurrentUnit(e.target.value)} style={styles.input}>
-                            {units.map(u => <option key={u} value={u}>{u}</option>)}
-                          </select>
-                      </div>
-                      <div style={{flex: 1}}><input type="number" placeholder="Price" value={currentPrice} onChange={e => setCurrentPrice(e.target.value)} style={styles.input}/></div>
-                      <button onClick={handleAddItemToStage} style={styles.addItemBtn}>Add</button>
-                  </div>
-              </div>
-              {stagedItems.length > 0 && (
-                  <div style={styles.formGroupFull}>
-                      <table style={{...styles.table, ...styles.stagedTable}}>
-                          <thead><tr><th style={styles.th}>Item</th><th style={styles.th}>Qty</th><th style={styles.th}>Price</th><th style={styles.th}>Action</th></tr></thead>
-                          <tbody>{stagedItems.map((item, index) => (<tr key={index}><td style={styles.td}>{item.label}</td><td style={styles.td}>{item.quantity} {item.unit}</td><td style={styles.td}>Rs. {item.price}</td><td style={styles.td}><button onClick={() => handleDeleteStagedItem(index)} style={styles.deleteBtn}><AiOutlineDelete/></button></td></tr>))}</tbody>
-                      </table>
-                  </div>
-              )}
+                <div style={styles.formGroupFull}><label style={styles.label}>Supplier Company</label><input value={supplierInfo.company} onChange={e => setSupplierInfo({...supplierInfo, company: e.target.value})} style={styles.input} /></div>
+                <div style={styles.formGroupFull}><label style={styles.label}>Reference Purchase Order (Optional)</label><Select options={purchaseOrders} value={selectedPO} onChange={setSelectedPO} placeholder="Search by PO ID..." isClearable /></div>
+                <hr style={styles.hr} />
+                <div style={styles.formGroupFull}>
+                    <label style={{...styles.label, fontSize: '16px', color: '#2c3e50', marginBottom: '10px', display: 'block'}}>Add Items to Stock</label>
+                    
+                    <div style={styles.itemEntryContainer}>
+                        {/* Row 1: Item Search */}
+                        <div style={{width: '100%', marginBottom: '10px'}}>
+                            <label style={styles.label}>Select Item</label>
+                            <Select 
+                                ref={itemSelectRef} 
+                                options={stockableItems} 
+                                value={currentItem} 
+                                onChange={(val) => {
+                                    setCurrentItem(val);
+                                    setTimeout(() => qtyInputRef.current?.focus(), 50); // Jump to Qty
+                                }} 
+                                placeholder="Search and select item..."
+                            />
+                        </div>
+                        
+                        {/* Row 2: Inputs Grid */}
+                        <div style={styles.itemEntryGrid}>
+                            <div style={{flex: 1}}>
+                                <label style={styles.label}>Quantity</label>
+                                <input 
+                                    ref={qtyInputRef}
+                                    type="number" 
+                                    placeholder="0" 
+                                    value={currentQty} 
+                                    onChange={e => setCurrentQty(e.target.value)} 
+                                    onKeyDown={(e) => handleKeyDown(e, unitInputRef)} // Enter -> Unit
+                                    style={styles.input}
+                                />
+                            </div>
+                            <div style={{flex: 1}}>
+                                <label style={styles.label}>Unit</label>
+                                <select 
+                                    ref={unitInputRef}
+                                    value={currentUnit} 
+                                    onChange={e => setCurrentUnit(e.target.value)} 
+                                    onKeyDown={(e) => handleKeyDown(e, priceInputRef)} // Enter -> Price
+                                    style={styles.input}
+                                >
+                                    {units.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                            </div>
+                            <div style={{flex: 1}}>
+                                <label style={styles.label}>Cost Price</label>
+                                <input 
+                                    ref={priceInputRef}
+                                    type="number" 
+                                    placeholder="0.00" 
+                                    value={currentPrice} 
+                                    onChange={e => setCurrentPrice(e.target.value)} 
+                                    onKeyDown={(e) => handleKeyDown(e, enableExpire ? expireInputRef : null, !enableExpire)} // Enter -> Expire (if enabled) else Add
+                                    style={styles.input}
+                                />
+                            </div>
+                            
+                            {enableExpire && (
+                                <div style={{flex: 1}}>
+                                    <label style={styles.label}>Batch Expire Date</label>
+                                    <input 
+                                        ref={expireInputRef}
+                                        type="date" 
+                                        value={currentExpireDate} 
+                                        onChange={e => setCurrentExpireDate(e.target.value)} 
+                                        onKeyDown={(e) => handleKeyDown(e, null, true)} // Enter -> Add
+                                        style={styles.input}
+                                    />
+                                </div>
+                            )}
+
+                            <div style={{display: 'flex', alignItems: 'flex-end'}}>
+                                <button onClick={handleAddItemToStage} style={styles.addItemBtn}>
+                                    <AiOutlinePlus size={18} /> Add
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+                {stagedItems.length > 0 && (
+                    <div style={styles.formGroupFull}>
+                        <table style={{...styles.table, ...styles.stagedTable}}>
+                            <thead>
+                                <tr>
+                                    <th style={styles.th}>Item</th>
+                                    <th style={styles.th}>Qty</th>
+                                    <th style={styles.th}>Price</th>
+                                    {enableExpire && <th style={styles.th}>Expire Date</th>}
+                                    <th style={styles.th}>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>{stagedItems.map((item, index) => (
+                                <tr key={index}>
+                                    <td style={styles.td}>{item.label}</td>
+                                    <td style={styles.td}>{item.quantity} {item.unit}</td>
+                                    <td style={styles.td}>Rs. {item.price}</td>
+                                    {enableExpire && <td style={styles.td}>{item.expireDate || "-"}</td>}
+                                    <td style={styles.td}><button onClick={() => handleDeleteStagedItem(index)} style={styles.deleteBtn}><AiOutlineDelete/></button></td>
+                                </tr>
+                            ))}</tbody>
+                        </table>
+                    </div>
+                )}
+                </div>
             </div>
+
             <div style={styles.modalButtons}>
                 <button style={styles.cancelButton} onClick={() => setShowModal(false)} disabled={isProcessing}>Cancel</button>
                 <button style={styles.saveButton} onClick={handleSave} disabled={isProcessing}>
@@ -525,7 +651,21 @@ const Inventory = ({ internalUser }) => {
         <div style={styles.tableHeader}><span style={styles.tableTitle}>Stock-In History</span></div>
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
-            <thead><tr><th style={styles.th}>Stock In ID</th><th style={styles.th}>Item</th><th style={styles.th}>Category</th><th style={styles.th}>Supplier</th><th style={styles.th}>Quantity</th><th style={styles.th}>Unit Price</th><th style={styles.th}>Added By</th><th style={styles.th}>Date</th>{isAdmin && <th style={styles.th}>Action</th>}</tr></thead>
+            <thead>
+                <tr>
+                    <th style={styles.th}>Stock In ID</th>
+                    <th style={styles.th}>Item</th>
+                    <th style={styles.th}>Category</th>
+                    <th style={styles.th}>Supplier</th>
+                    <th style={styles.th}>Quantity</th>
+                    <th style={styles.th}>Unit Price</th>
+                    {/* ✅ CONDITIONAL HEADER: Expire Date */}
+                    {enableExpire && <th style={styles.th}>Expire Date</th>}
+                    <th style={styles.th}>Added By</th>
+                    <th style={styles.th}>Date</th>
+                    {isAdmin && <th style={styles.th}>Action</th>}
+                </tr>
+            </thead>
             <tbody>
               {filteredInventory.flatMap((item) => 
                   (item.lineItems || [{...item}]).map((lineItem, lineIndex) => (
@@ -536,6 +676,8 @@ const Inventory = ({ internalUser }) => {
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}><div style={styles.supplierInfo}>{item.supplierName && <div>{item.supplierName}</div>}{item.supplierCompany && <div style={styles.companyName}>{item.supplierCompany}</div>}</div></td>}
                           <td style={styles.td}>{lineItem.quantity} {lineItem.unit}</td>
                           <td style={styles.td}>Rs. {parseFloat(lineItem.price || 0).toFixed(2)}</td>
+                          {/* ✅ CONDITIONAL CELL: Expire Date */}
+                          {enableExpire && <td style={styles.td}>{lineItem.expireDate || "-"}</td>}
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.addedBy}</td>}
                           {lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>{item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : 'N/A'}</td>}
                           {isAdmin && lineIndex === 0 && <td rowSpan={item.lineItems?.length || 1} style={styles.td}>
@@ -551,7 +693,7 @@ const Inventory = ({ internalUser }) => {
                       </tr>
                   ))
               )}
-              {filteredInventory.length === 0 && !loading && (<tr><td colSpan={isAdmin ? 9 : 8} style={styles.noData}>No inventory records found.</td></tr>)}
+              {filteredInventory.length === 0 && !loading && (<tr><td colSpan={isAdmin ? (enableExpire ? 10 : 9) : (enableExpire ? 9 : 8)} style={styles.noData}>No inventory records found.</td></tr>)}
             </tbody>
           </table>
         </div>
@@ -587,17 +729,21 @@ const styles = {
   dateInput: { padding: '8px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px' },
   addButton: { display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '12px 20px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: '600' },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' },
-  modal: { backgroundColor: 'white', borderRadius: '12px', width: '100%', maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' },
+  // ✅ MODAL FIX: Flex layout to keep header/footer fixed
+  modal: { backgroundColor: 'white', borderRadius: '12px', width: '100%', maxWidth: '900px', maxHeight: '90vh', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px', borderBottom: '1px solid #eaeaea', flexShrink: 0 },
+  // ✅ SCROLLABLE BODY
+  modalBody: { flex: 1, overflowY: 'auto', padding: '24px' },
   modalTitle: { margin: 0, fontSize: '20px', fontWeight: '600', color: '#2c3e50' },
   closeButton: { background: 'transparent', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#6c757d' },
-  formGrid: { padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', overflowY: 'auto' },
+  formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }, // Removed padding since parent has it
   formGroup: { display: 'flex', flexDirection: 'column', gap: '8px' },
   formGroupFull: { gridColumn: 'span 2' },
-  label: { fontSize: '14px', fontWeight: '500', color: '#495057' },
-  input: { padding: '12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' },
-  itemEntry: { display: 'flex', gap: '10px', alignItems: 'center' },
-  addItemBtn: { padding: '12px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '8px' },
+  label: { fontSize: '14px', fontWeight: '500', color: '#495057', display: 'block', marginBottom: '6px' },
+  input: { padding: '12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', width: '100%', boxSizing: 'border-box' },
+  itemEntryContainer: { backgroundColor: '#f9fafb', padding: '16px', borderRadius: '10px', border: '1px solid #eaeaea' },
+  itemEntryGrid: { display: 'flex', gap: '16px', alignItems: 'flex-start' },
+  addItemBtn: { padding: '12px 24px', backgroundColor: '#3498db', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600', height: '42px' },
   stagedTable: { marginTop: '16px' },
   hr: { gridColumn: 'span 2', border: 'none', borderTop: '1px solid #eaeaea', margin: '10px 0' },
   modalButtons: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid #eaeaea', flexShrink: 0 },

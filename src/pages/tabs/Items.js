@@ -23,6 +23,7 @@ import {
   AiOutlineDelete,
   AiOutlineEdit,
   AiOutlineSearch,
+  AiOutlineClose
 } from "react-icons/ai";
 
 const Items = ({ internalUser }) => {
@@ -30,19 +31,32 @@ const Items = ({ internalUser }) => {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [form, setForm] = useState({ name: "", brand: "", sku: "", type: "", category: "" });
+  
+  // ✅ UPDATED: 'sku' is now an array in local state
+  const [form, setForm] = useState({ 
+    name: "", 
+    brand: "", 
+    sku: [], // Array to hold multiple SKUs
+    type: "", 
+    category: "",
+    warranty: { years: "", months: "", days: "" } 
+  });
+
+  // ✅ NEW: Temporary input state for SKU typing
+  const [skuInput, setSkuInput] = useState("");
+  
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
-  const [inventoryType, setInventoryType] = useState(null); 
+  const [inventoryType, setInventoryType] = useState(null);
+  
+  const [enableWarranty, setEnableWarranty] = useState(false);
   
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // State for Total Items Count
   const [totalItems, setTotalItems] = useState(0);
   const MAX_ITEMS = 1000;
 
-  // State for server-side pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [lastVisible, setLastVisible] = useState(null);
   const [pageCursors, setPageCursors] = useState({ 1: null });
@@ -63,7 +77,6 @@ const Items = ({ internalUser }) => {
     return cur?.isAdmin === true || cur?.isAdmin === "1";
   })();
 
-  // Fetch Total Item Count on Load
   useEffect(() => {
     const fetchCount = async () => {
         const uid = auth.currentUser?.uid;
@@ -99,11 +112,16 @@ const Items = ({ internalUser }) => {
             const allFetched = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
             const filteredItems = allFetched.filter(item => {
+                // ✅ UPDATED Search Logic for Array SKUs
+                const skuMatch = Array.isArray(item.sku) 
+                    ? item.sku.some(s => s.toLowerCase().includes(searchTerm))
+                    : (item.sku && item.sku.toString().toLowerCase().includes(searchTerm));
+
                 return (
                     (item.pid && item.pid.toString().includes(searchTerm)) ||
                     (item.name && item.name.toLowerCase().includes(searchTerm)) ||
                     (item.brand && item.brand.toLowerCase().includes(searchTerm)) ||
-                    (item.sku && item.sku.toLowerCase().includes(searchTerm)) ||
+                    skuMatch ||
                     (item.category && item.category.toLowerCase().includes(searchTerm))
                 );
             });
@@ -154,6 +172,7 @@ const Items = ({ internalUser }) => {
           const settingsData = settingsSnap.data();
           setCategories(settingsData.itemCategories || []);
           setInventoryType(settingsData.inventoryType || "Buy and Sell only");
+          setEnableWarranty(settingsData.enableWarranty || false);
         } else {
           setInventoryType("Buy and Sell only");
         }
@@ -161,9 +180,7 @@ const Items = ({ internalUser }) => {
     fetchSettings();
   }, []);
 
-  // ✅ FIXED: Removed unnecessary dependency on 'loading'
   useEffect(() => {
-    // Always reset pagination when search term changes
     setCurrentPage(1);
     setPageCursors({ 1: null });
     setLastVisible(null);
@@ -181,6 +198,43 @@ const Items = ({ internalUser }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleWarrantyChange = (field, value) => {
+    const numVal = Math.max(0, parseInt(value) || 0);
+    setForm(prev => ({
+        ...prev,
+        warranty: { ...prev.warranty, [field]: numVal === 0 ? "" : numVal }
+    }));
+  };
+
+  // ✅ NEW: Handle SKU Input (Enter Key)
+  const handleSkuKeyDown = (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = skuInput.trim();
+        if (!val) return;
+        
+        // Limit to 3 SKUs
+        if (form.sku.length >= 3) {
+            alert("You can only add up to 3 SKUs per item.");
+            return;
+        }
+
+        // Prevent duplicates in the list
+        if (form.sku.includes(val)) {
+            setSkuInput("");
+            return;
+        }
+
+        setForm(prev => ({ ...prev, sku: [...prev.sku, val] }));
+        setSkuInput("");
+    }
+  };
+
+  // ✅ NEW: Remove SKU Chip
+  const handleRemoveSku = (indexToRemove) => {
+    setForm(prev => ({ ...prev, sku: prev.sku.filter((_, i) => i !== indexToRemove) }));
   };
 
   const handleTypeSelect = (selectedType) => {
@@ -234,27 +288,32 @@ const Items = ({ internalUser }) => {
       return;
     }
 
-    // SKU Uniqueness Check
-    const skuToCheck = form.sku?.trim();
-    if (skuToCheck) {
-      try {
-        const itemsColRef = collection(db, uid, "items", "item_list");
-        const q = query(itemsColRef, where("sku", "==", skuToCheck));
-        const querySnapshot = await getDocs(q);
-        
-        let isDuplicate = false;
-        if (!querySnapshot.empty) {
-          if (editingItem) {
-            if (querySnapshot.docs[0].id !== editingItem.id) isDuplicate = true;
-          } else {
-            isDuplicate = true;
-          }
-        }
+    const itemsColRef = collection(db, uid, "items", "item_list");
 
-        if (isDuplicate) {
-          alert("This SKU is already in use by another item. Please use a unique SKU.");
-          setIsSaving(false);
-          return;
+    // ✅ UPDATED: SKU Uniqueness Check (Handles Arrays & Strings)
+    // We must check if ANY of the entered SKUs exist in the DB
+    const skusToCheck = form.sku; // This is an array
+    if (skusToCheck.length > 0) {
+      try {
+        for (const sku of skusToCheck) {
+            // Check 1: Does it exist as a simple string? (Legacy items)
+            const qString = query(itemsColRef, where("sku", "==", sku));
+            const snapString = await getDocs(qString);
+            
+            // Check 2: Does it exist inside an array? (New items)
+            const qArray = query(itemsColRef, where("sku", "array-contains", sku));
+            const snapArray = await getDocs(qArray);
+
+            const allFound = [...snapString.docs, ...snapArray.docs];
+
+            // Filter out self if editing
+            const duplicates = allFound.filter(doc => editingItem ? doc.id !== editingItem.id : true);
+
+            if (duplicates.length > 0) {
+                alert(`The SKU "${sku}" is already in use by another item. Please remove duplicate SKUs.`);
+                setIsSaving(false);
+                return;
+            }
         }
       } catch (error) {
         alert("Error checking SKU uniqueness: " + error.message);
@@ -270,25 +329,24 @@ const Items = ({ internalUser }) => {
         ? `${form.brand.trim()} ${form.name.trim()}` 
         : form.name.trim();
 
-      const itemsColRef = collection(db, uid, "items", "item_list");
       const dataToSave = {
           name: finalName,
           name_lowercase: finalName.toLowerCase(),
           brand: form.brand.trim(),
-          sku: form.sku || "",
+          sku: form.sku, // ✅ Saving as Array
           type: form.type,
           category: form.category || "",
+          warranty: enableWarranty ? form.warranty : null, 
           lastEditedBy: username,
           lastEditedAt: serverTimestamp(),
       };
 
       if (editingItem) {
-        // Edit logic (No count change)
         setIsSyncing(true);
-
         const itemDocRef = doc(itemsColRef, editingItem.id);
         await updateDoc(itemDocRef, dataToSave);
         
+        // Sync to Price Categories
         try {
             const pricedItemsRef = collection(db, uid, "price_categories", "priced_items");
             const q = query(pricedItemsRef, where("itemId", "==", editingItem.id));
@@ -299,10 +357,10 @@ const Items = ({ internalUser }) => {
                 querySnapshot.forEach((doc) => {
                     batch.update(doc.ref, {
                         itemName: finalName,
-                        itemSKU: form.sku || "",
+                        itemSKU: form.sku, // Update array
                         itemBrand: form.brand.trim(),
                         itemType: form.type,
-                        sku: form.sku || "" 
+                        sku: form.sku 
                     });
                 });
                 await batch.commit();
@@ -317,7 +375,6 @@ const Items = ({ internalUser }) => {
         ));
 
       } else {
-        // Add logic (Checks Limit & Increments Count)
         const pid = await getNextPID(uid);
         
         if (pid === "LIMIT_REACHED") {
@@ -334,12 +391,11 @@ const Items = ({ internalUser }) => {
         const newData = { ...dataToSave, addedBy: username, createdAt: serverTimestamp(), pid };
         const docRef = await addDoc(itemsColRef, newData);
         setItems(prevItems => [{ id: docRef.id, ...newData, createdAt: new Date() }, ...prevItems]);
-        
-        // Update local count state
         setTotalItems(prev => prev + 1);
       }
 
-      setForm({ name: "", brand: "", sku: "", type: "", category: "" });
+      setForm({ name: "", brand: "", sku: [], type: "", category: "", warranty: { years: "", months: "", days: "" } });
+      setSkuInput("");
       setEditingItem(null);
       setShowModal(false);
     } catch (error) {
@@ -355,17 +411,10 @@ const Items = ({ internalUser }) => {
     const uid = auth.currentUser.uid;
     try {
       await deleteDoc(doc(db, uid, "items", "item_list", id));
-      
-      // Update Counter in DB
       const counterRef = doc(db, uid, "counters");
-      await updateDoc(counterRef, {
-        totalItems: increment(-1)
-      });
-
-      // Update Local State
+      await updateDoc(counterRef, { totalItems: increment(-1) });
       setItems(prevItems => prevItems.filter(item => item.id !== id));
       setTotalItems(prev => Math.max(0, prev - 1));
-
     } catch (error) {
       alert("Error deleting item: " + error.message);
     }
@@ -402,9 +451,43 @@ const Items = ({ internalUser }) => {
     } else if (inventoryType === "Production Selling only") {
       defaultType = "storesItem";
     }
-    setForm({ name: "", brand: "", sku: "", type: defaultType, category: "" });
+    
+    setForm({ 
+        name: "", 
+        brand: "", 
+        sku: [], // Reset as empty array
+        type: defaultType, 
+        category: "", 
+        warranty: { years: "", months: "", days: "" } 
+    });
+    setSkuInput("");
     setEditingItem(null);
     setShowModal(true);
+  };
+
+  const handleEditClick = (item) => {
+      setEditingItem(item);
+      
+      // ✅ Handle Backward Compatibility: 
+      // If 'sku' is string (old data), convert to array [string]. 
+      // If 'sku' is already array, use it.
+      let skusArray = [];
+      if (Array.isArray(item.sku)) {
+          skusArray = item.sku;
+      } else if (item.sku) {
+          skusArray = [item.sku];
+      }
+
+      setForm({
+          name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""),
+          brand: item.brand || "",
+          sku: skusArray,
+          type: item.type,
+          category: item.category || "",
+          warranty: item.warranty || { years: "", months: "", days: "" }
+      });
+      setSkuInput("");
+      setShowModal(true);
   };
 
   return (
@@ -435,8 +518,6 @@ const Items = ({ internalUser }) => {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: "24px", fontWeight: "600", color: "#333", margin: 0 }}>Items Management</h2>
-          
-          {/* ✅ VISUAL COUNTER */}
           <div style={{ 
               backgroundColor: totalItems >= MAX_ITEMS ? '#fadbd8' : '#e8f6f3',
               color: totalItems >= MAX_ITEMS ? '#c0392b' : '#27ae60',
@@ -472,18 +553,11 @@ const Items = ({ internalUser }) => {
           onClick={handleAddItemClick}
           disabled={totalItems >= MAX_ITEMS}
           style={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: "6px", 
-              padding: "8px 16px", 
+              display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", 
               background: totalItems >= MAX_ITEMS ? "#95a5a6" : "#3498db", 
-              color: "white", 
-              border: "none", 
-              borderRadius: "6px", 
+              color: "white", border: "none", borderRadius: "6px", 
               cursor: totalItems >= MAX_ITEMS ? "not-allowed" : "pointer", 
-              fontSize: '14px',
-              whiteSpace: 'nowrap',
-              flexShrink: 0
+              fontSize: '14px', whiteSpace: 'nowrap', flexShrink: 0
             }}
             title={totalItems >= MAX_ITEMS ? "Item limit reached" : "Add New Item"}
         >
@@ -509,12 +583,17 @@ const Items = ({ internalUser }) => {
                         <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
                             <td style={{ padding: "12px" }}>{item.pid}</td>
                             <td style={{ padding: "12px", fontWeight: 500 }}>{item.name}</td>
-                            <td style={{ padding: "12px" }}>{item.sku || "-"}</td>
+                            <td style={{ padding: "12px" }}>
+                                {Array.isArray(item.sku) 
+                                    ? item.sku.join(", ") 
+                                    : (item.sku || "-")
+                                }
+                            </td>
                             <td style={{ padding: "12px" }}>{item.type}</td>
                             <td style={{ padding: "12px" }}>{item.category || "-"}</td>
                             <td style={{ padding: "12px" }}>{item.addedBy || "-"}</td>
                             <td style={{ padding: "12px", display: "flex", gap: "8px" }}>
-                                <button onClick={() => { setEditingItem(item); setForm({ name: item.type === 'ourProduct' ? item.name : item.name.replace(`${item.brand} `, ""), brand: item.brand || "", sku: item.sku || "", type: item.type, category: item.category || "", }); setShowModal(true); }} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
+                                <button onClick={() => handleEditClick(item)} style={{ background: "#f39c12", color: "white", border: "none", borderRadius: "4px", padding: "8px", cursor: "pointer", display: 'flex', alignItems: 'center' }} title="Edit">
                                     <AiOutlineEdit />
                                 </button>
                                 {isAdmin && (
@@ -542,7 +621,7 @@ const Items = ({ internalUser }) => {
 
       {showModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px" }}>
+          <div style={{ background: "white", padding: "24px", borderRadius: "8px", width: "100%", maxWidth: "450px", maxHeight: '90vh', overflowY: 'auto' }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px' }}>{editingItem ? "Edit Item" : "Add New Item"}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {itemTypeOptions.length > 1 && (
@@ -562,7 +641,38 @@ const Items = ({ internalUser }) => {
                   <input type="text" name="brand" placeholder="Brand (optional, e.g., Coca-Cola)" value={form.brand} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
                 )}
                 <input type="text" name="name" placeholder="Item Name (e.g., Classic Coke) *" value={form.name} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
-                <input type="text" name="sku" placeholder="SKU / Barcode (optional)" value={form.sku} onChange={handleChange} style={{ width: "100%", padding: "10px", boxSizing: 'border-box' }}/>
+                
+                {/* ✅ NEW: Multiple SKU Input Section */}
+                <div style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '10px', backgroundColor: '#f9f9f9' }}>
+                    <label style={{ display: "block", marginBottom: "6px", fontSize: '14px', fontWeight: '500' }}>SKUs / Barcodes (Max 3)</label>
+                    <input 
+                        type="text" 
+                        placeholder={form.sku.length >= 3 ? "Max SKUs reached" : "Type SKU & Press Enter"} 
+                        value={skuInput} 
+                        onChange={(e) => setSkuInput(e.target.value)} 
+                        onKeyDown={handleSkuKeyDown}
+                        disabled={form.sku.length >= 3}
+                        style={{ width: "100%", padding: "8px", boxSizing: 'border-box', marginBottom: '8px' }}
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {form.sku.map((s, index) => (
+                            <div key={index} style={{ 
+                                display: 'flex', alignItems: 'center', gap: '6px', 
+                                background: '#3498db', color: 'white', 
+                                padding: '4px 8px', borderRadius: '12px', fontSize: '12px' 
+                            }}>
+                                <span>{s}</span>
+                                <AiOutlineClose 
+                                    size={12} 
+                                    style={{ cursor: 'pointer' }} 
+                                    onClick={() => handleRemoveSku(index)}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                    {form.sku.length === 0 && <span style={{ fontSize: '12px', color: '#999' }}>No SKUs added yet.</span>}
+                </div>
+
                 <div>
                     <label style={{ display: "block", marginBottom: "6px" }}>Category</label>
                     <select name="category" value={form.category} onChange={handleChange} style={{ width: "100%", padding: "10px" }}>
@@ -570,9 +680,50 @@ const Items = ({ internalUser }) => {
                         {categories.map((c, idx) => (<option key={idx} value={c}>{c}</option>))}
                     </select>
                 </div>
+
+                {enableWarranty && (
+                    <div style={{ border: '1px solid #b3e5fc', borderRadius: '6px', padding: '12px', backgroundColor: '#e1f5fe' }}>
+                        <label style={{ fontWeight: 600, display: 'block', marginBottom: '8px', color: '#0277bd' }}>Warranty Period</label>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <div style={{ flex: 1 }}>
+                                <input 
+                                    type="number" 
+                                    placeholder="Years" 
+                                    min="0"
+                                    value={form.warranty.years} 
+                                    onChange={(e) => handleWarrantyChange('years', e.target.value)} 
+                                    style={{ width: "100%", padding: "8px", boxSizing: 'border-box' }}
+                                />
+                                <span style={{ fontSize: '11px', color: '#555' }}>Years</span>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <input 
+                                    type="number" 
+                                    placeholder="Months" 
+                                    min="0"
+                                    value={form.warranty.months} 
+                                    onChange={(e) => handleWarrantyChange('months', e.target.value)} 
+                                    style={{ width: "100%", padding: "8px", boxSizing: 'border-box' }}
+                                />
+                                <span style={{ fontSize: '11px', color: '#555' }}>Months</span>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <input 
+                                    type="number" 
+                                    placeholder="Days" 
+                                    min="0"
+                                    value={form.warranty.days} 
+                                    onChange={(e) => handleWarrantyChange('days', e.target.value)} 
+                                    style={{ width: "100%", padding: "8px", boxSizing: 'border-box' }}
+                                />
+                                <span style={{ fontSize: '11px', color: '#555' }}>Days</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: '24px' }}>
-              <button onClick={() => { setShowModal(false); setEditingItem(null); }} style={{ padding: "10px 16px", background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => { setShowModal(false); setEditingItem(null); setSkuInput(""); }} style={{ padding: "10px 16px", background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
               <button 
                 onClick={handleSave} 
                 disabled={isSaving}

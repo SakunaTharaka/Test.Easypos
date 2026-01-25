@@ -383,16 +383,34 @@ const PriceCat = ({ internalUser }) => {
     .filter((i) => {
       if (!search.trim()) return true;
       const term = search.toLowerCase();
+
+      // ✅ FIXED: Handle Array SKU for View List
+      let skuMatch = false;
+      if (Array.isArray(i.itemSKU)) {
+          skuMatch = i.itemSKU.some(s => s.toLowerCase().includes(term));
+      } else if (i.itemSKU) {
+          skuMatch = String(i.itemSKU).toLowerCase().includes(term);
+      }
+
       return (
-        i.itemName.toLowerCase().includes(term) ||
-        (i.itemSKU && i.itemSKU.toLowerCase().includes(term))
+        i.itemName.toLowerCase().includes(term) || skuMatch
       );
     });
 
   const dropdownItems = items.filter(item => {
+    const term = dropdownSearch.toLowerCase();
+    
+    // ✅ FIXED: Handle Array SKU for Dropdown Search
+    let skuMatch = false;
+    if (Array.isArray(item.sku)) {
+        skuMatch = item.sku.some(s => s.toLowerCase().includes(term));
+    } else if (item.sku) {
+        skuMatch = String(item.sku).toLowerCase().includes(term);
+    }
+
     const matchesSearch = 
-        item.name.toLowerCase().includes(dropdownSearch.toLowerCase()) ||
-        (item.sku && item.sku.toLowerCase().includes(dropdownSearch.toLowerCase())) ||
+        item.name.toLowerCase().includes(term) ||
+        skuMatch ||
         (item.pid && String(item.pid).includes(dropdownSearch));
 
     const alreadyInCat = pricedItems.some(
@@ -572,7 +590,14 @@ const PriceCat = ({ internalUser }) => {
                 {filteredItems.map((i) => (
                   <tr key={i.id} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={{ padding: 10 }}>{i.itemName}</td>
-                    <td style={{ padding: 10 }}>{i.itemSKU || "-"}</td>
+                    
+                    {/* ✅ FIXED: Display Array SKUs properly */}
+                    <td style={{ padding: 10 }}>
+                        {Array.isArray(i.itemSKU) 
+                            ? i.itemSKU.join(", ") 
+                            : (i.itemSKU || "-")
+                        }
+                    </td>
                     
                     {selectedCategory.isDiscountable && (
                         <>
@@ -673,7 +698,7 @@ const PriceCat = ({ internalUser }) => {
                           onClick={() => handleItemSelect(item)}
                         >
                           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                                <span>{item.name} {item.sku ? `(SKU: ${item.sku})` : ''}</span>
+                                <span>{item.name} {Array.isArray(item.sku) ? `(SKU: ${item.sku.join(", ")})` : (item.sku ? `(SKU: ${item.sku})` : '')}</span>
                                 {item.pid && <span style={{fontWeight: 'bold', color: '#555', fontSize: '13px'}}>{item.pid}</span>}
                           </div>
                         </li>

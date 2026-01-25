@@ -73,6 +73,8 @@ const Dashboard = () => {
   const [activeFinanceTab, setActiveFinanceTab] = useState("Sales Income");
   const [isAnnouncementActive, setIsAnnouncementActive] = useState(false);
   const [maintainCreditCustomers, setMaintainCreditCustomers] = useState(false);
+  
+  // ✅ MODIFIED: Removed hover logic, strictly button controlled
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
 
@@ -252,6 +254,11 @@ const Dashboard = () => {
     if (internalUsers.length > 1) setShowLoginPopup(true);
   };
 
+  // --- Toggle Sidebar ---
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
   // --- Render Helpers ---
   if (maintenanceStatus.loading) {
     return <div style={styles.loadingContainer}><div style={styles.loadingSpinner}></div></div>;
@@ -399,17 +406,16 @@ const Dashboard = () => {
 
   return (
     <div style={styles.container}>
-      <div style={styles.sidebarTriggerArea} onMouseEnter={() => setIsSidebarOpen(true)} />
+      {/* ✅ MODIFIED: Sidebar controlled by button only, no mouse leave */}
       <div
         style={{ ...styles.sidebar, ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed), }}
-        onMouseLeave={() => { setIsSidebarOpen(false); setHoveredTab(null); }}
       >
         <div style={styles.sidebarTabs}>
           {visibleTabs.map((tab) => (
             <div
               key={tab}
               style={{ ...styles.sidebarTab, ...(hoveredTab === tab && activeTab !== tab ? styles.sidebarTabHover : {}), ...(activeTab === tab ? styles.sidebarActiveTab : {}), }}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => { setActiveTab(tab); setIsSidebarOpen(false); }}
               onMouseEnter={() => setHoveredTab(tab)}
               onMouseLeave={() => setHoveredTab(null)}
             >
@@ -421,20 +427,44 @@ const Dashboard = () => {
 
       <div style={styles.mainContentWrapper}>
         <div style={styles.topBar}>
-          <div style={{...styles.headerLeft, cursor: 'pointer'}} onClick={() => setActiveTab("Settings")} title="Go to Settings">
-            <div style={styles.logoPlaceholder}>
-              {/* ✅ MODIFIED: Show person.jpg as default if no companyLogo is set */}
-              <img 
-                src={userInfo?.companyLogo || "/person.jpg"} 
-                alt="Logo" 
-                style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} 
-              />
-            </div>
-            <div style={styles.topInfo}>
-              <h2 style={styles.companyName}>{userInfo?.companyName || "Business"}</h2>
-              <p style={styles.wayneSystems}>Wayne Systems</p>
-            </div>
+          {/* ✅ NEW: Menu Toggle Button + Header Left combined */}
+          <div style={styles.headerLeftWrapper}>
+             <button 
+                onClick={toggleSidebar} 
+                style={styles.menuToggleBtn}
+                title={isSidebarOpen ? "Close Menu" : "Open Menu"}
+             >
+                <svg viewBox="0 0 24 24" width="26" height="26" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  {isSidebarOpen ? (
+                     <>
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                     </>
+                  ) : (
+                     <>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                     </>
+                  )}
+                </svg>
+             </button>
+
+             <div style={{...styles.headerLeft, cursor: 'pointer'}} onClick={() => setActiveTab("Settings")} title="Go to Settings">
+                <div style={styles.logoPlaceholder}>
+                  <img 
+                    src={userInfo?.companyLogo || "/person.jpg"} 
+                    alt="Logo" 
+                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }} 
+                  />
+                </div>
+                <div style={styles.topInfo}>
+                  <h2 style={styles.companyName}>{userInfo?.companyName || "Business"}</h2>
+                  <p style={styles.wayneSystems}>Wayne Systems</p>
+                </div>
+             </div>
           </div>
+
           <div style={styles.headerCenter}>
             {isAnnouncementActive && ( <div style={{...styles.blinkingIndicator, cursor: 'pointer'}} onClick={() => setActiveTab("Dashboard")} title="Go to Dashboard"> SYSTEM ALERT </div> )}
           </div>
@@ -466,17 +496,26 @@ const styles = {
     container: { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", background: themeColors.light, minHeight: "100vh", display: 'flex', flexDirection: 'row', },
     mainContentWrapper: { flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflowY: 'auto', position: 'relative', marginLeft: '0', },
     content: { padding: "28px 24px", flex: 1, marginTop: '140px', }, 
-    sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 2001, },
-    sidebar: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '260px', background: `linear-gradient(180deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)`, backdropFilter: 'blur(10px)', borderRight: '1px solid rgba(255, 255, 255, 0.15)', color: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2000, transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', boxShadow: '4px 0 20px rgba(0, 0, 0, 0.15)', },
+    
+    // ✅ UPDATED Sidebar: Top 80px to slide under header, calculated height
+    sidebar: { position: 'fixed', top: '80px', left: 0, height: 'calc(100vh - 80px)', width: '260px', background: `linear-gradient(180deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%)`, backdropFilter: 'blur(10px)', borderRight: '1px solid rgba(255, 255, 255, 0.15)', color: '#fff', display: 'flex', flexDirection: 'column', zIndex: 2000, transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', boxShadow: '4px 0 20px rgba(0, 0, 0, 0.15)', },
     sidebarOpen: { transform: 'translateX(0)', },
     sidebarClosed: { transform: 'translateX(-100%)', },
+    
     logoPlaceholder: { width: "52px", height: "52px", borderRadius: "12px", background: `linear-gradient(135deg, ${themeColors.primary}, ${themeColors.secondary})`, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "22px", fontWeight: "bold", marginRight: "16px", flexShrink: 0, boxShadow: '0 4px 12px rgba(0, 161, 255, 0.3)', },
-    sidebarTabs: { display: 'flex', flexDirection: 'column', padding: '16px 0', paddingTop: '24px', },
+    sidebarTabs: { display: 'flex', flexDirection: 'column', padding: '16px 0', paddingTop: '24px', overflowY: 'auto' },
     sidebarTab: { padding: '16px 24px', cursor: 'pointer', fontSize: '15px', color: 'rgba(255, 255, 255, 0.7)', fontWeight: '500', borderLeft: '4px solid transparent', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', whiteSpace: 'nowrap', },
     sidebarTabHover: { color: '#fff', background: 'rgba(255, 255, 255, 0.15)', },
     sidebarActiveTab: { color: '#fff', fontWeight: '600', background: 'rgba(255, 255, 255, 0.15)', borderLeft: `4px solid #fff`, },
-    topBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '80px', padding: '0 32px', background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000, backdropFilter: 'blur(10px)', },
-    headerLeft: { display: 'flex', alignItems: 'center', flex: 1, },
+    
+    // ✅ UPDATED TopBar: Higher z-index to stay above sidebar
+    topBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '80px', padding: '0 32px', background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 2001, backdropFilter: 'blur(10px)', },
+    headerLeftWrapper: { display: 'flex', alignItems: 'center', flex: 1, gap: '24px' },
+    headerLeft: { display: 'flex', alignItems: 'center', },
+    
+    // ✅ NEW: Menu Toggle Button Style
+    menuToggleBtn: { background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer', color: '#fff', padding: '8px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease', outline: 'none' },
+    
     headerCenter: { display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, },
     headerRight: { display: 'flex', alignItems: 'center', gap: '16px', flex: 1, justifyContent: 'flex-end', },
     userBadge: { display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px', background: 'rgba(255, 255, 255, 0.15)', borderRadius: '12px', backdropFilter: 'blur(10px)', border: '1px solid rgba(255, 255, 255, 0.2)', },

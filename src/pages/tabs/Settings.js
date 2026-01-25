@@ -45,6 +45,9 @@ const Settings = () => {
   const [productionShifts, setProductionShifts] = useState([]);
   const [editingShift, setEditingShift] = useState(null);
 
+  // ✅ NEW: Expire Maintain State
+  const [expireMaintain, setExpireMaintain] = useState(false);
+
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [newExpenseCategory, setNewExpenseCategory] = useState("");
   
@@ -58,6 +61,9 @@ const Settings = () => {
   // ✅ Return Policy State
   const [returnPolicy, setReturnPolicy] = useState("");
   const [editReturnPolicy, setEditReturnPolicy] = useState(false);
+
+  // ✅ NEW: Warranty Feature State
+  const [enableWarranty, setEnableWarranty] = useState(false);
 
   const [priceCategories, setPriceCategories] = useState([]);
   const [servicePriceCategory, setServicePriceCategory] = useState("");
@@ -157,6 +163,8 @@ const Settings = () => {
             serviceCharge: "",
             sendInvoiceSms: false,
             returnPolicy: "",
+            enableWarranty: false,
+            expireMaintain: false, // Default value
           };
           await setDoc(settingsDocRef, finalData);
         }
@@ -194,6 +202,12 @@ const Settings = () => {
         setServiceCharge(finalData.serviceCharge || "");
         setSendInvoiceSms(finalData.sendInvoiceSms || false);
         setReturnPolicy(finalData.returnPolicy || ""); 
+        
+        // ✅ Load Warranty Setting
+        setEnableWarranty(finalData.enableWarranty || false);
+        
+        // ✅ Load Expire Maintain Setting
+        setExpireMaintain(finalData.expireMaintain || false);
 
         // --- FETCH SUBCOLLECTIONS ---
         const customersColRef = collection(db, uid, "customers", "customer_list");
@@ -278,6 +292,12 @@ const Settings = () => {
     await updateDoc(getSettingsDocRef(), { stockReminder: value });
   };
 
+  // ✅ NEW: Handle Expire Maintain Change
+  const handleExpireMaintainChange = async (value) => {
+    setExpireMaintain(value);
+    await updateDoc(getSettingsDocRef(), { expireMaintain: value });
+  };
+
   const handleToggleShiftProduction = async (value) => {
     setUseShiftProduction(value);
     await updateDoc(getSettingsDocRef(), { useShiftProduction: value });
@@ -358,6 +378,12 @@ const Settings = () => {
   const handleDoubleLineInvoiceChange = async (value) => {
     setDoubleLineInvoiceItem(value);
     await updateDoc(getSettingsDocRef(), { doubleLineInvoiceItem: value });
+  };
+
+  // ✅ NEW: Warranty Toggle Handler
+  const handleEnableWarrantyChange = async (value) => {
+    setEnableWarranty(value);
+    await updateDoc(getSettingsDocRef(), { enableWarranty: value });
   };
 
   const handleServicePriceCategoryChange = async (value) => {
@@ -466,6 +492,17 @@ const Settings = () => {
         <div style={styles.formGroup}><label style={styles.label}>Inventory Type</label><select value={inventoryType} onChange={(e) => handleInventoryTypeChange(e.target.value)} style={styles.select}><option value="Buy and Sell only">Buy and Sell only</option><option value="Production Selling only">Production Selling only</option><option value="We doing both">We doing both</option></select><p style={styles.helpText}>{inventoryTypeDescriptions[inventoryType]}</p></div>
         {(inventoryType === "Production Selling only" || inventoryType === "We doing both") && (<div style={styles.formGroup}><label style={styles.label}>Use a shift based production</label><div style={styles.toggleContainer}><button onClick={() => handleToggleShiftProduction(true)} style={useShiftProduction ? styles.toggleButtonActive : styles.toggleButton}>Yes</button><button onClick={() => handleToggleShiftProduction(false)} style={!useShiftProduction ? styles.toggleButtonActive : styles.toggleButton}>No</button></div>{useShiftProduction && (<div style={styles.shiftsManagementContainer}>{productionShifts.map((shift, index) => (<div key={index} style={styles.shiftItem}>{editingShift?.index === index ? (<><input type="text" value={editingShift.name} onChange={(e) => setEditingShift({...editingShift, name: e.target.value})} style={styles.shiftInput}/><button onClick={() => handleSaveShiftName(index)} style={styles.shiftSaveBtn}>Save</button></>) : (<><span>{shift}</span><div style={styles.shiftActions}><button onClick={() => setEditingShift({index, name: shift})} style={styles.shiftRenameBtn}>Rename</button><button onClick={() => handleDeleteShift(index)} style={styles.shiftDeleteBtn}><AiOutlineDelete size={16} /></button></div></>)}</div>))}<button onClick={handleAddShift} style={styles.addShiftButton}>+ Add a shift</button></div>)}</div>)}
         <div style={styles.formGroup}><label style={styles.label}>Low Stock Reminder</label><select value={stockReminder} onChange={(e) => handleStockReminderChange(e.target.value)} style={styles.select}><option value="Do not remind">Do not remind</option><option value="50">Remind at 50%</option><option value="20">Remind at 20%</option><option value="10">Remind at 10%</option></select><p style={styles.helpText}>Get notified when stock goes below the selected percentage</p></div>
+        
+        {/* ✅ NEW: Expire Maintain Toggle */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Expire Maintain</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleExpireMaintainChange(true)} style={expireMaintain ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleExpireMaintainChange(false)} style={!expireMaintain ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to track expiration dates for your inventory items.</p>
+        </div>
+
         <div style={styles.formGroup}><label style={styles.label}>Item Categories</label><div style={styles.categoryInputContainer}><input type="text" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={styles.categoryInput} placeholder="Add new item category" onKeyPress={(e) => e.key === 'Enter' && handleAddCategory()}/><button onClick={handleAddCategory} style={styles.addButton}>Add</button></div><div style={styles.categoriesList}>{itemCategories.length > 0 ? (itemCategories.map((cat, idx) => (<div key={idx} style={styles.categoryItem}><span>{cat}</span><button onClick={() => handleDeleteCategory(cat)} style={styles.deleteButton}><AiOutlineDelete size={14} /></button></div>))) : (<p style={styles.emptyState}>No item categories added yet</p>)}</div></div>
         <div style={styles.formGroup}><label style={styles.label}>Measurement Units</label><div style={styles.unitsGrid}>{AVAILABLE_UNITS.map((unit) => (<label key={unit} style={styles.unitCheckbox}><input type="checkbox" checked={selectedUnits.includes(unit)} onChange={() => handleUnitChange(unit)}/>{unit}</label>))}</div></div>
       </div>
@@ -577,7 +614,17 @@ const Settings = () => {
             <p style={styles.helpText}>Enable this to split item details into two lines on the printed invoice.</p>
         </div>
 
-        {/* ✅ NEW: Return Policy Field with Edit Toggle */}
+        {/* ✅ NEW: Enable Warranty Feature */}
+        <div style={styles.formGroup}>
+            <label style={styles.label}>Enable warranty feature</label>
+            <div style={styles.toggleContainer}>
+                <button onClick={() => handleEnableWarrantyChange(true)} style={enableWarranty ? styles.toggleButtonActive : styles.toggleButton}>Yes</button>
+                <button onClick={() => handleEnableWarrantyChange(false)} style={!enableWarranty ? styles.toggleButtonActive : styles.toggleButton}>No</button>
+            </div>
+            <p style={styles.helpText}>Enable this to manage warranties for items in invoices.</p>
+        </div>
+
+        {/* ✅ Return Policy Field with Edit Toggle */}
         <div style={styles.formGroup}>
             <label style={styles.label}>Return Policy</label>
             

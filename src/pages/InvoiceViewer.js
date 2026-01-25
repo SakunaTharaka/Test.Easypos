@@ -3,32 +3,53 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { getFunctions, httpsCallable } from "firebase/functions"; // ✅ Added for SMS
+import { getFunctions, httpsCallable } from "firebase/functions"; 
 
-// InvoiceHeader Component
-const InvoiceHeader = ({ companyInfo, onPrint, onSendSms, isPrintReady, isServiceOrder }) => {
+// InvoiceHeader Component (Unchanged)
+const InvoiceHeader = ({ companyInfo, onPrint, onSendSms, isPrintReady, isServiceOrder, onToggleSidebar, isSidebarOpen }) => {
     return (
         <div style={styles.topBar}>
-            <div style={styles.headerLeft}>
-                <div style={styles.logoPlaceholder}>
-                    {/* Shows /person.jpg if no company logo is set in DB */}
-                    <img 
-                        src={companyInfo?.companyLogo || "/person.jpg"} 
-                        alt="Logo" 
-                        style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}
-                    />
-                </div>
-                <div style={styles.topInfo}>
-                    <h2 style={styles.companyName}>{companyInfo?.companyName || "Business"}</h2>
-                    <p style={styles.wayneSystems}>
-                        {isServiceOrder ? "Service Management System" : "Wayne Systems"}
-                    </p> 
+            <div style={styles.headerLeftWrapper}>
+                <button 
+                    onClick={onToggleSidebar} 
+                    style={styles.menuToggleBtn}
+                    title={isSidebarOpen ? "Close Menu" : "Open Menu"}
+                >
+                    <svg viewBox="0 0 24 24" width="26" height="26" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                        {isSidebarOpen ? (
+                            <>
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </>
+                        ) : (
+                            <>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                                <line x1="3" y1="6" x2="21" y2="6"></line>
+                                <line x1="3" y1="18" x2="21" y2="18"></line>
+                            </>
+                        )}
+                    </svg>
+                </button>
+
+                <div style={styles.headerLeft}>
+                    <div style={styles.logoPlaceholder}>
+                        <img 
+                            src={companyInfo?.companyLogo || "/person.jpg"} 
+                            alt="Logo" 
+                            style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "8px" }}
+                        />
+                    </div>
+                    <div style={styles.topInfo}>
+                        <h2 style={styles.companyName}>{companyInfo?.companyName || "Business"}</h2>
+                        <p style={styles.wayneSystems}>
+                            {isServiceOrder ? "Service Management System" : "Wayne Systems"}
+                        </p> 
+                    </div>
                 </div>
             </div>
             
             <div style={styles.headerRight}>
                 <div style={styles.printButtonsContainer}>
-                    {/* ✅ NEW SEND SMS BUTTON */}
                     <button 
                         onClick={onSendSms} 
                         disabled={!isPrintReady} 
@@ -59,6 +80,9 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
   const isDoubleLine = companyInfo?.doubleLineInvoiceItem || false; 
   const isServiceOrder = invoice.invoiceNumber?.startsWith('SRV');
   const isOrder = invoice.invoiceNumber?.startsWith('ORD');
+  
+  // ✅ Robust Check: Handles boolean true or string "true"
+  const showWarranty = !!companyInfo?.enableWarranty && (companyInfo.enableWarranty === true || companyInfo.enableWarranty === "true");
 
   // --- Calculations ---
   const invSubtotal = invoice.items ? invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
@@ -95,6 +119,43 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
       return count; 
   };
 
+  // ✅ Robust Logic: Parses strings to numbers to ensure safety
+  const warrantyItems = invoice.items ? invoice.items.filter(item => {
+    if(!item.warranty) return false;
+    const y = parseInt(item.warranty.years) || 0;
+    const m = parseInt(item.warranty.months) || 0;
+    const d = parseInt(item.warranty.days) || 0;
+    return y > 0 || m > 0 || d > 0;
+  }) : [];
+
+  const getWarrantyString = (w) => {
+    if (!w) return "-";
+    let parts = [];
+    const y = parseInt(w.years) || 0;
+    const m = parseInt(w.months) || 0;
+    const d = parseInt(w.days) || 0;
+
+    if (y > 0) parts.push(`${y} Year${y > 1 ? 's' : ''}`);
+    if (m > 0) parts.push(`${m} Month${m > 1 ? 's' : ''}`);
+    if (d > 0) parts.push(`${d} Day${d > 1 ? 's' : ''}`);
+    return parts.join(', ');
+  };
+
+  const calculateVoidDate = (w) => {
+      if (!w || !invoice.createdAt) return "-";
+      let date = invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt);
+      
+      const y = parseInt(w.years) || 0;
+      const m = parseInt(w.months) || 0;
+      const d = parseInt(w.days) || 0;
+
+      if (y) date.setFullYear(date.getFullYear() + y);
+      if (m) date.setMonth(date.getMonth() + m);
+      if (d) date.setDate(date.getDate() + d);
+      
+      return date.toLocaleDateString();
+  };
+
   return (
     <div style={styles.invoiceBox}>
       {/* --- HEADER SECTION --- */}
@@ -124,13 +185,11 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
-            {/* --- NEW: DISPLAY NOTE HERE --- */}
             {invoice.note && (
                 <p style={{ marginTop: '5px', fontWeight: 'bold', fontStyle: 'italic', background: '#f3f4f6', padding: '2px 5px' }}>
                     Note: {invoice.note}
                 </p>
             )}
-            {/* ------------------------------ */}
 
             {companyInfo?.dineInAvailable && invoice.orderType && (
                 <p><strong>Order Type:</strong> {invoice.orderType}</p>
@@ -275,6 +334,34 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
         </div>
       </div>
       
+      {/* --- ✅ WARRANTY SECTION --- */}
+      {showWarranty && warrantyItems.length > 0 && (
+          <div style={styles.warrantyBox}>
+              <div style={styles.warrantyTitle}>WARRANTY DETAILS</div>
+              <table style={styles.warrantyTable}>
+                  <thead>
+                      <tr>
+                          <th style={styles.warrantyTh}>Item</th>
+                          <th style={styles.warrantyTh}>Period</th>
+                          <th style={styles.warrantyTh}>Expires On</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {warrantyItems.map((item, index) => (
+                          <tr key={index}>
+                              <td style={styles.warrantyTd}>{item.itemName}</td>
+                              <td style={styles.warrantyTdCenter}>{getWarrantyString(item.warranty)}</td>
+                              <td style={styles.warrantyTdCenter}>{calculateVoidDate(item.warranty)}</td>
+                          </tr>
+                      ))}
+                  </tbody>
+              </table>
+              <div style={styles.warrantyNote}>
+                  * Warranty void if physical damage or sticker removed.
+              </div>
+          </div>
+      )}
+
       {companyInfo?.showOrderNo && invoice.dailyOrderNumber && (
         <div style={{textAlign: 'center', marginTop: '15px', borderTop: '2px solid #000', paddingTop: '5px'}}>
             <span style={{fontSize: '1.2em', fontWeight: 'bold'}}>ORDER NO</span>
@@ -323,7 +410,7 @@ const InvoiceViewer = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hoveredTab, setHoveredTab] = useState(null);
 
-  // ✅ SMS STATE
+  // SMS STATE
   const [showSmsPopup, setShowSmsPopup] = useState(false);
   const [smsMobileNumber, setSmsMobileNumber] = useState("");
   const [isSendingSms, setIsSendingSms] = useState(false);
@@ -361,7 +448,6 @@ const InvoiceViewer = () => {
     }, 50);
   };
 
-  // ✅ Force Tab Title & Favicon
   useEffect(() => {
     document.title = "Wayne ERP Systems";
     const logoUrl = "/my-logo.ico"; 
@@ -382,9 +468,56 @@ const InvoiceViewer = () => {
         const settingsRef = doc(db, user.uid, "settings");
         
         const [invoiceSnap, settingsSnap] = await Promise.all([ getDoc(invoiceRef), getDoc(settingsRef) ]);
+        
+        // --- 1. Load Settings First ---
+        let appSettings = {};
+        if (settingsSnap.exists()) {
+          appSettings = settingsSnap.data();
+          setCompanyInfo(appSettings);
+          setEnableServiceOrders(appSettings.enableServiceOrders === true);
+          setEnableKOD(appSettings.enableKOD === true);
+          if (!appSettings.companyLogo) setIsImageLoaded(true);
+        } else {
+            setIsImageLoaded(true);
+        }
 
+        // --- 2. Load Invoice & Hydrate Warranty if needed ---
         if (invoiceSnap.exists()) { 
             const invData = invoiceSnap.data();
+            
+            // ✅ NEW: Auto-Fetch Warranty from Inventory if missing in Invoice
+            // This fixes "Old Invoices" or invoices created before the logic was updated
+            const warrantyEnabled = !!appSettings?.enableWarranty && (appSettings.enableWarranty === true || appSettings.enableWarranty === "true");
+
+            if (warrantyEnabled && invData.items && invData.items.length > 0) {
+                // Check if any item is missing warranty data but has an ID to lookup
+                const needsHydration = invData.items.some(i => !i.warranty && (i.itemId || i.id));
+                
+                if (needsHydration) {
+                    console.log("Hydrating invoice items with warranty data...");
+                    const enrichedItems = await Promise.all(invData.items.map(async (item) => {
+                        if (item.warranty) return item; // Already has warranty
+                        
+                        const lookupId = item.itemId || item.id;
+                        if (!lookupId) return item; // No ID to lookup
+
+                        try {
+                            const itemRef = doc(db, user.uid, "items", "item_list", lookupId);
+                            const itemSnap = await getDoc(itemRef);
+                            if (itemSnap.exists()) {
+                                const realItem = itemSnap.data();
+                                // If the inventory item has warranty, attach it to this invoice view
+                                if (realItem.warranty && (realItem.warranty.years || realItem.warranty.months || realItem.warranty.days)) {
+                                    return { ...item, warranty: realItem.warranty };
+                                }
+                            }
+                        } catch (e) { console.error("Error fetching item warranty:", e); }
+                        return item;
+                    }));
+                    invData.items = enrichedItems;
+                }
+            }
+
             setInvoice(invData); 
             
             if (invData.invoiceNumber?.startsWith('SRV') && invData.relatedJobId) {
@@ -400,16 +533,6 @@ const InvoiceViewer = () => {
             }
         }
         
-        if (settingsSnap.exists()) {
-          const settingsData = settingsSnap.data();
-          setCompanyInfo(settingsData);
-          setEnableServiceOrders(settingsData.enableServiceOrders === true);
-          setEnableKOD(settingsData.enableKOD === true);
-
-          if (!settingsData.companyLogo) { setIsImageLoaded(true); }
-        } else {
-            setIsImageLoaded(true);
-        }
         setIsDataLoaded(true);
       } catch (error) {
         console.error("Error fetching document:", error);
@@ -422,14 +545,12 @@ const InvoiceViewer = () => {
     return () => unsubscribe();
   }, [invoiceId]);
 
-  // ✅ Auto-Focus SMS Input when popup opens
   useEffect(() => {
     if (showSmsPopup) {
         setTimeout(() => smsInputRef.current?.focus(), 50);
     }
   }, [showSmsPopup]);
 
-  // ✅ GENERATE SMS PREVIEW (Matches Invoice.js Logic)
   const generateSmsPreview = (inv, appSettings) => {
       const company = (appSettings?.companyName || "Store").substring(0, 25); 
       const invNo = inv.invoiceNumber;
@@ -447,7 +568,6 @@ const InvoiceViewer = () => {
       return `${company}\nInv:${invNo}\nItems:${itemsStr}\nTotal:${total}\nThank you!`;
   };
 
-  // ✅ CLICK HANDLER: Prepare Data & Show Modal
   const handleOpenSmsModal = () => {
       if(!invoice) return;
       
@@ -455,14 +575,12 @@ const InvoiceViewer = () => {
       const msg = generateSmsPreview(invoice, companyInfo);
       setSmsMessagePreview(msg);
       
-      // Credit Calculation: 1 credit per 160 characters
       const estimatedCost = Math.ceil(msg.length / 160);
       setSmsCreditsEstimate(estimatedCost);
 
       setShowSmsPopup(true);
   };
 
-  // ✅ SEND SMS FUNCTION
   const handleSendSms = async () => {
       if (isSendingSms) return; 
 
@@ -555,10 +673,8 @@ const InvoiceViewer = () => {
 
       {/* Sidebar */}
       <div className="no-print">
-          <div style={styles.sidebarTriggerArea} onMouseEnter={() => setIsSidebarOpen(true)} />
           <div
             style={{ ...styles.sidebar, ...(isSidebarOpen ? styles.sidebarOpen : styles.sidebarClosed) }}
-            onMouseLeave={() => { setIsSidebarOpen(false); setHoveredTab(null); }}
           >
             <div style={styles.sidebarTabs}>
               {visibleTabs.map((tab) => (
@@ -583,6 +699,8 @@ const InvoiceViewer = () => {
             onSendSms={handleOpenSmsModal} 
             isPrintReady={isPrintReady}
             isServiceOrder={isServiceOrder}
+            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+            isSidebarOpen={isSidebarOpen}
         />
       </div>
 
@@ -598,11 +716,10 @@ const InvoiceViewer = () => {
         </div>
       </div>
 
-      {/* ✅ SMS POPUP MODAL (No Print) */}
+      {/* SMS POPUP */}
       {showSmsPopup && (
         <div style={styles.modalOverlay} className="no-print">
           <div style={styles.modalContent}>
-            {/* Header */}
             <div style={{background: 'linear-gradient(135deg, #00A1FF 0%, #0077FF 100%)', padding: '20px', textAlign: 'center'}}>
                 <h3 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: '600' }}>Send Invoice SMS</h3>
             </div>
@@ -612,17 +729,10 @@ const InvoiceViewer = () => {
                     Send this invoice details to the customer via SMS.
                 </p>
                 
-                {/* Credit Info */}
                 <div style={{
-                    background: '#eff6ff', 
-                    padding: '12px 16px', 
-                    borderRadius: '8px', 
-                    marginBottom: '24px', 
-                    fontSize: '14px', 
-                    color: '#1e40af', 
-                    display: 'flex', 
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
+                    background: '#eff6ff', padding: '12px 16px', borderRadius: '8px', 
+                    marginBottom: '24px', fontSize: '14px', color: '#1e40af', 
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     border: '1px solid #bfdbfe'
                 }}>
                     <span style={{fontWeight: '500'}}>Estimated Cost:</span>
@@ -631,7 +741,6 @@ const InvoiceViewer = () => {
                     </strong>
                 </div>
 
-                {/* Input Field */}
                 <div style={{marginBottom: '24px'}}>
                     <label style={{display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#374151', textTransform: 'uppercase'}}>
                         Mobile Number
@@ -653,18 +762,12 @@ const InvoiceViewer = () => {
                         placeholder="07XXXXXXXX"
                         maxLength="10"
                         style={{
-                            width: '100%', 
-                            padding: '14px', 
-                            fontSize: '18px', 
-                            border: '2px solid #e5e7eb', 
-                            borderRadius: '8px', 
-                            textAlign: 'center',
-                            letterSpacing: '1.5px',
-                            fontWeight: '600',
+                            width: '100%', padding: '14px', fontSize: '18px', 
+                            border: '2px solid #e5e7eb', borderRadius: '8px', textAlign: 'center',
+                            letterSpacing: '1.5px', fontWeight: '600',
                             color: isSendingSms ? '#9ca3af' : '#1f2937',
                             backgroundColor: isSendingSms ? '#f3f4f6' : 'white',
-                            outline: 'none',
-                            boxSizing: 'border-box',
+                            outline: 'none', boxSizing: 'border-box',
                             cursor: isSendingSms ? 'not-allowed' : 'text'
                         }}
                         onFocus={(e) => !isSendingSms && (e.target.style.borderColor = '#00A1FF')}
@@ -672,21 +775,14 @@ const InvoiceViewer = () => {
                     />
                 </div>
                 
-                {/* Preview */}
                 <div style={{textAlign: 'left', marginBottom: '24px'}}>
                     <label style={{display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase'}}>
                         Message Preview
                     </label>
                     <div style={{
-                        fontSize: '12px', 
-                        color: '#4b5563', 
-                        border: '1px solid #e5e7eb', 
-                        borderRadius: '8px', 
-                        padding: '12px', 
-                        background: '#f9fafb', 
-                        whiteSpace: 'pre-wrap', 
-                        maxHeight: '120px', 
-                        overflowY: 'auto',
+                        fontSize: '12px', color: '#4b5563', border: '1px solid #e5e7eb', 
+                        borderRadius: '8px', padding: '12px', background: '#f9fafb', 
+                        whiteSpace: 'pre-wrap', maxHeight: '120px', overflowY: 'auto',
                         lineHeight: '1.4'
                     }}>
                         {smsMessagePreview}
@@ -697,16 +793,10 @@ const InvoiceViewer = () => {
                     <button 
                         onClick={() => { if (!isSendingSms) setShowSmsPopup(false); }} 
                         style={{ 
-                            padding: '14px 20px', 
-                            background: 'white', 
-                            color: isSendingSms ? '#9ca3af' : '#374151', 
-                            border: '1px solid #d1d5db',
-                            borderRadius: '8px', 
-                            cursor: isSendingSms ? 'not-allowed' : 'pointer',
-                            fontWeight: '600',
-                            fontSize: '14px',
-                            flex: 1,
-                            transition: 'background 0.2s'
+                            padding: '14px 20px', background: 'white', 
+                            color: isSendingSms ? '#9ca3af' : '#374151', border: '1px solid #d1d5db',
+                            borderRadius: '8px', cursor: isSendingSms ? 'not-allowed' : 'pointer',
+                            fontWeight: '600', fontSize: '14px', flex: 1, transition: 'background 0.2s'
                         }}
                         disabled={isSendingSms}
                     >
@@ -715,21 +805,12 @@ const InvoiceViewer = () => {
                     <button 
                         onClick={handleSendSms} 
                         style={{ 
-                            padding: '14px 20px', 
-                            background: isSendingSms ? '#93c5fd' : '#00A1FF', 
-                            color: 'white', 
-                            border: 'none',
-                            borderRadius: '8px', 
-                            cursor: isSendingSms ? 'wait' : 'pointer',
-                            fontWeight: '600',
-                            fontSize: '14px',
-                            flex: 1,
-                            boxShadow: isSendingSms ? 'none' : '0 4px 6px -1px rgba(0, 161, 255, 0.3)',
-                            transition: 'all 0.2s',
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            gap: '8px'
+                            padding: '14px 20px', background: isSendingSms ? '#93c5fd' : '#00A1FF', 
+                            color: 'white', border: 'none', borderRadius: '8px', 
+                            cursor: isSendingSms ? 'wait' : 'pointer', fontWeight: '600',
+                            fontSize: '14px', flex: 1, boxShadow: isSendingSms ? 'none' : '0 4px 6px -1px rgba(0, 161, 255, 0.3)',
+                            transition: 'all 0.2s', display: 'flex', justifyContent: 'center',
+                            alignItems: 'center', gap: '8px'
                         }}
                         disabled={isSendingSms}
                     >
@@ -749,16 +830,21 @@ const InvoiceViewer = () => {
 const themeColors = { primary: '#00A1FF', secondary: '#F089D7', dark: '#1a2530', light: '#f8f9fa' };
 
 const styles = {
-  // TopBar
   topBar: { 
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '80px', padding: '0 32px', 
       background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)', 
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000, 
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 2001,
       backdropFilter: 'blur(10px)', 
   },
-  headerLeft: { display: 'flex', alignItems: 'center', flex: 1, },
+  headerLeftWrapper: { display: 'flex', alignItems: 'center', flex: 1, gap: '24px' },
+  menuToggleBtn: { 
+      background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', 
+      cursor: 'pointer', color: '#fff', padding: '8px', borderRadius: '8px', 
+      display: 'flex', alignItems: 'center', justifyContent: 'center', 
+      transition: 'all 0.2s ease', outline: 'none' 
+  },
+  headerLeft: { display: 'flex', alignItems: 'center', },
   headerRight: { display: 'flex', alignItems: 'center', gap: '16px', flex: 1, justifyContent: 'flex-end', },
-  
   logoPlaceholder: { 
     width: "52px", height: "52px", borderRadius: "12px", 
     background: `linear-gradient(135deg, ${themeColors.primary}, ${themeColors.secondary})`, 
@@ -787,14 +873,11 @@ const styles = {
     fontSize: "14px", fontFamily: "'Inter', sans-serif", backdropFilter: 'blur(10px)', transition: 'all 0.3s ease',
     boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
   },
-
-  // Sidebar
-  sidebarTriggerArea: { position: 'fixed', top: 0, left: 0, bottom: 0, width: '20px', zIndex: 3000, },
   sidebar: { 
-      position: 'fixed', top: 0, left: 0, bottom: 0, width: '260px', 
-      background: `linear-gradient(180deg, rgba(102, 126, 234, 0.85) 0%, rgba(118, 75, 162, 0.85) 100%)`, 
+      position: 'fixed', top: '80px', left: 0, height: 'calc(100vh - 80px)', width: '260px', 
+      background: `linear-gradient(180deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%)`, 
       backdropFilter: 'blur(10px)', borderRight: '1px solid rgba(255, 255, 255, 0.15)', color: '#fff', 
-      display: 'flex', flexDirection: 'column', zIndex: 2999, 
+      display: 'flex', flexDirection: 'column', zIndex: 2000, 
       transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
       boxShadow: '4px 0 20px rgba(0, 0, 0, 0.15)', 
   },
@@ -825,6 +908,15 @@ const styles = {
   hr: { border: 'none', borderTop: '1px dashed #000' },
   footer: { textAlign: 'center', marginTop: '20px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '0.8em' },
   creditFooter: { textAlign: 'center', marginTop: '10px', fontSize: '0.7em', color: '#777' },
+  
+  // Warranty Styles
+  warrantyBox: { marginTop: '15px', border: '1px dashed #000', padding: '10px', borderRadius: '4px', fontSize: '0.9em' },
+  warrantyTitle: { fontWeight: 'bold', borderBottom: '1px dotted #000', marginBottom: '5px', textTransform: 'uppercase', textAlign: 'center' },
+  warrantyTable: { width: '100%', borderCollapse: 'collapse' },
+  warrantyTh: { textAlign: 'left', borderBottom: '1px solid #ddd', padding: '4px', fontSize: '0.85em' },
+  warrantyTd: { padding: '4px', borderBottom: '1px solid #eee' },
+  warrantyTdCenter: { padding: '4px', borderBottom: '1px solid #eee', textAlign: 'center' },
+  warrantyNote: { fontSize: '0.75em', marginTop: '5px', fontStyle: 'italic', textAlign: 'center' },
 
   // Modal Styles
   modalOverlay: {
