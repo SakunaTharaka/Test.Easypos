@@ -115,6 +115,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
                 <p><strong>Customer:</strong> {invoice.customerName}</p>
                 {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
                 
+                {/* --- DISPLAY NOTE IN PRINT --- */}
+                {invoice.note && (
+                    <p style={{ marginTop: '5px', fontWeight: 'bold', fontStyle: 'italic', background: '#f3f4f6', padding: '2px 5px' }}>
+                        Note: {invoice.note}
+                    </p>
+                )}
+                {/* ----------------------------- */}
+
                 {invoice.paymentMethod === "Dine-in" && <p><strong>Order Type:</strong> Dine-in</p>}
 
                 {isOrder && orderDetails && orderDetails.deliveryDate && (
@@ -460,6 +468,10 @@ const Invoice = ({ internalUser }) => {
   const [currentCategoryId, setCurrentCategoryId] = useState(null); 
   const [filteredItems, setFilteredItems] = useState([]);
   const [selectedDbItem, setSelectedDbItem] = useState(null); 
+  
+  // --- NEW: INVOICE NOTE STATE ---
+  const [invoiceNote, setInvoiceNote] = useState("");
+  // -------------------------------
 
   const [itemInput, setItemInput] = useState("");
   const [qtyInput, setQtyInput] = useState(1);
@@ -705,6 +717,9 @@ const Invoice = ({ internalUser }) => {
       setDeliveryCharge(""); 
       setCalculatedFreeItems([]); 
       setOrderType("Take Away");
+      // --- RESET NOTE ---
+      setInvoiceNote("");
+      // ------------------
       itemInputRef.current?.focus(); 
   }, [fetchProvisionalInvoiceNumber]);
   
@@ -900,7 +915,10 @@ const Invoice = ({ internalUser }) => {
           shift: selectedShift || "", paymentMethod: method, isDiscountable: isCustomerDiscountable,
           totalCOGS: invoiceTotalCOGS,
           dailyOrderNumber: nextDailyOrderSeq,
-          orderType: orderType 
+          orderType: orderType,
+          // --- SAVE NOTE TO DB ---
+          note: invoiceNote || "" 
+          // -----------------------
         };
         const newRef = doc(collection(db, user.uid, "invoices", "invoice_list"));
         t.set(newRef, invData);
@@ -923,7 +941,9 @@ const Invoice = ({ internalUser }) => {
                 })),
                 status: "Pending",
                 shift: selectedShift || "",
-                type: orderType 
+                type: orderType,
+                // Optional: You could also save the note to KOT if needed
+                note: invoiceNote || "" 
             };
             t.set(kotDocRef, kotData);
         }
@@ -966,7 +986,7 @@ const Invoice = ({ internalUser }) => {
           }
       }
     } catch (e) { console.error(e); alert("Save failed: " + e.message); } finally { setIsSaving(false); }
-  }, [checkout, deliveryCharge, receivedAmount, selectedCustomer, selectedShift, calculatedFreeItems, isCustomerDiscountable, internalUser, settings, resetForm, orderType, serviceChargeRate]);
+  }, [checkout, deliveryCharge, receivedAmount, selectedCustomer, selectedShift, calculatedFreeItems, isCustomerDiscountable, internalUser, settings, resetForm, orderType, serviceChargeRate, invoiceNote]);
 
   // ✅ GENERATE SMS PREVIEW FUNCTION (Updated to allow long messages for accurate billing)
   const generateSmsPreview = (invoice, appSettings) => {
@@ -1106,6 +1126,7 @@ const Invoice = ({ internalUser }) => {
             <div style={{textAlign: 'right'}}><div className="header-label">ISSUED BY</div><div className="header-value">{internalUser?.username || 'Admin'}</div></div>
         </div>
         <div className="customer-section"><label className="section-label">CUSTOMER</label><Select options={customers} value={selectedCustomer} onChange={setSelectedCustomer} placeholder="Select a customer..." /></div>
+        
         <div className="item-entry-section">
           <div style={{position: 'relative', flex: 1}}>
             <label className="section-label">ADD ITEM</label>
@@ -1115,6 +1136,20 @@ const Invoice = ({ internalUser }) => {
           <div style={{width: '120px'}}><label className="section-label">QTY</label><input ref={qtyInputRef} value={qtyInput} onChange={handleQtyChange} onKeyDown={handleQtyKeyDown} onFocus={(e) => e.target.select()} type="text" inputMode="decimal" className="invoice-input" /></div>
           <button onClick={addItemToCheckout} className="invoice-btn-primary">ADD</button>
         </div>
+
+        {/* --- NEW NOTE INPUT SECTION --- */}
+        <div style={{ marginTop: '0px' }}>
+            <label className="section-label">INVOICE NOTE</label>
+            <textarea 
+                className="invoice-textarea" 
+                value={invoiceNote} 
+                onChange={(e) => setInvoiceNote(e.target.value)} 
+                placeholder="Add a note/ref..."
+                rows={2}
+            />
+        </div>
+        {/* ------------------------------- */}
+
         <div className="shortcuts-help">
           <h4 className="shortcuts-title">Keyboard Shortcuts</h4>
           <div className="shortcut-item"><b>F2:</b> Focus 'Amount Received'</div>

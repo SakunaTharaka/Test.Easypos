@@ -124,6 +124,14 @@ const PrintableLayout = ({ invoice, companyInfo, onImageLoad, serviceJob, orderD
             <p><strong>Customer:</strong> {invoice.customerName}</p>
             {invoice.customerTelephone && <p><strong>Tel:</strong> {invoice.customerTelephone}</p>}
             
+            {/* --- NEW: DISPLAY NOTE HERE --- */}
+            {invoice.note && (
+                <p style={{ marginTop: '5px', fontWeight: 'bold', fontStyle: 'italic', background: '#f3f4f6', padding: '2px 5px' }}>
+                    Note: {invoice.note}
+                </p>
+            )}
+            {/* ------------------------------ */}
+
             {companyInfo?.dineInAvailable && invoice.orderType && (
                 <p><strong>Order Type:</strong> {invoice.orderType}</p>
             )}
